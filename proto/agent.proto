@@ -1,0 +1,365 @@
+syntax = "proto3";
+package agent;
+option go_package = "agent/pb";
+
+service DeviceAgent {
+  // Device Management
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc ConnectDevice(ConnectDeviceRequest) returns (ConnectDeviceResponse);
+  rpc DisconnectDevice(DisconnectDeviceRequest) returns (DisconnectDeviceResponse);
+
+  // Benchmarking
+  rpc RunBenchmark(RunBenchmarkRequest) returns (RunBenchmarkResponse);
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  rpc SubscribeJobProgress(SubscribeJobProgressRequest) returns (stream JobProgress);
+  rpc GetBenchmarkResult(GetBenchmarkResultRequest) returns (GetBenchmarkResultResponse);
+  rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
+
+  // Scenario
+  rpc RunScenario(RunScenarioRequest) returns (RunScenarioResponse);
+
+  // Trace
+  rpc StartTrace(StartTraceRequest) returns (StartTraceResponse);
+  rpc StopTrace(StopTraceRequest) returns (StopTraceResponse);
+  rpc GetTraceResult(GetTraceResultRequest) returns (GetTraceResultResponse);
+  rpc GetTraceRawData(GetTraceRawDataRequest) returns (GetTraceRawDataResponse);
+
+  // Monitoring
+  rpc MonitorDevices(MonitorDevicesRequest) returns (stream DeviceMetrics);
+}
+
+// ==================== Device ====================
+
+enum DeviceState {
+  DEVICE_STATE_UNKNOWN = 0;
+  DEVICE_STATE_ONLINE = 1;
+  DEVICE_STATE_OFFLINE = 2;
+  DEVICE_STATE_BUSY = 3;
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  string serial = 2;
+  DeviceState state = 3;
+  string android_version = 4;
+  string model = 5;
+}
+
+message ListDevicesRequest {}
+message ListDevicesResponse {
+  repeated DeviceInfo devices = 1;
+}
+
+message ConnectDeviceRequest {
+  string serial = 1;
+}
+message ConnectDeviceResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DisconnectDeviceRequest {
+  string serial = 1;
+}
+message DisconnectDeviceResponse {
+  bool success = 1;
+}
+
+// ==================== Benchmark ====================
+
+enum BenchmarkTool {
+  BENCHMARK_TOOL_UNSPECIFIED = 0;
+  BENCHMARK_TOOL_FIO = 1;
+  BENCHMARK_TOOL_IOZONE = 2;
+  BENCHMARK_TOOL_TIOTEST = 3;
+}
+
+enum JobState {
+  JOB_STATE_UNKNOWN = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_PUSHING_TOOLS = 2;
+  JOB_STATE_RUNNING = 3;
+  JOB_STATE_COLLECTING = 4;
+  JOB_STATE_COMPLETED = 5;
+  JOB_STATE_FAILED = 6;
+  JOB_STATE_PARTIALLY_FAILED = 7;
+}
+
+message RunBenchmarkRequest {
+  repeated string device_ids = 1;
+  BenchmarkTool tool = 2;
+  map<string, string> params = 3;
+  string job_name = 4;
+}
+
+message RunBenchmarkResponse {
+  string job_id = 1;
+}
+
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  string job_id = 1;
+  JobState state = 2;
+  int32 total_devices = 3;
+  int32 completed_devices = 4;
+  int32 failed_devices = 5;
+  repeated DeviceJobStatus device_statuses = 6;
+}
+
+message DeviceJobStatus {
+  string device_id = 1;
+  JobState state = 2;
+  string message = 3;
+  int32 progress_percent = 4;
+}
+
+message SubscribeJobProgressRequest {
+  string job_id = 1;
+}
+
+message JobProgress {
+  string job_id = 1;
+  string device_id = 2;
+  JobState state = 3;
+  string message = 4;
+  int32 progress_percent = 5;
+  string error = 6;
+  map<string, double> metrics = 7;   // benchmark step 완료 시 결과 포함
+  string raw_output = 8;             // benchmark step의 raw output
+}
+
+message GetBenchmarkResultRequest {
+  string job_id = 1;
+  string device_id = 2;
+}
+
+message GetBenchmarkResultResponse {
+  repeated BenchmarkResult results = 1;
+}
+
+message BenchmarkResult {
+  string device_id = 1;
+  BenchmarkTool tool = 2;
+  string raw_output = 3;
+  map<string, double> metrics = 4;
+  int64 started_at = 5;
+  int64 finished_at = 6;
+  bool success = 7;
+  string error = 8;
+}
+
+message DeleteJobRequest {
+  string job_id = 1;
+}
+
+message DeleteJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ==================== Scenario ====================
+
+message ScenarioStep {
+  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop"
+  BenchmarkTool tool = 2;            // benchmark일 때 사용
+  map<string, string> params = 3;
+}
+
+message ScenarioLoop {
+  int32 start_step = 1;              // 시작 step index (0-based)
+  int32 end_step = 2;                // 끝 step index (inclusive)
+  int32 count = 3;                   // 반복 횟수
+}
+
+message RunScenarioRequest {
+  repeated string device_ids = 1;
+  string scenario_name = 2;
+  repeated ScenarioStep steps = 3;
+  repeated ScenarioLoop loops = 4;
+  int32 repeat = 5;                  // 전체 시나리오 반복 (기본 1)
+}
+
+message RunScenarioResponse {
+  string job_id = 1;
+}
+
+// ==================== Trace ====================
+
+message StartTraceRequest {
+  string device_id = 1;
+  string trace_type = 2;        // "ufs", "block", "ufscustom"
+  int32 window_seconds = 3;     // parquet 윈도우 (기본 1초)
+  string job_name = 4;
+}
+
+message StartTraceResponse {
+  string job_id = 1;
+}
+
+message StopTraceRequest {
+  string job_id = 1;
+}
+
+message StopTraceResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message TraceFilter {
+  double start_time = 1;
+  double end_time = 2;
+  uint64 start_lba = 3;
+  uint64 end_lba = 4;
+  double min_dtoc = 5;
+  double max_dtoc = 6;
+  double min_ctoc = 7;
+  double max_ctoc = 8;
+  double min_ctod = 9;
+  double max_ctod = 10;
+  uint32 min_qd = 11;
+  uint32 max_qd = 12;
+  repeated uint32 cpu_list = 13;
+  repeated string cmd_list = 14;
+  repeated uint32 size_list = 15;
+}
+
+message GetTraceResultRequest {
+  repeated string job_ids = 1;             // 여러 job의 parquet를 합쳐서 통계 (빈 경우 불가)
+  TraceFilter filter = 2;
+  repeated double latency_ranges_ms = 3;   // custom latency 구간 (예: [0.1, 0.5, 1, 5, 10, 50])
+}
+
+message GetTraceResultResponse {
+  string job_id = 1;
+  TraceStats stats = 2;
+}
+
+message TraceStats {
+  int64 total_events = 1;
+  double duration_seconds = 2;
+  LatencyStats dtoc = 3;
+  LatencyStats ctod = 4;
+  LatencyStats ctoc = 5;
+  LatencyStats qd = 6;
+  repeated CmdStats cmd_stats = 7;
+  repeated LatencyHistogram latency_histograms = 8;
+  repeated CmdSizeCount cmd_size_counts = 9;
+  int64 continuous_count = 10;
+  double continuous_ratio = 11;
+  int64 aligned_count = 12;
+  double aligned_ratio = 13;
+}
+
+message LatencyStats {
+  double min = 1;
+  double max = 2;
+  double avg = 3;
+  double stddev = 4;
+  double median = 5;
+  double p99 = 6;
+  double p999 = 7;
+  double p9999 = 8;
+  double p99999 = 9;
+  double p999999 = 10;
+}
+
+message CmdStats {
+  string cmd = 1;
+  int64 count = 2;
+  double ratio = 3;
+  LatencyStats dtoc = 4;
+  LatencyStats ctod = 5;
+  LatencyStats ctoc = 6;
+  LatencyStats qd = 7;
+}
+
+message LatencyHistogram {
+  string cmd = 1;
+  string latency_type = 2;     // "dtoc", "ctod", "ctoc"
+  repeated LatencyBucket buckets = 3;
+}
+
+message LatencyBucket {
+  double range_start_ms = 1;
+  double range_end_ms = 2;
+  int64 count = 3;
+}
+
+message CmdSizeCount {
+  string cmd = 1;
+  uint32 size = 2;
+  int64 count = 3;
+}
+
+message GetTraceRawDataRequest {
+  repeated string job_ids = 1;             // 여러 job의 parquet를 합쳐서 조회
+  TraceFilter filter = 2;
+}
+
+message GetTraceRawDataResponse {
+  string job_id = 1;
+  int64 total_events = 2;
+  int64 sampled_events = 3;
+  bool is_sampled = 4;
+  repeated TraceEvent events = 5;
+}
+
+message TraceEvent {
+  double time = 1;
+  uint64 lba = 2;
+  uint32 qd = 3;
+  uint32 cpu = 4;
+  double dtoc = 5;
+  double ctod = 6;
+  double ctoc = 7;
+  string cmd = 8;
+  uint32 size = 9;
+  bool continuous = 10;
+}
+
+// ==================== Monitoring ====================
+
+message MonitorDevicesRequest {
+  repeated string device_ids = 1;
+  uint32 interval_seconds = 2;
+}
+
+message DeviceMetrics {
+  string device_id = 1;
+  int64 timestamp = 2;
+  CpuMetrics cpu = 3;
+  MemoryMetrics memory = 4;
+  DiskMetrics disk = 5;
+  FilesystemInfo data_partition = 6;
+}
+
+message CpuMetrics {
+  double usage_percent = 1;
+  repeated double per_core_percent = 2;
+}
+
+message MemoryMetrics {
+  uint64 total_kb = 1;
+  uint64 available_kb = 2;
+  uint64 used_kb = 3;
+  double usage_percent = 4;
+}
+
+message DiskMetrics {
+  uint64 read_bytes = 1;
+  uint64 write_bytes = 2;
+  uint64 read_ios = 3;
+  uint64 write_ios = 4;
+}
+
+message FilesystemInfo {
+  string mount_point = 1;
+  string filesystem = 2;
+  uint64 total_bytes = 3;
+  uint64 used_bytes = 4;
+  uint64 available_bytes = 5;
+  double usage_percent = 6;
+}

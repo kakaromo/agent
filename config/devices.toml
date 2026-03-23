@@ -1,0 +1,4 @@
+[server]
+port = 50051
+tools_dir = "./tools"
+trace_dir = "/tmp/agent_trace"

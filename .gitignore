@@ -1,0 +1,19 @@
+# Binary
+agent
+
+# Tools (ARM64 binaries, too large for git)
+tools/fio
+tools/iozone
+tools/tiotest
+tools/trace
+
+# Trace output
+/tmp/agent_trace/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
