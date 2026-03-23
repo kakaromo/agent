@@ -20,6 +20,7 @@ import (
 	"agent/trace"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -55,8 +56,18 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(64*1024*1024), // 64MB
-		grpc.MaxSendMsgSize(64*1024*1024), // 64MB
+		grpc.MaxRecvMsgSize(64*1024*1024),
+		grpc.MaxSendMsgSize(64*1024*1024),
+		// Keepalive: server pings client every 30s, client must respond within 5s
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    30 * time.Second, // ping client every 30s
+			Timeout: 5 * time.Second,  // wait 5s for ping ack
+		}),
+		// Enforce client keepalive: allow ping every 10s minimum
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	)
 	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr)
 	pb.RegisterDeviceAgentServer(grpcServer, agentServer)
@@ -66,8 +77,24 @@ func main() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		slog.Info("shutting down...")
-		grpcServer.GracefulStop()
+		slog.Info("shutting down, notifying clients...")
+
+		// Give GracefulStop 5 seconds, then force stop
+		// GracefulStop stops accepting new RPCs and waits for existing ones.
+		// Streaming RPCs will receive context cancellation.
+		done := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			slog.Info("graceful shutdown completed")
+		case <-time.After(5 * time.Second):
+			slog.Warn("graceful shutdown timed out, forcing stop")
+			grpcServer.Stop() // force close all connections immediately
+		}
 		cancel()
 	}()
 

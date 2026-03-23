@@ -62,11 +62,29 @@ func (s *DeviceAgentServer) RunBenchmark(ctx context.Context, req *pb.RunBenchma
 }
 
 func (s *DeviceAgentServer) GetJobStatus(ctx context.Context, req *pb.GetJobStatusRequest) (*pb.GetJobStatusResponse, error) {
+	// Try benchmark/scenario job first
 	resp, err := s.orchestrator.GetJobStatus(req.JobId)
-	if err != nil {
-		return nil, fmt.Errorf("get job status: %w", err)
+	if err == nil {
+		return resp, nil
 	}
-	return resp, nil
+	// Try trace job
+	traceJob, traceErr := s.traceMgr.GetJob(req.JobId)
+	if traceErr != nil {
+		return nil, fmt.Errorf("job not found: %s", req.JobId)
+	}
+	traceJob.Mu.Lock()
+	state := traceJob.State
+	deviceID := traceJob.DeviceID
+	traceJob.Mu.Unlock()
+	return &pb.GetJobStatusResponse{
+		JobId:        req.JobId,
+		State:        state,
+		TotalDevices: 1,
+		DeviceStatuses: []*pb.DeviceJobStatus{{
+			DeviceId: deviceID,
+			State:    state,
+		}},
+	}, nil
 }
 
 func (s *DeviceAgentServer) SubscribeJobProgress(req *pb.SubscribeJobProgressRequest, stream pb.DeviceAgent_SubscribeJobProgressServer) error {

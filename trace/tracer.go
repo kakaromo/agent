@@ -19,7 +19,7 @@ import (
 
 // TraceJob represents a running trace session.
 type TraceJob struct {
-	mu           sync.Mutex
+	Mu           sync.Mutex
 	ID           string
 	DeviceID     string
 	TraceType    string // "ufs", "block", "both"
@@ -40,8 +40,8 @@ type TraceJob struct {
 }
 
 func (j *TraceJob) notify(progress *pb.JobProgress) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
+	j.Mu.Lock()
+	defer j.Mu.Unlock()
 	j.lastProgress = append(j.lastProgress, progress)
 	for _, ch := range j.subscribers {
 		select {
@@ -52,8 +52,8 @@ func (j *TraceJob) notify(progress *pb.JobProgress) {
 }
 
 func (j *TraceJob) closeSubscribers() {
-	j.mu.Lock()
-	defer j.mu.Unlock()
+	j.Mu.Lock()
+	defer j.Mu.Unlock()
 	for _, ch := range j.subscribers {
 		close(ch)
 	}
@@ -120,9 +120,9 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Clear trace buffer before starting
+	// Stop tracing and clear trace buffer before starting
 	md.Device.Shell(bgCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
-	md.Device.Shell(bgCtx, fmt.Sprintf("echo 0 > %s/trace", tracingDir))
+	md.Device.Shell(bgCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
 
 	// Enable selected events
 	job.notify(&pb.JobProgress{
@@ -164,11 +164,11 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("start trace_pipe: %w", err)
 	}
 
-	job.mu.Lock()
+	job.Mu.Lock()
 	job.adbCancel = adbCancel
 	job.adbCmd = adbCmd
 	job.logFd = logFd
-	job.mu.Unlock()
+	job.Mu.Unlock()
 
 	job.notify(&pb.JobProgress{
 		JobId:    jobID,
@@ -195,15 +195,15 @@ func (m *Manager) StopTrace(jobID string) error {
 		return err
 	}
 
-	job.mu.Lock()
+	job.Mu.Lock()
 	if job.State != pb.JobState_JOB_STATE_RUNNING {
-		job.mu.Unlock()
+		job.Mu.Unlock()
 		return fmt.Errorf("job not running: %s", jobID)
 	}
 	adbCancel := job.adbCancel
 	deviceID := job.DeviceID
 	tracingDir := job.TracingDir
-	job.mu.Unlock()
+	job.Mu.Unlock()
 
 	// Disable tracing on device
 	if md, err := m.adbMgr.GetDevice(deviceID); err == nil {
@@ -250,10 +250,10 @@ func (m *Manager) StopTrace(jobID string) error {
 
 	slog.Info("trace tool completed", "job_id", jobID)
 
-	job.mu.Lock()
+	job.Mu.Lock()
 	job.State = pb.JobState_JOB_STATE_COMPLETED
 	job.FinishedAt = time.Now().UnixMilli()
-	job.mu.Unlock()
+	job.Mu.Unlock()
 
 	job.notify(&pb.JobProgress{
 		JobId:    jobID,
@@ -268,11 +268,11 @@ func (m *Manager) StopTrace(jobID string) error {
 }
 
 func (m *Manager) failJob(job *TraceJob, errMsg string) {
-	job.mu.Lock()
+	job.Mu.Lock()
 	job.State = pb.JobState_JOB_STATE_FAILED
 	job.Error = errMsg
 	job.FinishedAt = time.Now().UnixMilli()
-	job.mu.Unlock()
+	job.Mu.Unlock()
 
 	job.notify(&pb.JobProgress{
 		JobId:    job.ID,
@@ -302,7 +302,7 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	}
 	ch := make(chan *pb.JobProgress, 256)
 
-	job.mu.Lock()
+	job.Mu.Lock()
 	for _, p := range job.lastProgress {
 		ch <- p
 	}
@@ -313,7 +313,7 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	} else {
 		job.subscribers = append(job.subscribers, ch)
 	}
-	job.mu.Unlock()
+	job.Mu.Unlock()
 
 	return ch, nil
 }
@@ -340,9 +340,9 @@ func (m *Manager) DeleteJob(jobID string) error {
 
 	// Check memory for running job
 	if job, ok := m.jobs[jobID]; ok {
-		job.mu.Lock()
+		job.Mu.Lock()
 		state := job.State
-		job.mu.Unlock()
+		job.Mu.Unlock()
 		if state == pb.JobState_JOB_STATE_RUNNING {
 			return fmt.Errorf("cannot delete running trace job: %s", jobID)
 		}

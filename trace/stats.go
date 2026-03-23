@@ -14,16 +14,16 @@ import (
 var defaultLatencyRanges = []float64{0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000}
 
 // buildGlobList builds a DuckDB-compatible glob list from multiple directories.
-// Returns something like: read_parquet(['/dir1/*.parquet', '/dir2/*.parquet'])
+// Uses union_by_name=true to handle mixed schemas (ufs vs block parquet).
 func buildGlobList(dirs []string) string {
 	if len(dirs) == 1 {
-		return fmt.Sprintf("'%s'", filepath.Join(dirs[0], "*.parquet"))
+		return fmt.Sprintf("'%s', union_by_name=true", filepath.Join(dirs[0], "*.parquet"))
 	}
 	var parts []string
 	for _, d := range dirs {
 		parts = append(parts, fmt.Sprintf("'%s'", filepath.Join(d, "*.parquet")))
 	}
-	return "[" + strings.Join(parts, ", ") + "]"
+	return "[" + strings.Join(parts, ", ") + "], union_by_name=true"
 }
 
 // ComputeStats computes trace statistics from parquet files across multiple directories.
@@ -102,17 +102,19 @@ func ComputeStats(dirs []string, filter *pb.TraceFilter, customRanges []float64)
 		return nil, fmt.Errorf("cmd size counts: %w", err)
 	}
 
-	// 7. Continuity / alignment stats
+	// 7. Continuity stats (aligned may not exist in all schemas)
 	q = fmt.Sprintf(`SELECT
 		count(*) FILTER (WHERE continuous = true),
-		count(*) FILTER (WHERE continuous = true) * 100.0 / count(*),
+		count(*) FILTER (WHERE continuous = true) * 100.0 / count(*)
+	FROM read_parquet(%s) %s`, glob, where)
+	db.QueryRow(q).Scan(&stats.ContinuousCount, &stats.ContinuousRatio)
+
+	// Try aligned stats separately (column may not exist)
+	q = fmt.Sprintf(`SELECT
 		count(*) FILTER (WHERE aligned = true),
 		count(*) FILTER (WHERE aligned = true) * 100.0 / count(*)
 	FROM read_parquet(%s) %s`, glob, where)
-	db.QueryRow(q).Scan(
-		&stats.ContinuousCount, &stats.ContinuousRatio,
-		&stats.AlignedCount, &stats.AlignedRatio,
-	)
+	db.QueryRow(q).Scan(&stats.AlignedCount, &stats.AlignedRatio) // ignore error if column missing
 
 	return stats, nil
 }
@@ -344,14 +346,44 @@ func queryCmdSizeCounts(db *sql.DB, glob, where string) ([]*pb.CmdSizeCount, err
 // ==================== Helpers ====================
 
 func detectCmdColumn(db *sql.DB, glob string) string {
-	// Check if opcode column exists (UFS), else use io_type (Block)
+	// With union_by_name=true, both columns may exist (NULL for missing rows).
+	// Check which columns are present.
 	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
-		WHERE column_name IN ('opcode', 'io_type') LIMIT 1`, glob)
-	var col string
-	if err := db.QueryRow(q).Scan(&col); err != nil {
-		return "opcode" // default
+		WHERE column_name IN ('opcode', 'io_type')`, glob)
+	rows, err := db.Query(q)
+	if err != nil {
+		return "opcode"
 	}
-	return col
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var col string
+		rows.Scan(&col)
+		cols = append(cols, col)
+	}
+
+	// Both exist (mixed ufs+block) → use COALESCE
+	hasOpcode := false
+	hasIoType := false
+	for _, c := range cols {
+		if c == "opcode" {
+			hasOpcode = true
+		}
+		if c == "io_type" {
+			hasIoType = true
+		}
+	}
+	if hasOpcode && hasIoType {
+		return "COALESCE(opcode, io_type)"
+	}
+	if hasOpcode {
+		return "opcode"
+	}
+	if hasIoType {
+		return "io_type"
+	}
+	return "opcode"
 }
 
 func buildFilterWhere(f *pb.TraceFilter) string {
@@ -366,10 +398,10 @@ func buildFilterWhere(f *pb.TraceFilter) string {
 		conds = append(conds, fmt.Sprintf("time <= %f", f.EndTime))
 	}
 	if f.StartLba > 0 {
-		conds = append(conds, fmt.Sprintf("lba >= %d", f.StartLba))
+		conds = append(conds, fmt.Sprintf("COALESCE(lba, sector) >= %d", f.StartLba))
 	}
 	if f.EndLba > 0 {
-		conds = append(conds, fmt.Sprintf("lba <= %d", f.EndLba))
+		conds = append(conds, fmt.Sprintf("COALESCE(lba, sector) <= %d", f.EndLba))
 	}
 	if f.MinDtoc > 0 {
 		conds = append(conds, fmt.Sprintf("dtoc >= %f", f.MinDtoc))
@@ -407,9 +439,7 @@ func buildFilterWhere(f *pb.TraceFilter) string {
 		for i, v := range f.CmdList {
 			vals[i] = fmt.Sprintf("'%s'", v)
 		}
-		// Use both opcode and io_type since we don't know the type yet
-		conds = append(conds, fmt.Sprintf("(opcode IN (%s) OR io_type IN (%s))",
-			strings.Join(vals, ","), strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("COALESCE(opcode, io_type) IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(f.SizeList) > 0 {
 		vals := make([]string, len(f.SizeList))

@@ -157,10 +157,33 @@ func scanEvents(db *sql.DB, q string) ([]*pb.TraceEvent, error) {
 
 func detectLbaColumn(db *sql.DB, glob string) string {
 	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
-		WHERE column_name IN ('lba', 'sector') LIMIT 1`, glob)
-	var col string
-	if err := db.QueryRow(q).Scan(&col); err != nil {
+		WHERE column_name IN ('lba', 'sector')`, glob)
+	rows, err := db.Query(q)
+	if err != nil {
 		return "lba"
 	}
-	return col
+	defer rows.Close()
+
+	hasLba := false
+	hasSector := false
+	for rows.Next() {
+		var col string
+		rows.Scan(&col)
+		if col == "lba" {
+			hasLba = true
+		}
+		if col == "sector" {
+			hasSector = true
+		}
+	}
+	if hasLba && hasSector {
+		return "COALESCE(lba, sector)"
+	}
+	if hasLba {
+		return "lba"
+	}
+	if hasSector {
+		return "sector"
+	}
+	return "lba"
 }
