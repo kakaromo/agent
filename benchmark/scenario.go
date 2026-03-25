@@ -187,6 +187,8 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 	stepFiles := make(map[int]string)
 	// Track active trace job ID for trace_start/trace_stop
 	var activeTraceJobID string
+	// Collect trace job mappings
+	var traceJobMappings []*pb.TraceJobMapping
 
 	for i, es := range steps {
 		progress := int32(float64(i) / float64(totalSteps) * 100)
@@ -198,8 +200,21 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 		if err != nil {
 			errMsg := fmt.Sprintf("%s failed: %s", msg, err.Error())
 			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, progress)
-			o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg)
+			o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg, traceJobMappings...)
 			return
+		}
+
+		// Collect trace job mapping from TRACE_STOP output
+		if strings.Contains(stepOut, "TRACE_STOP|") {
+			for _, line := range strings.Split(stepOut, "\n") {
+				if !strings.HasPrefix(line, "TRACE_STOP|") {
+					continue
+				}
+				mapping := parseTraceMapping(line, es)
+				if mapping != nil {
+					traceJobMappings = append(traceJobMappings, mapping)
+				}
+			}
 		}
 
 		if stepOut != "" {
@@ -231,7 +246,7 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 	}
 
 	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())
-	o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, true, "")
+	o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, true, "", traceJobMappings...)
 }
 
 const testDir = "/data/local/tmp/test"
@@ -270,8 +285,10 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 		}
 
 		// Prepend/append trace info to output
-		traceStart := fmt.Sprintf("TRACE_START|loop=%d|step=%d|job_id=%s", es.loopIndex, es.stepIndex, traceJobID)
-		traceStop := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|job_id=%s", es.loopIndex, es.stepIndex, traceJobID)
+		traceStart := fmt.Sprintf("TRACE_START|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
+			es.loopIndex, es.stepIndex, es.repeatIndex, traceJobID, traceType)
+		traceStop := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
+			es.loopIndex, es.stepIndex, es.repeatIndex, traceJobID, traceType)
 		fullOut := traceStart + "\n" + out + "\n" + traceStop
 
 		return fullOut, metrics, stepErr
@@ -359,12 +376,16 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, md *adb.ManagedDevi
 			return "", nil, fmt.Errorf("no active trace to stop")
 		}
 		stoppedID := *activeTraceJobID
+		traceType := step.Params["trace_type"]
+		if traceType == "" {
+			traceType = "ufs"
+		}
 		if err := o.traceMgr.StopTrace(stoppedID); err != nil {
 			return "", nil, fmt.Errorf("stop trace: %w", err)
 		}
 		*activeTraceJobID = ""
-		// Output in structured format: TRACE_STOP|loop|step|job_id
-		out := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|job_id=%s", es.loopIndex, es.stepIndex, stoppedID)
+		out := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
+			es.loopIndex, es.stepIndex, es.repeatIndex, stoppedID, traceType)
 		return out, nil, nil
 	default:
 		return "", nil, fmt.Errorf("unknown step type: %s", step.Type)
@@ -480,4 +501,25 @@ func formatStepMessage(es expandedStep, totalSteps int) string {
 
 	parts = append(parts, stepDesc)
 	return strings.Join(parts, ", ")
+}
+
+// parseTraceMapping parses a TRACE_STOP line into a TraceJobMapping.
+// Format: TRACE_STOP|loop=1|step=2|repeat=1|job_id=abc-123|trace_type=ufs
+func parseTraceMapping(line string, es expandedStep) *pb.TraceJobMapping {
+	m := &pb.TraceJobMapping{
+		StepIndex:   int32(es.stepIndex),
+		LoopIndex:   int32(es.loopIndex),
+		RepeatIndex: int32(es.repeatIndex),
+	}
+	for _, part := range strings.Split(line, "|") {
+		if strings.HasPrefix(part, "job_id=") {
+			m.TraceJobId = strings.TrimSpace(strings.TrimPrefix(part, "job_id="))
+		} else if strings.HasPrefix(part, "trace_type=") {
+			m.TraceType = strings.TrimSpace(strings.TrimPrefix(part, "trace_type="))
+		}
+	}
+	if m.TraceJobId == "" {
+		return nil
+	}
+	return m
 }

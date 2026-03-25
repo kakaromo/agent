@@ -17,6 +17,7 @@ import (
 	"agent/monitor"
 	pb "agent/pb"
 	"agent/server"
+	"agent/storage"
 	"agent/trace"
 
 	"google.golang.org/grpc"
@@ -46,8 +47,23 @@ func main() {
 
 	orch := benchmark.NewOrchestrator(mgr, cfg.Server.ToolsDir)
 	coll := monitor.NewCollector(mgr)
-	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir)
+	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir, cfg.Server.TraceGrpcPort)
+	if err := traceMgr.StartTraceServer(); err != nil {
+		slog.Warn("failed to start trace gRPC server", "error", err)
+	}
 	orch.SetTraceController(traceMgr)
+
+	// MinIO client (optional)
+	var minioClient *storage.MinioClient
+	if cfg.Minio.Endpoint != "" {
+		mc, err := storage.NewMinioClient(cfg.Minio)
+		if err != nil {
+			slog.Warn("minio client init failed", "error", err)
+		} else {
+			minioClient = mc
+			slog.Info("minio connected", "endpoint", cfg.Minio.Endpoint, "bucket", cfg.Minio.Bucket)
+		}
+	}
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.Port))
 	if err != nil {
@@ -69,7 +85,7 @@ func main() {
 			PermitWithoutStream: true,
 		}),
 	)
-	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr)
+	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr, minioClient)
 	pb.RegisterDeviceAgentServer(grpcServer, agentServer)
 	reflection.Register(grpcServer)
 
@@ -93,8 +109,9 @@ func main() {
 			slog.Info("graceful shutdown completed")
 		case <-time.After(5 * time.Second):
 			slog.Warn("graceful shutdown timed out, forcing stop")
-			grpcServer.Stop() // force close all connections immediately
+			grpcServer.Stop()
 		}
+		traceMgr.StopTraceServer()
 		cancel()
 	}()
 

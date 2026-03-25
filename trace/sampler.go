@@ -12,17 +12,17 @@ import (
 const maxEvents = 500000
 
 // GetRawData returns trace events, sampling if over maxEvents.
-func GetRawData(dirs []string, filter *pb.TraceFilter) (*pb.GetTraceRawDataResponse, error) {
+func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawDataResponse, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return nil, fmt.Errorf("open duckdb: %w", err)
 	}
 	defer db.Close()
 
-	glob := buildGlobList(dirs)
-	where := buildFilterWhere(filter)
+	glob := buildGlobList(infos)
 	cmdCol := detectCmdColumn(db, glob)
 	lbaCol := detectLbaColumn(db, glob)
+	where := buildFilterWhere(filter, lbaCol, cmdCol)
 
 	// Count total events
 	q := fmt.Sprintf("SELECT count(*) FROM read_parquet(%s) %s", glob, where)
@@ -63,7 +63,7 @@ func GetRawData(dirs []string, filter *pb.TraceFilter) (*pb.GetTraceRawDataRespo
 }
 
 func queryAllEvents(db *sql.DB, glob, where, cmdCol, lbaCol string) ([]*pb.TraceEvent, error) {
-	q := fmt.Sprintf(`SELECT time, %s, qd, cpu, dtoc, ctod, ctoc, %s, size, continuous
+	q := fmt.Sprintf(`SELECT time, %s, qd, cpu, dtoc, ctod, ctoc, %s, size, continuous, action
 		FROM read_parquet(%s) %s ORDER BY time`, lbaCol, cmdCol, glob, where)
 	return scanEvents(db, q)
 }
@@ -122,7 +122,7 @@ combined AS (
   UNION
   SELECT rn FROM sampled
 )
-SELECT b.time, b.%s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, b.%s, b.size, b.continuous
+SELECT b.time, b.%s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, b.%s, b.size, b.continuous, b.action
 FROM base b
 JOIN combined c ON b.rn = c.rn
 ORDER BY b.time
@@ -147,8 +147,12 @@ func scanEvents(db *sql.DB, q string) ([]*pb.TraceEvent, error) {
 	var events []*pb.TraceEvent
 	for rows.Next() {
 		e := &pb.TraceEvent{}
-		if err := rows.Scan(&e.Time, &e.Lba, &e.Qd, &e.Cpu, &e.Dtoc, &e.Ctod, &e.Ctoc, &e.Cmd, &e.Size, &e.Continuous); err != nil {
+		var action sql.NullString
+		if err := rows.Scan(&e.Time, &e.Lba, &e.Qd, &e.Cpu, &e.Dtoc, &e.Ctod, &e.Ctoc, &e.Cmd, &e.Size, &e.Continuous, &action); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		if action.Valid {
+			e.Action = action.String
 		}
 		events = append(events, e)
 	}

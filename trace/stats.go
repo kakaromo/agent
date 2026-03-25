@@ -13,29 +13,79 @@ import (
 
 var defaultLatencyRanges = []float64{0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000}
 
-// buildGlobList builds a DuckDB-compatible glob list from multiple directories.
-// Uses union_by_name=true to handle mixed schemas (ufs vs block parquet).
-func buildGlobList(dirs []string) string {
-	if len(dirs) == 1 {
-		return fmt.Sprintf("'%s', union_by_name=true", filepath.Join(dirs[0], "*.parquet"))
+// parquetGlobPatterns returns file glob patterns for a trace type.
+// Covers all naming conventions:
+//   realtime:    realtime_ufs_000001.parquet
+//   parquet-only: result_ufs.parquet
+//   merged:      ufs.parquet
+func parquetGlobPatterns(traceType string) []string {
+	switch traceType {
+	case "ufs":
+		return []string{"realtime_ufs_*.parquet", "result_ufs.parquet", "ufs.parquet"}
+	case "block":
+		return []string{"realtime_block_*.parquet", "result_block.parquet", "block.parquet"}
+	case "ufscustom":
+		return []string{"realtime_ufscustom_*.parquet", "result_ufscustom.parquet", "ufscustom.parquet"}
+	default:
+		return []string{"*.parquet"}
 	}
-	var parts []string
-	for _, d := range dirs {
-		parts = append(parts, fmt.Sprintf("'%s'", filepath.Join(d, "*.parquet")))
-	}
-	return "[" + strings.Join(parts, ", ") + "], union_by_name=true"
 }
 
-// ComputeStats computes trace statistics from parquet files across multiple directories.
-func ComputeStats(dirs []string, filter *pb.TraceFilter, customRanges []float64) (*pb.TraceStats, error) {
+// findParquetFiles finds actual parquet files in a directory matching the trace type.
+func findParquetFiles(dir, traceType string) []string {
+	patterns := parquetGlobPatterns(traceType)
+	var found []string
+	for _, p := range patterns {
+		matches, err := filepath.Glob(filepath.Join(dir, p))
+		if err == nil && len(matches) > 0 {
+			found = append(found, matches...)
+		}
+	}
+	return found
+}
+
+// buildGlobList builds a DuckDB-compatible glob from multiple TraceJobInfos.
+// Only includes patterns that actually have matching files.
+func buildGlobList(infos []*TraceJobInfo) string {
+	needsUnion := false
+	var parts []string
+	for _, info := range infos {
+		files := findParquetFiles(info.Dir, info.TraceType)
+		for _, f := range files {
+			parts = append(parts, fmt.Sprintf("'%s'", f))
+		}
+		if info.TraceType == "both" || info.TraceType == "" {
+			needsUnion = true
+		}
+	}
+	if len(parts) == 0 {
+		return "''" // will produce empty result
+	}
+	if len(parts) == 1 {
+		if needsUnion {
+			return parts[0] + ", union_by_name=true"
+		}
+		return parts[0]
+	}
+	glob := "[" + strings.Join(parts, ", ") + "]"
+	if needsUnion {
+		glob += ", union_by_name=true"
+	}
+	return glob
+}
+
+// ComputeStats computes trace statistics from parquet files.
+func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []float64) (*pb.TraceStats, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return nil, fmt.Errorf("open duckdb: %w", err)
 	}
 	defer db.Close()
 
-	glob := buildGlobList(dirs)
-	where := buildFilterWhere(filter)
+	glob := buildGlobList(infos)
+	lbaCol := detectLbaColumn(db, glob)
+	cmdCol := detectCmdColumn(db, glob)
+	where := buildFilterWhere(filter, lbaCol, cmdCol)
 
 	stats := &pb.TraceStats{}
 
@@ -96,24 +146,59 @@ func ComputeStats(dirs []string, filter *pb.TraceFilter, customRanges []float64)
 		stats.LatencyHistograms = append(stats.LatencyHistograms, histograms...)
 	}
 
+	// 5.5 Compute read/write/discard totals from cmd stats
+	// UFS: size unit = 4096 bytes (1 LBA = 4KB)
+	// Block: size unit = 512 bytes (1 sector = 512B)
+	for _, cs := range stats.CmdStats {
+		cmd := strings.ToUpper(cs.Cmd)
+		switch {
+		// UFS opcodes (size * 4096)
+		case cmd == "0X28" || cmd == "0X88": // READ_10, READ_16
+			cs.TotalSizeBytes *= 4096
+			stats.ReadTotalBytes += cs.TotalSizeBytes
+		case cmd == "0X2A" || cmd == "0X8A": // WRITE_10, WRITE_16
+			cs.TotalSizeBytes *= 4096
+			stats.WriteTotalBytes += cs.TotalSizeBytes
+		case cmd == "0X42": // UNMAP (discard)
+			cs.TotalSizeBytes *= 4096
+			stats.DiscardTotalBytes += cs.TotalSizeBytes
+		// Block io_type (size * 512)
+		case strings.HasPrefix(cmd, "R"):
+			cs.TotalSizeBytes *= 512
+			stats.ReadTotalBytes += cs.TotalSizeBytes
+		case strings.HasPrefix(cmd, "W"):
+			cs.TotalSizeBytes *= 512
+			stats.WriteTotalBytes += cs.TotalSizeBytes
+		case strings.HasPrefix(cmd, "D"):
+			cs.TotalSizeBytes *= 512
+			stats.DiscardTotalBytes += cs.TotalSizeBytes
+		default:
+			// Unknown cmd, assume UFS unit
+			cs.TotalSizeBytes *= 4096
+		}
+	}
+
 	// 6. Cmd + size counts
 	stats.CmdSizeCounts, err = queryCmdSizeCounts(db, glob, where)
 	if err != nil {
 		return nil, fmt.Errorf("cmd size counts: %w", err)
 	}
 
-	// 7. Continuity stats (aligned may not exist in all schemas)
+	// 7. Continuity stats — only from send/issue events (address continuity is send-side only)
+	// UFS: action='send_req', Block: action='block_rq_issue'
+	sendFilter := addCondition(where, "action IN ('send_req', 'block_rq_issue')")
 	q = fmt.Sprintf(`SELECT
+		count(*),
 		count(*) FILTER (WHERE continuous = true),
-		count(*) FILTER (WHERE continuous = true) * 100.0 / count(*)
-	FROM read_parquet(%s) %s`, glob, where)
-	db.QueryRow(q).Scan(&stats.ContinuousCount, &stats.ContinuousRatio)
+		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*), 0)
+	FROM read_parquet(%s) %s`, glob, sendFilter)
+	db.QueryRow(q).Scan(&stats.SendCount, &stats.ContinuousCount, &stats.ContinuousRatio)
 
-	// Try aligned stats separately (column may not exist)
+	// Try aligned stats separately (column may not exist, also send-side only)
 	q = fmt.Sprintf(`SELECT
 		count(*) FILTER (WHERE aligned = true),
-		count(*) FILTER (WHERE aligned = true) * 100.0 / count(*)
-	FROM read_parquet(%s) %s`, glob, where)
+		count(*) FILTER (WHERE aligned = true) * 100.0 / NULLIF(count(*), 0)
+	FROM read_parquet(%s) %s`, glob, sendFilter)
 	db.QueryRow(q).Scan(&stats.AlignedCount, &stats.AlignedRatio) // ignore error if column missing
 
 	return stats, nil
@@ -198,7 +283,11 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		percentile_cont(0.99) WITHIN GROUP (ORDER BY ctoc),
 		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctoc),
 		min(qd), max(qd), avg(qd), stddev_pop(qd),
-		percentile_cont(0.99) WITHIN GROUP (ORDER BY qd)
+		percentile_cont(0.99) WITHIN GROUP (ORDER BY qd),
+		COALESCE(sum(CAST(size AS BIGINT)), 0) as total_size,
+		count(*) FILTER (WHERE continuous = true) as cont_count,
+		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as cont_ratio,
+		count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')) as send_count
 	FROM read_parquet(%s) %s GROUP BY %s ORDER BY cnt DESC`,
 		cmdCol, glob, where, cmdCol)
 
@@ -221,12 +310,16 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		var ctocMin, ctocMax, ctocAvg, ctocStd, ctocP99, ctocP999 sql.NullFloat64
 		var qdMin, qdMax, qdAvg, qdStd, qdP99 sql.NullFloat64
 
+		var contRatio sql.NullFloat64
 		if err := rows.Scan(
 			&cs.Cmd, &cs.Count, &cs.Ratio,
 			&dtocMin, &dtocMax, &dtocAvg, &dtocStd, &dtocP99, &dtocP999,
 			&ctodMin, &ctodMax, &ctodAvg, &ctodStd, &ctodP99, &ctodP999,
 			&ctocMin, &ctocMax, &ctocAvg, &ctocStd, &ctocP99, &ctocP999,
 			&qdMin, &qdMax, &qdAvg, &qdStd, &qdP99,
+			&cs.TotalSizeBytes,
+			&cs.ContinuousCount, &contRatio,
+			&cs.SendCount,
 		); err != nil {
 			return nil, err
 		}
@@ -247,6 +340,9 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		}
 		if qdP99.Valid {
 			cs.Qd.P99 = qdP99.Float64
+		}
+		if contRatio.Valid {
+			cs.ContinuousRatio = contRatio.Float64
 		}
 		results = append(results, cs)
 	}
@@ -386,7 +482,7 @@ func detectCmdColumn(db *sql.DB, glob string) string {
 	return "opcode"
 }
 
-func buildFilterWhere(f *pb.TraceFilter) string {
+func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
 	if f == nil {
 		return ""
 	}
@@ -398,10 +494,10 @@ func buildFilterWhere(f *pb.TraceFilter) string {
 		conds = append(conds, fmt.Sprintf("time <= %f", f.EndTime))
 	}
 	if f.StartLba > 0 {
-		conds = append(conds, fmt.Sprintf("COALESCE(lba, sector) >= %d", f.StartLba))
+		conds = append(conds, fmt.Sprintf("%s >= %d", lbaCol, f.StartLba))
 	}
 	if f.EndLba > 0 {
-		conds = append(conds, fmt.Sprintf("COALESCE(lba, sector) <= %d", f.EndLba))
+		conds = append(conds, fmt.Sprintf("%s <= %d", lbaCol, f.EndLba))
 	}
 	if f.MinDtoc > 0 {
 		conds = append(conds, fmt.Sprintf("dtoc >= %f", f.MinDtoc))
@@ -439,7 +535,7 @@ func buildFilterWhere(f *pb.TraceFilter) string {
 		for i, v := range f.CmdList {
 			vals[i] = fmt.Sprintf("'%s'", v)
 		}
-		conds = append(conds, fmt.Sprintf("COALESCE(opcode, io_type) IN (%s)", strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("%s IN (%s)", cmdCol, strings.Join(vals, ",")))
 	}
 	if len(f.SizeList) > 0 {
 		vals := make([]string, len(f.SizeList))
@@ -447,6 +543,13 @@ func buildFilterWhere(f *pb.TraceFilter) string {
 			vals[i] = fmt.Sprintf("%d", v)
 		}
 		conds = append(conds, fmt.Sprintf("size IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.ActionList) > 0 {
+		vals := make([]string, len(f.ActionList))
+		for i, v := range f.ActionList {
+			vals[i] = fmt.Sprintf("'%s'", v)
+		}
+		conds = append(conds, fmt.Sprintf("action IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(conds) == 0 {
 		return ""

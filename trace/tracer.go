@@ -1,13 +1,15 @@
 package trace
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,19 +26,23 @@ type TraceJob struct {
 	DeviceID     string
 	TraceType    string // "ufs", "block", "both"
 	State        pb.JobState
-	OutputDir    string
+	OutputDir    string // base dir for this job
+	RealtimeDir  string // realtime parquet output dir
 	LogFile      string
-	TracingDir   string // /sys/kernel/tracing or /sys/kernel/debug/tracing
+	TracingDir   string
+	TraceGrpcJobID string // job_id from trace gRPC server (for --client stop)
 	StartedAt    int64
 	FinishedAt   int64
 	Error        string
 
-	// internal
-	adbCancel    context.CancelFunc
-	adbCmd       *exec.Cmd
-	logFd        *os.File
-	subscribers  []chan *pb.JobProgress
-	lastProgress []*pb.JobProgress
+	// internal processes
+	adbCancel      context.CancelFunc
+	adbCmd         *exec.Cmd
+	logFd          *os.File
+	realtimeCmd    *exec.Cmd
+	realtimeCancel context.CancelFunc
+	subscribers    []chan *pb.JobProgress
+	lastProgress   []*pb.JobProgress
 }
 
 func (j *TraceJob) notify(progress *pb.JobProgress) {
@@ -62,24 +68,64 @@ func (j *TraceJob) closeSubscribers() {
 
 // Manager manages trace sessions.
 type Manager struct {
-	mu         sync.RWMutex
-	jobs       map[string]*TraceJob
-	adbMgr     *adb.Manager
-	toolsDir   string
-	outputBase string
+	mu            sync.RWMutex
+	jobs          map[string]*TraceJob
+	adbMgr        *adb.Manager
+	toolsDir      string
+	outputBase    string
+	traceGrpcPort int
+	traceServer   *exec.Cmd
+	traceServerCancel context.CancelFunc
 }
 
-func NewManager(adbMgr *adb.Manager, toolsDir, traceDir string) *Manager {
+func NewManager(adbMgr *adb.Manager, toolsDir, traceDir string, traceGrpcPort int) *Manager {
 	return &Manager{
-		jobs:       make(map[string]*TraceJob),
-		adbMgr:     adbMgr,
-		toolsDir:   toolsDir,
-		outputBase: traceDir,
+		jobs:          make(map[string]*TraceJob),
+		adbMgr:        adbMgr,
+		toolsDir:      toolsDir,
+		outputBase:    traceDir,
+		traceGrpcPort: traceGrpcPort,
 	}
 }
 
-// findTracingDir finds the tracing directory on the device.
-// StartTrace begins trace log collection on a device.
+// StartTraceServer starts the trace gRPC server as a background process.
+func (m *Manager) StartTraceServer() error {
+	traceBin := filepath.Join(m.toolsDir, "trace")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cmd := exec.CommandContext(ctx, traceBin,
+		"--grpc-server",
+		"--port", fmt.Sprintf("%d", m.traceGrpcPort),
+	)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return fmt.Errorf("start trace grpc server: %w", err)
+	}
+
+	m.traceServer = cmd
+	m.traceServerCancel = cancel
+
+	time.Sleep(1 * time.Second)
+
+	slog.Info("trace gRPC server started", "port", m.traceGrpcPort, "pid", cmd.Process.Pid)
+	return nil
+}
+
+// StopTraceServer stops the trace gRPC server.
+func (m *Manager) StopTraceServer() {
+	if m.traceServerCancel != nil {
+		m.traceServerCancel()
+	}
+	if m.traceServer != nil {
+		m.traceServer.Wait()
+	}
+	slog.Info("trace gRPC server stopped")
+}
+
+// StartTrace begins trace collection + realtime parsing on a device.
 func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (string, error) {
 	md, err := m.adbMgr.GetDevice(req.DeviceId)
 	if err != nil {
@@ -95,7 +141,8 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 
 	jobID := uuid.New().String()
 	outputDir := filepath.Join(m.outputBase, jobID)
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	realtimeDir := filepath.Join(outputDir, "realtime")
+	if err := os.MkdirAll(realtimeDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir output: %w", err)
 	}
 
@@ -104,23 +151,28 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	if traceType == "" {
 		traceType = "ufs"
 	}
+	windowSec := req.WindowSeconds
+	if windowSec <= 0 {
+		windowSec = 1
+	}
 
 	job := &TraceJob{
-		ID:         jobID,
-		DeviceID:   req.DeviceId,
-		TraceType:  traceType,
-		State:      pb.JobState_JOB_STATE_RUNNING,
-		OutputDir:  outputDir,
-		LogFile:    logFile,
-		TracingDir: tracingDir,
-		StartedAt:  time.Now().UnixMilli(),
+		ID:          jobID,
+		DeviceID:    req.DeviceId,
+		TraceType:   traceType,
+		State:       pb.JobState_JOB_STATE_RUNNING,
+		OutputDir:   outputDir,
+		RealtimeDir: realtimeDir,
+		LogFile:     logFile,
+		TracingDir:  tracingDir,
+		StartedAt:   time.Now().UnixMilli(),
 	}
 
 	m.mu.Lock()
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Stop tracing and clear trace buffer before starting
+	// Stop tracing and clear trace buffer
 	md.Device.Shell(bgCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
 	md.Device.Shell(bgCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
 
@@ -164,20 +216,73 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("start trace_pipe: %w", err)
 	}
 
+	// Wait for log data to start flowing
+	time.Sleep(500 * time.Millisecond)
+
+	// Start realtime parsing via trace CLI client
+	realtimeCtx, realtimeCancel := context.WithCancel(bgCtx)
+	traceBin := filepath.Join(m.toolsDir, "trace")
+	realtimeCmd := exec.CommandContext(realtimeCtx, traceBin,
+		"--client", "realtime",
+		"--server", fmt.Sprintf("localhost:%d", m.traceGrpcPort),
+		"--source-path", logFile,
+		"--output-dir", realtimeDir,
+		"--log-type", traceType,
+		"--window", fmt.Sprintf("%d", windowSec),
+	)
+
+	// Capture stdout to parse trace gRPC job_id
+	realtimeStdout, err := realtimeCmd.StdoutPipe()
+	if err != nil {
+		adbCancel()
+		logFd.Close()
+		realtimeCancel()
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	realtimeCmd.Stderr = io.Discard
+
+	if err := realtimeCmd.Start(); err != nil {
+		adbCancel()
+		logFd.Close()
+		realtimeCancel()
+		return "", fmt.Errorf("start realtime parsing: %w", err)
+	}
+
 	job.Mu.Lock()
 	job.adbCancel = adbCancel
 	job.adbCmd = adbCmd
 	job.logFd = logFd
+	job.realtimeCmd = realtimeCmd
+	job.realtimeCancel = realtimeCancel
 	job.Mu.Unlock()
+
+	// Parse trace gRPC job_id from realtime client stdout in background
+	go func() {
+		scanner := bufio.NewScanner(realtimeStdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Output format: [파일 #0001] /path/realtime_000001.parquet (52340 events, ...) job_id=xxx
+			if idx := strings.Index(line, "job_id="); idx >= 0 {
+				traceJobID := strings.TrimSpace(line[idx+7:])
+				job.Mu.Lock()
+				if job.TraceGrpcJobID == "" {
+					job.TraceGrpcJobID = traceJobID
+					slog.Info("captured trace gRPC job_id", "agent_job", jobID, "trace_job", traceJobID)
+				}
+				job.Mu.Unlock()
+			}
+		}
+	}()
 
 	job.notify(&pb.JobProgress{
 		JobId:    jobID,
 		DeviceId: req.DeviceId,
 		State:    pb.JobState_JOB_STATE_RUNNING,
-		Message:  "trace collecting",
+		Message:  "trace collecting + realtime parsing",
 	})
 
-	slog.Info("trace started", "job_id", jobID, "device", req.DeviceId, "type", traceType, "tracing_dir", tracingDir)
+	slog.Info("trace started", "job_id", jobID, "device", req.DeviceId, "type", traceType,
+		"realtime_dir", realtimeDir, "window", windowSec)
 
 	// Wait for adb process in background
 	go func() {
@@ -188,7 +293,7 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	return jobID, nil
 }
 
-// StopTrace stops trace collection, then runs trace tool to generate parquet.
+// StopTrace stops trace collection and gracefully stops realtime parsing.
 func (m *Manager) StopTrace(jobID string) error {
 	job, err := m.GetJob(jobID)
 	if err != nil {
@@ -201,54 +306,61 @@ func (m *Manager) StopTrace(jobID string) error {
 		return fmt.Errorf("job not running: %s", jobID)
 	}
 	adbCancel := job.adbCancel
+	realtimeCancel := job.realtimeCancel
 	deviceID := job.DeviceID
 	tracingDir := job.TracingDir
+	traceGrpcJobID := job.TraceGrpcJobID
 	job.Mu.Unlock()
 
-	// Disable tracing on device
+	// 1. Disable tracing on device
 	if md, err := m.adbMgr.GetDevice(deviceID); err == nil {
 		md.Device.Shell(context.Background(), fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
 		md.Device.Shell(context.Background(), fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
 	}
 
-	// Stop adb trace_pipe collection
+	// 2. Stop adb trace_pipe (so realtime parser gets no more data)
 	if adbCancel != nil {
 		adbCancel()
 	}
 
-	// Wait for file to flush
-	time.Sleep(500 * time.Millisecond)
+	// Wait for remaining data to flush to log file
+	time.Sleep(1 * time.Second)
 
-	// Check log file size
+	// 3. Gracefully stop realtime parsing via trace --client stop
+	if traceGrpcJobID != "" {
+		traceBin := filepath.Join(m.toolsDir, "trace")
+		stopCmd := exec.Command(traceBin,
+			"--client", "stop",
+			"--server", fmt.Sprintf("localhost:%d", m.traceGrpcPort),
+			"--job-id", traceGrpcJobID,
+		)
+		stopCmd.Stdout = io.Discard
+		stopCmd.Stderr = io.Discard
+		if err := stopCmd.Run(); err != nil {
+			slog.Warn("trace --client stop failed, forcing", "error", err, "trace_job", traceGrpcJobID)
+			// Fallback: force kill
+			if realtimeCancel != nil {
+				realtimeCancel()
+			}
+		} else {
+			slog.Info("trace realtime parsing stopped gracefully", "trace_job", traceGrpcJobID)
+		}
+	} else {
+		// No trace gRPC job_id captured, force kill
+		slog.Warn("no trace gRPC job_id, forcing realtime parser stop")
+		if realtimeCancel != nil {
+			realtimeCancel()
+		}
+	}
+
+	// Wait for realtime parser to finish writing final parquet
+	time.Sleep(1 * time.Second)
+
+	// Delete raw trace log (large file, parquet is sufficient)
 	if fi, err := os.Stat(job.LogFile); err == nil {
-		slog.Info("trace log collected", "job_id", jobID, "size_bytes", fi.Size())
+		slog.Info("deleting trace log", "job_id", jobID, "size_bytes", fi.Size())
+		os.Remove(job.LogFile)
 	}
-
-	job.notify(&pb.JobProgress{
-		JobId:    jobID,
-		DeviceId: deviceID,
-		State:    pb.JobState_JOB_STATE_COLLECTING,
-		Message:  "parsing trace log to parquet",
-	})
-
-	// Run trace tool: ./tools/trace --parquet-only <log_file> <output_prefix>
-	traceBin := filepath.Join(m.toolsDir, "trace")
-	outputPrefix := filepath.Join(job.OutputDir, "result")
-
-	var stdout, stderr bytes.Buffer
-	traceCmd := exec.Command(traceBin, "--parquet-only", job.LogFile, outputPrefix)
-	traceCmd.Stdout = &stdout
-	traceCmd.Stderr = &stderr
-
-	slog.Info("running trace tool", "cmd", traceCmd.String())
-	if err := traceCmd.Run(); err != nil {
-		errMsg := fmt.Sprintf("trace tool failed: %v: %s", err, stderr.String())
-		slog.Error(errMsg)
-		m.failJob(job, errMsg)
-		return fmt.Errorf(errMsg)
-	}
-
-	slog.Info("trace tool completed", "job_id", jobID)
 
 	job.Mu.Lock()
 	job.State = pb.JobState_JOB_STATE_COMPLETED
@@ -318,19 +430,29 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	return ch, nil
 }
 
-// GetParquetDir returns the output directory for a trace job's parquet files.
-// Falls back to checking disk if job is not in memory (e.g. after agent restart).
-func (m *Manager) GetParquetDir(jobID string) (string, error) {
+// TraceJobInfo holds directory and type info for parquet file lookup.
+type TraceJobInfo struct {
+	Dir       string
+	TraceType string // "ufs", "block", "both"
+}
+
+// GetTraceJobInfo returns the parquet directory and trace type for a job.
+func (m *Manager) GetTraceJobInfo(jobID string) (*TraceJobInfo, error) {
 	// Try memory first
 	if job, err := m.GetJob(jobID); err == nil {
-		return job.OutputDir, nil
+		return &TraceJobInfo{Dir: job.RealtimeDir, TraceType: job.TraceType}, nil
 	}
-	// Fallback: check if directory exists on disk
-	dir := filepath.Join(m.outputBase, jobID)
+	// Fallback: check realtime dir on disk (type unknown, use "both" to read all)
+	dir := filepath.Join(m.outputBase, jobID, "realtime")
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-		return dir, nil
+		return &TraceJobInfo{Dir: dir, TraceType: "both"}, nil
 	}
-	return "", fmt.Errorf("trace job not found: %s", jobID)
+	// Fallback: check base dir (for old --parquet-only jobs)
+	dir = filepath.Join(m.outputBase, jobID)
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		return &TraceJobInfo{Dir: dir, TraceType: "both"}, nil
+	}
+	return nil, fmt.Errorf("trace job not found: %s", jobID)
 }
 
 // DeleteJob deletes a completed/failed trace job and its output files.
@@ -338,7 +460,6 @@ func (m *Manager) DeleteJob(jobID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check memory for running job
 	if job, ok := m.jobs[jobID]; ok {
 		job.Mu.Lock()
 		state := job.State
@@ -349,7 +470,6 @@ func (m *Manager) DeleteJob(jobID string) error {
 		delete(m.jobs, jobID)
 	}
 
-	// Remove output directory (works even if job not in memory)
 	dir := filepath.Join(m.outputBase, jobID)
 	if _, err := os.Stat(dir); err == nil {
 		if err := os.RemoveAll(dir); err != nil {

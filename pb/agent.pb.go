@@ -1087,6 +1087,7 @@ type BenchmarkResult struct {
 	FinishedAt    int64                  `protobuf:"varint,6,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	Success       bool                   `protobuf:"varint,7,opt,name=success,proto3" json:"success,omitempty"`
 	Error         string                 `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
+	TraceJobs     []*TraceJobMapping     `protobuf:"bytes,9,rep,name=trace_jobs,json=traceJobs,proto3" json:"trace_jobs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1177,6 +1178,89 @@ func (x *BenchmarkResult) GetError() string {
 	return ""
 }
 
+func (x *BenchmarkResult) GetTraceJobs() []*TraceJobMapping {
+	if x != nil {
+		return x.TraceJobs
+	}
+	return nil
+}
+
+type TraceJobMapping struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TraceJobId    string                 `protobuf:"bytes,1,opt,name=trace_job_id,json=traceJobId,proto3" json:"trace_job_id,omitempty"`
+	StepIndex     int32                  `protobuf:"varint,2,opt,name=step_index,json=stepIndex,proto3" json:"step_index,omitempty"`
+	LoopIndex     int32                  `protobuf:"varint,3,opt,name=loop_index,json=loopIndex,proto3" json:"loop_index,omitempty"`       // 0 = no loop
+	RepeatIndex   int32                  `protobuf:"varint,4,opt,name=repeat_index,json=repeatIndex,proto3" json:"repeat_index,omitempty"` // 1-based
+	TraceType     string                 `protobuf:"bytes,5,opt,name=trace_type,json=traceType,proto3" json:"trace_type,omitempty"`        // "ufs", "block", "both"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceJobMapping) Reset() {
+	*x = TraceJobMapping{}
+	mi := &file_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceJobMapping) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceJobMapping) ProtoMessage() {}
+
+func (x *TraceJobMapping) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceJobMapping.ProtoReflect.Descriptor instead.
+func (*TraceJobMapping) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TraceJobMapping) GetTraceJobId() string {
+	if x != nil {
+		return x.TraceJobId
+	}
+	return ""
+}
+
+func (x *TraceJobMapping) GetStepIndex() int32 {
+	if x != nil {
+		return x.StepIndex
+	}
+	return 0
+}
+
+func (x *TraceJobMapping) GetLoopIndex() int32 {
+	if x != nil {
+		return x.LoopIndex
+	}
+	return 0
+}
+
+func (x *TraceJobMapping) GetRepeatIndex() int32 {
+	if x != nil {
+		return x.RepeatIndex
+	}
+	return 0
+}
+
+func (x *TraceJobMapping) GetTraceType() string {
+	if x != nil {
+		return x.TraceType
+	}
+	return ""
+}
+
 type DeleteJobRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -1186,7 +1270,7 @@ type DeleteJobRequest struct {
 
 func (x *DeleteJobRequest) Reset() {
 	*x = DeleteJobRequest{}
-	mi := &file_agent_proto_msgTypes[17]
+	mi := &file_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1198,7 +1282,7 @@ func (x *DeleteJobRequest) String() string {
 func (*DeleteJobRequest) ProtoMessage() {}
 
 func (x *DeleteJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[17]
+	mi := &file_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1211,7 +1295,7 @@ func (x *DeleteJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteJobRequest.ProtoReflect.Descriptor instead.
 func (*DeleteJobRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{17}
+	return file_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DeleteJobRequest) GetJobId() string {
@@ -1231,7 +1315,7 @@ type DeleteJobResponse struct {
 
 func (x *DeleteJobResponse) Reset() {
 	*x = DeleteJobResponse{}
-	mi := &file_agent_proto_msgTypes[18]
+	mi := &file_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1243,7 +1327,7 @@ func (x *DeleteJobResponse) String() string {
 func (*DeleteJobResponse) ProtoMessage() {}
 
 func (x *DeleteJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[18]
+	mi := &file_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1256,7 +1340,7 @@ func (x *DeleteJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteJobResponse.ProtoReflect.Descriptor instead.
 func (*DeleteJobResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{18}
+	return file_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteJobResponse) GetSuccess() bool {
@@ -1284,7 +1368,7 @@ type ScenarioStep struct {
 
 func (x *ScenarioStep) Reset() {
 	*x = ScenarioStep{}
-	mi := &file_agent_proto_msgTypes[19]
+	mi := &file_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1380,7 @@ func (x *ScenarioStep) String() string {
 func (*ScenarioStep) ProtoMessage() {}
 
 func (x *ScenarioStep) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[19]
+	mi := &file_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1393,7 @@ func (x *ScenarioStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScenarioStep.ProtoReflect.Descriptor instead.
 func (*ScenarioStep) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{19}
+	return file_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ScenarioStep) GetType() string {
@@ -1344,7 +1428,7 @@ type ScenarioLoop struct {
 
 func (x *ScenarioLoop) Reset() {
 	*x = ScenarioLoop{}
-	mi := &file_agent_proto_msgTypes[20]
+	mi := &file_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +1440,7 @@ func (x *ScenarioLoop) String() string {
 func (*ScenarioLoop) ProtoMessage() {}
 
 func (x *ScenarioLoop) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[20]
+	mi := &file_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +1453,7 @@ func (x *ScenarioLoop) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScenarioLoop.ProtoReflect.Descriptor instead.
 func (*ScenarioLoop) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{20}
+	return file_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ScenarioLoop) GetStartStep() int32 {
@@ -1406,7 +1490,7 @@ type RunScenarioRequest struct {
 
 func (x *RunScenarioRequest) Reset() {
 	*x = RunScenarioRequest{}
-	mi := &file_agent_proto_msgTypes[21]
+	mi := &file_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1418,7 +1502,7 @@ func (x *RunScenarioRequest) String() string {
 func (*RunScenarioRequest) ProtoMessage() {}
 
 func (x *RunScenarioRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[21]
+	mi := &file_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1431,7 +1515,7 @@ func (x *RunScenarioRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunScenarioRequest.ProtoReflect.Descriptor instead.
 func (*RunScenarioRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{21}
+	return file_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RunScenarioRequest) GetDeviceIds() []string {
@@ -1478,7 +1562,7 @@ type RunScenarioResponse struct {
 
 func (x *RunScenarioResponse) Reset() {
 	*x = RunScenarioResponse{}
-	mi := &file_agent_proto_msgTypes[22]
+	mi := &file_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1490,7 +1574,7 @@ func (x *RunScenarioResponse) String() string {
 func (*RunScenarioResponse) ProtoMessage() {}
 
 func (x *RunScenarioResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[22]
+	mi := &file_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1503,7 +1587,7 @@ func (x *RunScenarioResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunScenarioResponse.ProtoReflect.Descriptor instead.
 func (*RunScenarioResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{22}
+	return file_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RunScenarioResponse) GetJobId() string {
@@ -1525,7 +1609,7 @@ type StartTraceRequest struct {
 
 func (x *StartTraceRequest) Reset() {
 	*x = StartTraceRequest{}
-	mi := &file_agent_proto_msgTypes[23]
+	mi := &file_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1537,7 +1621,7 @@ func (x *StartTraceRequest) String() string {
 func (*StartTraceRequest) ProtoMessage() {}
 
 func (x *StartTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[23]
+	mi := &file_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1550,7 +1634,7 @@ func (x *StartTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTraceRequest.ProtoReflect.Descriptor instead.
 func (*StartTraceRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{23}
+	return file_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *StartTraceRequest) GetDeviceId() string {
@@ -1590,7 +1674,7 @@ type StartTraceResponse struct {
 
 func (x *StartTraceResponse) Reset() {
 	*x = StartTraceResponse{}
-	mi := &file_agent_proto_msgTypes[24]
+	mi := &file_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1602,7 +1686,7 @@ func (x *StartTraceResponse) String() string {
 func (*StartTraceResponse) ProtoMessage() {}
 
 func (x *StartTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[24]
+	mi := &file_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1615,7 +1699,7 @@ func (x *StartTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTraceResponse.ProtoReflect.Descriptor instead.
 func (*StartTraceResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{24}
+	return file_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *StartTraceResponse) GetJobId() string {
@@ -1634,7 +1718,7 @@ type StopTraceRequest struct {
 
 func (x *StopTraceRequest) Reset() {
 	*x = StopTraceRequest{}
-	mi := &file_agent_proto_msgTypes[25]
+	mi := &file_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1646,7 +1730,7 @@ func (x *StopTraceRequest) String() string {
 func (*StopTraceRequest) ProtoMessage() {}
 
 func (x *StopTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[25]
+	mi := &file_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1659,7 +1743,7 @@ func (x *StopTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTraceRequest.ProtoReflect.Descriptor instead.
 func (*StopTraceRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{25}
+	return file_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *StopTraceRequest) GetJobId() string {
@@ -1679,7 +1763,7 @@ type StopTraceResponse struct {
 
 func (x *StopTraceResponse) Reset() {
 	*x = StopTraceResponse{}
-	mi := &file_agent_proto_msgTypes[26]
+	mi := &file_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1691,7 +1775,7 @@ func (x *StopTraceResponse) String() string {
 func (*StopTraceResponse) ProtoMessage() {}
 
 func (x *StopTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[26]
+	mi := &file_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1704,7 +1788,7 @@ func (x *StopTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopTraceResponse.ProtoReflect.Descriptor instead.
 func (*StopTraceResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{26}
+	return file_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StopTraceResponse) GetSuccess() bool {
@@ -1738,13 +1822,14 @@ type TraceFilter struct {
 	CpuList       []uint32               `protobuf:"varint,13,rep,packed,name=cpu_list,json=cpuList,proto3" json:"cpu_list,omitempty"`
 	CmdList       []string               `protobuf:"bytes,14,rep,name=cmd_list,json=cmdList,proto3" json:"cmd_list,omitempty"`
 	SizeList      []uint32               `protobuf:"varint,15,rep,packed,name=size_list,json=sizeList,proto3" json:"size_list,omitempty"`
+	ActionList    []string               `protobuf:"bytes,16,rep,name=action_list,json=actionList,proto3" json:"action_list,omitempty"` // "send_req", "complete_rsp", "block_rq_issue", "block_rq_complete"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TraceFilter) Reset() {
 	*x = TraceFilter{}
-	mi := &file_agent_proto_msgTypes[27]
+	mi := &file_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1756,7 +1841,7 @@ func (x *TraceFilter) String() string {
 func (*TraceFilter) ProtoMessage() {}
 
 func (x *TraceFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[27]
+	mi := &file_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1769,7 +1854,7 @@ func (x *TraceFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceFilter.ProtoReflect.Descriptor instead.
 func (*TraceFilter) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{27}
+	return file_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *TraceFilter) GetStartTime() float64 {
@@ -1877,6 +1962,13 @@ func (x *TraceFilter) GetSizeList() []uint32 {
 	return nil
 }
 
+func (x *TraceFilter) GetActionList() []string {
+	if x != nil {
+		return x.ActionList
+	}
+	return nil
+}
+
 type GetTraceResultRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	JobIds          []string               `protobuf:"bytes,1,rep,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"` // 여러 job의 parquet를 합쳐서 통계 (빈 경우 불가)
@@ -1888,7 +1980,7 @@ type GetTraceResultRequest struct {
 
 func (x *GetTraceResultRequest) Reset() {
 	*x = GetTraceResultRequest{}
-	mi := &file_agent_proto_msgTypes[28]
+	mi := &file_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1900,7 +1992,7 @@ func (x *GetTraceResultRequest) String() string {
 func (*GetTraceResultRequest) ProtoMessage() {}
 
 func (x *GetTraceResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[28]
+	mi := &file_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1913,7 +2005,7 @@ func (x *GetTraceResultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceResultRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceResultRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{28}
+	return file_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GetTraceResultRequest) GetJobIds() []string {
@@ -1947,7 +2039,7 @@ type GetTraceResultResponse struct {
 
 func (x *GetTraceResultResponse) Reset() {
 	*x = GetTraceResultResponse{}
-	mi := &file_agent_proto_msgTypes[29]
+	mi := &file_agent_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1959,7 +2051,7 @@ func (x *GetTraceResultResponse) String() string {
 func (*GetTraceResultResponse) ProtoMessage() {}
 
 func (x *GetTraceResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[29]
+	mi := &file_agent_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1972,7 +2064,7 @@ func (x *GetTraceResultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceResultResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceResultResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{29}
+	return file_agent_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetTraceResultResponse) GetJobId() string {
@@ -1991,7 +2083,7 @@ func (x *GetTraceResultResponse) GetStats() *TraceStats {
 
 type TraceStats struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	TotalEvents       int64                  `protobuf:"varint,1,opt,name=total_events,json=totalEvents,proto3" json:"total_events,omitempty"`
+	TotalEvents       int64                  `protobuf:"varint,1,opt,name=total_events,json=totalEvents,proto3" json:"total_events,omitempty"` // send + complete 전체
 	DurationSeconds   float64                `protobuf:"fixed64,2,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
 	Dtoc              *LatencyStats          `protobuf:"bytes,3,opt,name=dtoc,proto3" json:"dtoc,omitempty"`
 	Ctod              *LatencyStats          `protobuf:"bytes,4,opt,name=ctod,proto3" json:"ctod,omitempty"`
@@ -2000,17 +2092,21 @@ type TraceStats struct {
 	CmdStats          []*CmdStats            `protobuf:"bytes,7,rep,name=cmd_stats,json=cmdStats,proto3" json:"cmd_stats,omitempty"`
 	LatencyHistograms []*LatencyHistogram    `protobuf:"bytes,8,rep,name=latency_histograms,json=latencyHistograms,proto3" json:"latency_histograms,omitempty"`
 	CmdSizeCounts     []*CmdSizeCount        `protobuf:"bytes,9,rep,name=cmd_size_counts,json=cmdSizeCounts,proto3" json:"cmd_size_counts,omitempty"`
-	ContinuousCount   int64                  `protobuf:"varint,10,opt,name=continuous_count,json=continuousCount,proto3" json:"continuous_count,omitempty"`
+	ContinuousCount   int64                  `protobuf:"varint,10,opt,name=continuous_count,json=continuousCount,proto3" json:"continuous_count,omitempty"` // 연속성 true 개수 (send 기준)
 	ContinuousRatio   float64                `protobuf:"fixed64,11,opt,name=continuous_ratio,json=continuousRatio,proto3" json:"continuous_ratio,omitempty"`
 	AlignedCount      int64                  `protobuf:"varint,12,opt,name=aligned_count,json=alignedCount,proto3" json:"aligned_count,omitempty"`
 	AlignedRatio      float64                `protobuf:"fixed64,13,opt,name=aligned_ratio,json=alignedRatio,proto3" json:"aligned_ratio,omitempty"`
+	ReadTotalBytes    uint64                 `protobuf:"varint,14,opt,name=read_total_bytes,json=readTotalBytes,proto3" json:"read_total_bytes,omitempty"`
+	WriteTotalBytes   uint64                 `protobuf:"varint,15,opt,name=write_total_bytes,json=writeTotalBytes,proto3" json:"write_total_bytes,omitempty"`
+	DiscardTotalBytes uint64                 `protobuf:"varint,16,opt,name=discard_total_bytes,json=discardTotalBytes,proto3" json:"discard_total_bytes,omitempty"`
+	SendCount         int64                  `protobuf:"varint,17,opt,name=send_count,json=sendCount,proto3" json:"send_count,omitempty"` // send/issue 이벤트 수 (연속성 분모)
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
 
 func (x *TraceStats) Reset() {
 	*x = TraceStats{}
-	mi := &file_agent_proto_msgTypes[30]
+	mi := &file_agent_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2022,7 +2118,7 @@ func (x *TraceStats) String() string {
 func (*TraceStats) ProtoMessage() {}
 
 func (x *TraceStats) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[30]
+	mi := &file_agent_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2035,7 +2131,7 @@ func (x *TraceStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceStats.ProtoReflect.Descriptor instead.
 func (*TraceStats) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{30}
+	return file_agent_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *TraceStats) GetTotalEvents() int64 {
@@ -2129,6 +2225,34 @@ func (x *TraceStats) GetAlignedRatio() float64 {
 	return 0
 }
 
+func (x *TraceStats) GetReadTotalBytes() uint64 {
+	if x != nil {
+		return x.ReadTotalBytes
+	}
+	return 0
+}
+
+func (x *TraceStats) GetWriteTotalBytes() uint64 {
+	if x != nil {
+		return x.WriteTotalBytes
+	}
+	return 0
+}
+
+func (x *TraceStats) GetDiscardTotalBytes() uint64 {
+	if x != nil {
+		return x.DiscardTotalBytes
+	}
+	return 0
+}
+
+func (x *TraceStats) GetSendCount() int64 {
+	if x != nil {
+		return x.SendCount
+	}
+	return 0
+}
+
 type LatencyStats struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Min           float64                `protobuf:"fixed64,1,opt,name=min,proto3" json:"min,omitempty"`
@@ -2147,7 +2271,7 @@ type LatencyStats struct {
 
 func (x *LatencyStats) Reset() {
 	*x = LatencyStats{}
-	mi := &file_agent_proto_msgTypes[31]
+	mi := &file_agent_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2159,7 +2283,7 @@ func (x *LatencyStats) String() string {
 func (*LatencyStats) ProtoMessage() {}
 
 func (x *LatencyStats) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[31]
+	mi := &file_agent_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2172,7 +2296,7 @@ func (x *LatencyStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LatencyStats.ProtoReflect.Descriptor instead.
 func (*LatencyStats) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{31}
+	return file_agent_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *LatencyStats) GetMin() float64 {
@@ -2246,21 +2370,25 @@ func (x *LatencyStats) GetP999999() float64 {
 }
 
 type CmdStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Cmd           string                 `protobuf:"bytes,1,opt,name=cmd,proto3" json:"cmd,omitempty"`
-	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
-	Ratio         float64                `protobuf:"fixed64,3,opt,name=ratio,proto3" json:"ratio,omitempty"`
-	Dtoc          *LatencyStats          `protobuf:"bytes,4,opt,name=dtoc,proto3" json:"dtoc,omitempty"`
-	Ctod          *LatencyStats          `protobuf:"bytes,5,opt,name=ctod,proto3" json:"ctod,omitempty"`
-	Ctoc          *LatencyStats          `protobuf:"bytes,6,opt,name=ctoc,proto3" json:"ctoc,omitempty"`
-	Qd            *LatencyStats          `protobuf:"bytes,7,opt,name=qd,proto3" json:"qd,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Cmd             string                 `protobuf:"bytes,1,opt,name=cmd,proto3" json:"cmd,omitempty"`
+	Count           int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"` // send + complete 전체
+	Ratio           float64                `protobuf:"fixed64,3,opt,name=ratio,proto3" json:"ratio,omitempty"`
+	Dtoc            *LatencyStats          `protobuf:"bytes,4,opt,name=dtoc,proto3" json:"dtoc,omitempty"`
+	Ctod            *LatencyStats          `protobuf:"bytes,5,opt,name=ctod,proto3" json:"ctod,omitempty"`
+	Ctoc            *LatencyStats          `protobuf:"bytes,6,opt,name=ctoc,proto3" json:"ctoc,omitempty"`
+	Qd              *LatencyStats          `protobuf:"bytes,7,opt,name=qd,proto3" json:"qd,omitempty"`
+	TotalSizeBytes  uint64                 `protobuf:"varint,8,opt,name=total_size_bytes,json=totalSizeBytes,proto3" json:"total_size_bytes,omitempty"`
+	ContinuousCount int64                  `protobuf:"varint,9,opt,name=continuous_count,json=continuousCount,proto3" json:"continuous_count,omitempty"`
+	ContinuousRatio float64                `protobuf:"fixed64,10,opt,name=continuous_ratio,json=continuousRatio,proto3" json:"continuous_ratio,omitempty"`
+	SendCount       int64                  `protobuf:"varint,11,opt,name=send_count,json=sendCount,proto3" json:"send_count,omitempty"` // send/issue 이벤트 수
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CmdStats) Reset() {
 	*x = CmdStats{}
-	mi := &file_agent_proto_msgTypes[32]
+	mi := &file_agent_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2272,7 +2400,7 @@ func (x *CmdStats) String() string {
 func (*CmdStats) ProtoMessage() {}
 
 func (x *CmdStats) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[32]
+	mi := &file_agent_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2285,7 +2413,7 @@ func (x *CmdStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CmdStats.ProtoReflect.Descriptor instead.
 func (*CmdStats) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{32}
+	return file_agent_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CmdStats) GetCmd() string {
@@ -2337,6 +2465,34 @@ func (x *CmdStats) GetQd() *LatencyStats {
 	return nil
 }
 
+func (x *CmdStats) GetTotalSizeBytes() uint64 {
+	if x != nil {
+		return x.TotalSizeBytes
+	}
+	return 0
+}
+
+func (x *CmdStats) GetContinuousCount() int64 {
+	if x != nil {
+		return x.ContinuousCount
+	}
+	return 0
+}
+
+func (x *CmdStats) GetContinuousRatio() float64 {
+	if x != nil {
+		return x.ContinuousRatio
+	}
+	return 0
+}
+
+func (x *CmdStats) GetSendCount() int64 {
+	if x != nil {
+		return x.SendCount
+	}
+	return 0
+}
+
 type LatencyHistogram struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Cmd           string                 `protobuf:"bytes,1,opt,name=cmd,proto3" json:"cmd,omitempty"`
@@ -2348,7 +2504,7 @@ type LatencyHistogram struct {
 
 func (x *LatencyHistogram) Reset() {
 	*x = LatencyHistogram{}
-	mi := &file_agent_proto_msgTypes[33]
+	mi := &file_agent_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2360,7 +2516,7 @@ func (x *LatencyHistogram) String() string {
 func (*LatencyHistogram) ProtoMessage() {}
 
 func (x *LatencyHistogram) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[33]
+	mi := &file_agent_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2373,7 +2529,7 @@ func (x *LatencyHistogram) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LatencyHistogram.ProtoReflect.Descriptor instead.
 func (*LatencyHistogram) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{33}
+	return file_agent_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *LatencyHistogram) GetCmd() string {
@@ -2408,7 +2564,7 @@ type LatencyBucket struct {
 
 func (x *LatencyBucket) Reset() {
 	*x = LatencyBucket{}
-	mi := &file_agent_proto_msgTypes[34]
+	mi := &file_agent_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2420,7 +2576,7 @@ func (x *LatencyBucket) String() string {
 func (*LatencyBucket) ProtoMessage() {}
 
 func (x *LatencyBucket) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[34]
+	mi := &file_agent_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2433,7 +2589,7 @@ func (x *LatencyBucket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LatencyBucket.ProtoReflect.Descriptor instead.
 func (*LatencyBucket) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{34}
+	return file_agent_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *LatencyBucket) GetRangeStartMs() float64 {
@@ -2468,7 +2624,7 @@ type CmdSizeCount struct {
 
 func (x *CmdSizeCount) Reset() {
 	*x = CmdSizeCount{}
-	mi := &file_agent_proto_msgTypes[35]
+	mi := &file_agent_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2480,7 +2636,7 @@ func (x *CmdSizeCount) String() string {
 func (*CmdSizeCount) ProtoMessage() {}
 
 func (x *CmdSizeCount) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[35]
+	mi := &file_agent_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2493,7 +2649,7 @@ func (x *CmdSizeCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CmdSizeCount.ProtoReflect.Descriptor instead.
 func (*CmdSizeCount) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{35}
+	return file_agent_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CmdSizeCount) GetCmd() string {
@@ -2527,7 +2683,7 @@ type GetTraceRawDataRequest struct {
 
 func (x *GetTraceRawDataRequest) Reset() {
 	*x = GetTraceRawDataRequest{}
-	mi := &file_agent_proto_msgTypes[36]
+	mi := &file_agent_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2539,7 +2695,7 @@ func (x *GetTraceRawDataRequest) String() string {
 func (*GetTraceRawDataRequest) ProtoMessage() {}
 
 func (x *GetTraceRawDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[36]
+	mi := &file_agent_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2552,7 +2708,7 @@ func (x *GetTraceRawDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRawDataRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceRawDataRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{36}
+	return file_agent_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *GetTraceRawDataRequest) GetJobIds() []string {
@@ -2582,7 +2738,7 @@ type GetTraceRawDataResponse struct {
 
 func (x *GetTraceRawDataResponse) Reset() {
 	*x = GetTraceRawDataResponse{}
-	mi := &file_agent_proto_msgTypes[37]
+	mi := &file_agent_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2594,7 +2750,7 @@ func (x *GetTraceRawDataResponse) String() string {
 func (*GetTraceRawDataResponse) ProtoMessage() {}
 
 func (x *GetTraceRawDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[37]
+	mi := &file_agent_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2607,7 +2763,7 @@ func (x *GetTraceRawDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRawDataResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceRawDataResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{37}
+	return file_agent_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *GetTraceRawDataResponse) GetJobId() string {
@@ -2657,13 +2813,14 @@ type TraceEvent struct {
 	Cmd           string                 `protobuf:"bytes,8,opt,name=cmd,proto3" json:"cmd,omitempty"`
 	Size          uint32                 `protobuf:"varint,9,opt,name=size,proto3" json:"size,omitempty"`
 	Continuous    bool                   `protobuf:"varint,10,opt,name=continuous,proto3" json:"continuous,omitempty"`
+	Action        string                 `protobuf:"bytes,11,opt,name=action,proto3" json:"action,omitempty"` // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TraceEvent) Reset() {
 	*x = TraceEvent{}
-	mi := &file_agent_proto_msgTypes[38]
+	mi := &file_agent_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2675,7 +2832,7 @@ func (x *TraceEvent) String() string {
 func (*TraceEvent) ProtoMessage() {}
 
 func (x *TraceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[38]
+	mi := &file_agent_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2688,7 +2845,7 @@ func (x *TraceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceEvent.ProtoReflect.Descriptor instead.
 func (*TraceEvent) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{38}
+	return file_agent_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *TraceEvent) GetTime() float64 {
@@ -2761,6 +2918,237 @@ func (x *TraceEvent) GetContinuous() bool {
 	return false
 }
 
+func (x *TraceEvent) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+type UploadTraceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobIds        []string               `protobuf:"bytes,1,rep,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"`             // trace job IDs to upload
+	RemotePath    string                 `protobuf:"bytes,2,opt,name=remote_path,json=remotePath,proto3" json:"remote_path,omitempty"` // MinIO path prefix (e.g. "test_2024/trace")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadTraceRequest) Reset() {
+	*x = UploadTraceRequest{}
+	mi := &file_agent_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadTraceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadTraceRequest) ProtoMessage() {}
+
+func (x *UploadTraceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadTraceRequest.ProtoReflect.Descriptor instead.
+func (*UploadTraceRequest) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *UploadTraceRequest) GetJobIds() []string {
+	if x != nil {
+		return x.JobIds
+	}
+	return nil
+}
+
+func (x *UploadTraceRequest) GetRemotePath() string {
+	if x != nil {
+		return x.RemotePath
+	}
+	return ""
+}
+
+type UploadTraceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	UploadedFiles []string               `protobuf:"bytes,3,rep,name=uploaded_files,json=uploadedFiles,proto3" json:"uploaded_files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadTraceResponse) Reset() {
+	*x = UploadTraceResponse{}
+	mi := &file_agent_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadTraceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadTraceResponse) ProtoMessage() {}
+
+func (x *UploadTraceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadTraceResponse.ProtoReflect.Descriptor instead.
+func (*UploadTraceResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *UploadTraceResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UploadTraceResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UploadTraceResponse) GetUploadedFiles() []string {
+	if x != nil {
+		return x.UploadedFiles
+	}
+	return nil
+}
+
+type UploadBenchmarkRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`                // benchmark/scenario job ID
+	RemotePath    string                 `protobuf:"bytes,2,opt,name=remote_path,json=remotePath,proto3" json:"remote_path,omitempty"` // MinIO path prefix (e.g. "test_2024/perf")
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadBenchmarkRequest) Reset() {
+	*x = UploadBenchmarkRequest{}
+	mi := &file_agent_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadBenchmarkRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadBenchmarkRequest) ProtoMessage() {}
+
+func (x *UploadBenchmarkRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadBenchmarkRequest.ProtoReflect.Descriptor instead.
+func (*UploadBenchmarkRequest) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *UploadBenchmarkRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *UploadBenchmarkRequest) GetRemotePath() string {
+	if x != nil {
+		return x.RemotePath
+	}
+	return ""
+}
+
+type UploadBenchmarkResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	UploadedFiles []string               `protobuf:"bytes,3,rep,name=uploaded_files,json=uploadedFiles,proto3" json:"uploaded_files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadBenchmarkResponse) Reset() {
+	*x = UploadBenchmarkResponse{}
+	mi := &file_agent_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadBenchmarkResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadBenchmarkResponse) ProtoMessage() {}
+
+func (x *UploadBenchmarkResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadBenchmarkResponse.ProtoReflect.Descriptor instead.
+func (*UploadBenchmarkResponse) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *UploadBenchmarkResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UploadBenchmarkResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UploadBenchmarkResponse) GetUploadedFiles() []string {
+	if x != nil {
+		return x.UploadedFiles
+	}
+	return nil
+}
+
 type MonitorDevicesRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	DeviceIds       []string               `protobuf:"bytes,1,rep,name=device_ids,json=deviceIds,proto3" json:"device_ids,omitempty"`
@@ -2771,7 +3159,7 @@ type MonitorDevicesRequest struct {
 
 func (x *MonitorDevicesRequest) Reset() {
 	*x = MonitorDevicesRequest{}
-	mi := &file_agent_proto_msgTypes[39]
+	mi := &file_agent_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2783,7 +3171,7 @@ func (x *MonitorDevicesRequest) String() string {
 func (*MonitorDevicesRequest) ProtoMessage() {}
 
 func (x *MonitorDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[39]
+	mi := &file_agent_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2796,7 +3184,7 @@ func (x *MonitorDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MonitorDevicesRequest.ProtoReflect.Descriptor instead.
 func (*MonitorDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{39}
+	return file_agent_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *MonitorDevicesRequest) GetDeviceIds() []string {
@@ -2827,7 +3215,7 @@ type DeviceMetrics struct {
 
 func (x *DeviceMetrics) Reset() {
 	*x = DeviceMetrics{}
-	mi := &file_agent_proto_msgTypes[40]
+	mi := &file_agent_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2839,7 +3227,7 @@ func (x *DeviceMetrics) String() string {
 func (*DeviceMetrics) ProtoMessage() {}
 
 func (x *DeviceMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[40]
+	mi := &file_agent_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2852,7 +3240,7 @@ func (x *DeviceMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceMetrics.ProtoReflect.Descriptor instead.
 func (*DeviceMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{40}
+	return file_agent_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *DeviceMetrics) GetDeviceId() string {
@@ -2907,7 +3295,7 @@ type CpuMetrics struct {
 
 func (x *CpuMetrics) Reset() {
 	*x = CpuMetrics{}
-	mi := &file_agent_proto_msgTypes[41]
+	mi := &file_agent_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2919,7 +3307,7 @@ func (x *CpuMetrics) String() string {
 func (*CpuMetrics) ProtoMessage() {}
 
 func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[41]
+	mi := &file_agent_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2932,7 +3320,7 @@ func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CpuMetrics.ProtoReflect.Descriptor instead.
 func (*CpuMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{41}
+	return file_agent_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *CpuMetrics) GetUsagePercent() float64 {
@@ -2961,7 +3349,7 @@ type MemoryMetrics struct {
 
 func (x *MemoryMetrics) Reset() {
 	*x = MemoryMetrics{}
-	mi := &file_agent_proto_msgTypes[42]
+	mi := &file_agent_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2973,7 +3361,7 @@ func (x *MemoryMetrics) String() string {
 func (*MemoryMetrics) ProtoMessage() {}
 
 func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[42]
+	mi := &file_agent_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2986,7 +3374,7 @@ func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryMetrics.ProtoReflect.Descriptor instead.
 func (*MemoryMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{42}
+	return file_agent_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *MemoryMetrics) GetTotalKb() uint64 {
@@ -3029,7 +3417,7 @@ type DiskMetrics struct {
 
 func (x *DiskMetrics) Reset() {
 	*x = DiskMetrics{}
-	mi := &file_agent_proto_msgTypes[43]
+	mi := &file_agent_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3041,7 +3429,7 @@ func (x *DiskMetrics) String() string {
 func (*DiskMetrics) ProtoMessage() {}
 
 func (x *DiskMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[43]
+	mi := &file_agent_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3054,7 +3442,7 @@ func (x *DiskMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskMetrics.ProtoReflect.Descriptor instead.
 func (*DiskMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{43}
+	return file_agent_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DiskMetrics) GetReadBytes() uint64 {
@@ -3099,7 +3487,7 @@ type FilesystemInfo struct {
 
 func (x *FilesystemInfo) Reset() {
 	*x = FilesystemInfo{}
-	mi := &file_agent_proto_msgTypes[44]
+	mi := &file_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3111,7 +3499,7 @@ func (x *FilesystemInfo) String() string {
 func (*FilesystemInfo) ProtoMessage() {}
 
 func (x *FilesystemInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[44]
+	mi := &file_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3124,7 +3512,7 @@ func (x *FilesystemInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilesystemInfo.ProtoReflect.Descriptor instead.
 func (*FilesystemInfo) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{44}
+	return file_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *FilesystemInfo) GetMountPoint() string {
@@ -3237,7 +3625,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\"N\n" +
 	"\x1aGetBenchmarkResultResponse\x120\n" +
-	"\aresults\x18\x01 \x03(\v2\x16.agent.BenchmarkResultR\aresults\"\xe2\x02\n" +
+	"\aresults\x18\x01 \x03(\v2\x16.agent.BenchmarkResultR\aresults\"\x99\x03\n" +
 	"\x0fBenchmarkResult\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12(\n" +
 	"\x04tool\x18\x02 \x01(\x0e2\x14.agent.BenchmarkToolR\x04tool\x12\x1d\n" +
@@ -3249,10 +3637,22 @@ const file_agent_proto_rawDesc = "" +
 	"\vfinished_at\x18\x06 \x01(\x03R\n" +
 	"finishedAt\x12\x18\n" +
 	"\asuccess\x18\a \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\b \x01(\tR\x05error\x1a:\n" +
+	"\x05error\x18\b \x01(\tR\x05error\x125\n" +
+	"\n" +
+	"trace_jobs\x18\t \x03(\v2\x16.agent.TraceJobMappingR\ttraceJobs\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\")\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"\xb3\x01\n" +
+	"\x0fTraceJobMapping\x12 \n" +
+	"\ftrace_job_id\x18\x01 \x01(\tR\n" +
+	"traceJobId\x12\x1d\n" +
+	"\n" +
+	"step_index\x18\x02 \x01(\x05R\tstepIndex\x12\x1d\n" +
+	"\n" +
+	"loop_index\x18\x03 \x01(\x05R\tloopIndex\x12!\n" +
+	"\frepeat_index\x18\x04 \x01(\x05R\vrepeatIndex\x12\x1d\n" +
+	"\n" +
+	"trace_type\x18\x05 \x01(\tR\ttraceType\")\n" +
 	"\x10DeleteJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11DeleteJobResponse\x12\x18\n" +
@@ -3291,7 +3691,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11StopTraceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xa0\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xc1\x03\n" +
 	"\vTraceFilter\x12\x1d\n" +
 	"\n" +
 	"start_time\x18\x01 \x01(\x01R\tstartTime\x12\x19\n" +
@@ -3309,14 +3709,16 @@ const file_agent_proto_rawDesc = "" +
 	"\x06max_qd\x18\f \x01(\rR\x05maxQd\x12\x19\n" +
 	"\bcpu_list\x18\r \x03(\rR\acpuList\x12\x19\n" +
 	"\bcmd_list\x18\x0e \x03(\tR\acmdList\x12\x1b\n" +
-	"\tsize_list\x18\x0f \x03(\rR\bsizeList\"\x88\x01\n" +
+	"\tsize_list\x18\x0f \x03(\rR\bsizeList\x12\x1f\n" +
+	"\vaction_list\x18\x10 \x03(\tR\n" +
+	"actionList\"\x88\x01\n" +
 	"\x15GetTraceResultRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12*\n" +
 	"\x06filter\x18\x02 \x01(\v2\x12.agent.TraceFilterR\x06filter\x12*\n" +
 	"\x11latency_ranges_ms\x18\x03 \x03(\x01R\x0flatencyRangesMs\"X\n" +
 	"\x16GetTraceResultResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12'\n" +
-	"\x05stats\x18\x02 \x01(\v2\x11.agent.TraceStatsR\x05stats\"\xcd\x04\n" +
+	"\x05stats\x18\x02 \x01(\v2\x11.agent.TraceStatsR\x05stats\"\xf2\x05\n" +
 	"\n" +
 	"TraceStats\x12!\n" +
 	"\ftotal_events\x18\x01 \x01(\x03R\vtotalEvents\x12)\n" +
@@ -3332,7 +3734,12 @@ const file_agent_proto_rawDesc = "" +
 	" \x01(\x03R\x0fcontinuousCount\x12)\n" +
 	"\x10continuous_ratio\x18\v \x01(\x01R\x0fcontinuousRatio\x12#\n" +
 	"\raligned_count\x18\f \x01(\x03R\falignedCount\x12#\n" +
-	"\raligned_ratio\x18\r \x01(\x01R\falignedRatio\"\xe2\x01\n" +
+	"\raligned_ratio\x18\r \x01(\x01R\falignedRatio\x12(\n" +
+	"\x10read_total_bytes\x18\x0e \x01(\x04R\x0ereadTotalBytes\x12*\n" +
+	"\x11write_total_bytes\x18\x0f \x01(\x04R\x0fwriteTotalBytes\x12.\n" +
+	"\x13discard_total_bytes\x18\x10 \x01(\x04R\x11discardTotalBytes\x12\x1d\n" +
+	"\n" +
+	"send_count\x18\x11 \x01(\x03R\tsendCount\"\xe2\x01\n" +
 	"\fLatencyStats\x12\x10\n" +
 	"\x03min\x18\x01 \x01(\x01R\x03min\x12\x10\n" +
 	"\x03max\x18\x02 \x01(\x01R\x03max\x12\x10\n" +
@@ -3344,7 +3751,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x05p9999\x18\b \x01(\x01R\x05p9999\x12\x16\n" +
 	"\x06p99999\x18\t \x01(\x01R\x06p99999\x12\x18\n" +
 	"\ap999999\x18\n" +
-	" \x01(\x01R\ap999999\"\xe8\x01\n" +
+	" \x01(\x01R\ap999999\"\x87\x03\n" +
 	"\bCmdStats\x12\x10\n" +
 	"\x03cmd\x18\x01 \x01(\tR\x03cmd\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x14\n" +
@@ -3352,7 +3759,13 @@ const file_agent_proto_rawDesc = "" +
 	"\x04dtoc\x18\x04 \x01(\v2\x13.agent.LatencyStatsR\x04dtoc\x12'\n" +
 	"\x04ctod\x18\x05 \x01(\v2\x13.agent.LatencyStatsR\x04ctod\x12'\n" +
 	"\x04ctoc\x18\x06 \x01(\v2\x13.agent.LatencyStatsR\x04ctoc\x12#\n" +
-	"\x02qd\x18\a \x01(\v2\x13.agent.LatencyStatsR\x02qd\"w\n" +
+	"\x02qd\x18\a \x01(\v2\x13.agent.LatencyStatsR\x02qd\x12(\n" +
+	"\x10total_size_bytes\x18\b \x01(\x04R\x0etotalSizeBytes\x12)\n" +
+	"\x10continuous_count\x18\t \x01(\x03R\x0fcontinuousCount\x12)\n" +
+	"\x10continuous_ratio\x18\n" +
+	" \x01(\x01R\x0fcontinuousRatio\x12\x1d\n" +
+	"\n" +
+	"send_count\x18\v \x01(\x03R\tsendCount\"w\n" +
 	"\x10LatencyHistogram\x12\x10\n" +
 	"\x03cmd\x18\x01 \x01(\tR\x03cmd\x12!\n" +
 	"\flatency_type\x18\x02 \x01(\tR\vlatencyType\x12.\n" +
@@ -3375,7 +3788,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x0esampled_events\x18\x03 \x01(\x03R\rsampledEvents\x12\x1d\n" +
 	"\n" +
 	"is_sampled\x18\x04 \x01(\bR\tisSampled\x12)\n" +
-	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\"\xd6\x01\n" +
+	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\"\xee\x01\n" +
 	"\n" +
 	"TraceEvent\x12\x12\n" +
 	"\x04time\x18\x01 \x01(\x01R\x04time\x12\x10\n" +
@@ -3390,7 +3803,24 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"continuous\x18\n" +
 	" \x01(\bR\n" +
-	"continuous\"a\n" +
+	"continuous\x12\x16\n" +
+	"\x06action\x18\v \x01(\tR\x06action\"N\n" +
+	"\x12UploadTraceRequest\x12\x17\n" +
+	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12\x1f\n" +
+	"\vremote_path\x18\x02 \x01(\tR\n" +
+	"remotePath\"p\n" +
+	"\x13UploadTraceResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
+	"\x0euploaded_files\x18\x03 \x03(\tR\ruploadedFiles\"P\n" +
+	"\x16UploadBenchmarkRequest\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1f\n" +
+	"\vremote_path\x18\x02 \x01(\tR\n" +
+	"remotePath\"t\n" +
+	"\x17UploadBenchmarkResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
+	"\x0euploaded_files\x18\x03 \x03(\tR\ruploadedFiles\"a\n" +
 	"\x15MonitorDevicesRequest\x12\x1d\n" +
 	"\n" +
 	"device_ids\x18\x01 \x03(\tR\tdeviceIds\x12)\n" +
@@ -3448,7 +3878,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x14JOB_STATE_COLLECTING\x10\x04\x12\x17\n" +
 	"\x13JOB_STATE_COMPLETED\x10\x05\x12\x14\n" +
 	"\x10JOB_STATE_FAILED\x10\x06\x12\x1e\n" +
-	"\x1aJOB_STATE_PARTIALLY_FAILED\x10\a2\xa5\b\n" +
+	"\x1aJOB_STATE_PARTIALLY_FAILED\x10\a2\xcb\t\n" +
 	"\vDeviceAgent\x12D\n" +
 	"\vListDevices\x12\x19.agent.ListDevicesRequest\x1a\x1a.agent.ListDevicesResponse\x12J\n" +
 	"\rConnectDevice\x12\x1b.agent.ConnectDeviceRequest\x1a\x1c.agent.ConnectDeviceResponse\x12S\n" +
@@ -3463,7 +3893,9 @@ const file_agent_proto_rawDesc = "" +
 	"StartTrace\x12\x18.agent.StartTraceRequest\x1a\x19.agent.StartTraceResponse\x12>\n" +
 	"\tStopTrace\x12\x17.agent.StopTraceRequest\x1a\x18.agent.StopTraceResponse\x12M\n" +
 	"\x0eGetTraceResult\x12\x1c.agent.GetTraceResultRequest\x1a\x1d.agent.GetTraceResultResponse\x12P\n" +
-	"\x0fGetTraceRawData\x12\x1d.agent.GetTraceRawDataRequest\x1a\x1e.agent.GetTraceRawDataResponse\x12F\n" +
+	"\x0fGetTraceRawData\x12\x1d.agent.GetTraceRawDataRequest\x1a\x1e.agent.GetTraceRawDataResponse\x12K\n" +
+	"\x12UploadTraceToMinio\x12\x19.agent.UploadTraceRequest\x1a\x1a.agent.UploadTraceResponse\x12W\n" +
+	"\x16UploadBenchmarkToMinio\x12\x1d.agent.UploadBenchmarkRequest\x1a\x1e.agent.UploadBenchmarkResponse\x12F\n" +
 	"\x0eMonitorDevices\x12\x1c.agent.MonitorDevicesRequest\x1a\x14.agent.DeviceMetrics0\x01B\n" +
 	"Z\bagent/pbb\x06proto3"
 
@@ -3480,7 +3912,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_agent_proto_goTypes = []any{
 	(DeviceState)(0),                    // 0: agent.DeviceState
 	(BenchmarkTool)(0),                  // 1: agent.BenchmarkTool
@@ -3502,109 +3934,119 @@ var file_agent_proto_goTypes = []any{
 	(*GetBenchmarkResultRequest)(nil),   // 17: agent.GetBenchmarkResultRequest
 	(*GetBenchmarkResultResponse)(nil),  // 18: agent.GetBenchmarkResultResponse
 	(*BenchmarkResult)(nil),             // 19: agent.BenchmarkResult
-	(*DeleteJobRequest)(nil),            // 20: agent.DeleteJobRequest
-	(*DeleteJobResponse)(nil),           // 21: agent.DeleteJobResponse
-	(*ScenarioStep)(nil),                // 22: agent.ScenarioStep
-	(*ScenarioLoop)(nil),                // 23: agent.ScenarioLoop
-	(*RunScenarioRequest)(nil),          // 24: agent.RunScenarioRequest
-	(*RunScenarioResponse)(nil),         // 25: agent.RunScenarioResponse
-	(*StartTraceRequest)(nil),           // 26: agent.StartTraceRequest
-	(*StartTraceResponse)(nil),          // 27: agent.StartTraceResponse
-	(*StopTraceRequest)(nil),            // 28: agent.StopTraceRequest
-	(*StopTraceResponse)(nil),           // 29: agent.StopTraceResponse
-	(*TraceFilter)(nil),                 // 30: agent.TraceFilter
-	(*GetTraceResultRequest)(nil),       // 31: agent.GetTraceResultRequest
-	(*GetTraceResultResponse)(nil),      // 32: agent.GetTraceResultResponse
-	(*TraceStats)(nil),                  // 33: agent.TraceStats
-	(*LatencyStats)(nil),                // 34: agent.LatencyStats
-	(*CmdStats)(nil),                    // 35: agent.CmdStats
-	(*LatencyHistogram)(nil),            // 36: agent.LatencyHistogram
-	(*LatencyBucket)(nil),               // 37: agent.LatencyBucket
-	(*CmdSizeCount)(nil),                // 38: agent.CmdSizeCount
-	(*GetTraceRawDataRequest)(nil),      // 39: agent.GetTraceRawDataRequest
-	(*GetTraceRawDataResponse)(nil),     // 40: agent.GetTraceRawDataResponse
-	(*TraceEvent)(nil),                  // 41: agent.TraceEvent
-	(*MonitorDevicesRequest)(nil),       // 42: agent.MonitorDevicesRequest
-	(*DeviceMetrics)(nil),               // 43: agent.DeviceMetrics
-	(*CpuMetrics)(nil),                  // 44: agent.CpuMetrics
-	(*MemoryMetrics)(nil),               // 45: agent.MemoryMetrics
-	(*DiskMetrics)(nil),                 // 46: agent.DiskMetrics
-	(*FilesystemInfo)(nil),              // 47: agent.FilesystemInfo
-	nil,                                 // 48: agent.RunBenchmarkRequest.ParamsEntry
-	nil,                                 // 49: agent.JobProgress.MetricsEntry
-	nil,                                 // 50: agent.BenchmarkResult.MetricsEntry
-	nil,                                 // 51: agent.ScenarioStep.ParamsEntry
+	(*TraceJobMapping)(nil),             // 20: agent.TraceJobMapping
+	(*DeleteJobRequest)(nil),            // 21: agent.DeleteJobRequest
+	(*DeleteJobResponse)(nil),           // 22: agent.DeleteJobResponse
+	(*ScenarioStep)(nil),                // 23: agent.ScenarioStep
+	(*ScenarioLoop)(nil),                // 24: agent.ScenarioLoop
+	(*RunScenarioRequest)(nil),          // 25: agent.RunScenarioRequest
+	(*RunScenarioResponse)(nil),         // 26: agent.RunScenarioResponse
+	(*StartTraceRequest)(nil),           // 27: agent.StartTraceRequest
+	(*StartTraceResponse)(nil),          // 28: agent.StartTraceResponse
+	(*StopTraceRequest)(nil),            // 29: agent.StopTraceRequest
+	(*StopTraceResponse)(nil),           // 30: agent.StopTraceResponse
+	(*TraceFilter)(nil),                 // 31: agent.TraceFilter
+	(*GetTraceResultRequest)(nil),       // 32: agent.GetTraceResultRequest
+	(*GetTraceResultResponse)(nil),      // 33: agent.GetTraceResultResponse
+	(*TraceStats)(nil),                  // 34: agent.TraceStats
+	(*LatencyStats)(nil),                // 35: agent.LatencyStats
+	(*CmdStats)(nil),                    // 36: agent.CmdStats
+	(*LatencyHistogram)(nil),            // 37: agent.LatencyHistogram
+	(*LatencyBucket)(nil),               // 38: agent.LatencyBucket
+	(*CmdSizeCount)(nil),                // 39: agent.CmdSizeCount
+	(*GetTraceRawDataRequest)(nil),      // 40: agent.GetTraceRawDataRequest
+	(*GetTraceRawDataResponse)(nil),     // 41: agent.GetTraceRawDataResponse
+	(*TraceEvent)(nil),                  // 42: agent.TraceEvent
+	(*UploadTraceRequest)(nil),          // 43: agent.UploadTraceRequest
+	(*UploadTraceResponse)(nil),         // 44: agent.UploadTraceResponse
+	(*UploadBenchmarkRequest)(nil),      // 45: agent.UploadBenchmarkRequest
+	(*UploadBenchmarkResponse)(nil),     // 46: agent.UploadBenchmarkResponse
+	(*MonitorDevicesRequest)(nil),       // 47: agent.MonitorDevicesRequest
+	(*DeviceMetrics)(nil),               // 48: agent.DeviceMetrics
+	(*CpuMetrics)(nil),                  // 49: agent.CpuMetrics
+	(*MemoryMetrics)(nil),               // 50: agent.MemoryMetrics
+	(*DiskMetrics)(nil),                 // 51: agent.DiskMetrics
+	(*FilesystemInfo)(nil),              // 52: agent.FilesystemInfo
+	nil,                                 // 53: agent.RunBenchmarkRequest.ParamsEntry
+	nil,                                 // 54: agent.JobProgress.MetricsEntry
+	nil,                                 // 55: agent.BenchmarkResult.MetricsEntry
+	nil,                                 // 56: agent.ScenarioStep.ParamsEntry
 }
 var file_agent_proto_depIdxs = []int32{
 	0,  // 0: agent.DeviceInfo.state:type_name -> agent.DeviceState
 	3,  // 1: agent.ListDevicesResponse.devices:type_name -> agent.DeviceInfo
 	1,  // 2: agent.RunBenchmarkRequest.tool:type_name -> agent.BenchmarkTool
-	48, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
+	53, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
 	2,  // 4: agent.GetJobStatusResponse.state:type_name -> agent.JobState
 	14, // 5: agent.GetJobStatusResponse.device_statuses:type_name -> agent.DeviceJobStatus
 	2,  // 6: agent.DeviceJobStatus.state:type_name -> agent.JobState
 	2,  // 7: agent.JobProgress.state:type_name -> agent.JobState
-	49, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
+	54, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
 	19, // 9: agent.GetBenchmarkResultResponse.results:type_name -> agent.BenchmarkResult
 	1,  // 10: agent.BenchmarkResult.tool:type_name -> agent.BenchmarkTool
-	50, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
-	1,  // 12: agent.ScenarioStep.tool:type_name -> agent.BenchmarkTool
-	51, // 13: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
-	22, // 14: agent.RunScenarioRequest.steps:type_name -> agent.ScenarioStep
-	23, // 15: agent.RunScenarioRequest.loops:type_name -> agent.ScenarioLoop
-	30, // 16: agent.GetTraceResultRequest.filter:type_name -> agent.TraceFilter
-	33, // 17: agent.GetTraceResultResponse.stats:type_name -> agent.TraceStats
-	34, // 18: agent.TraceStats.dtoc:type_name -> agent.LatencyStats
-	34, // 19: agent.TraceStats.ctod:type_name -> agent.LatencyStats
-	34, // 20: agent.TraceStats.ctoc:type_name -> agent.LatencyStats
-	34, // 21: agent.TraceStats.qd:type_name -> agent.LatencyStats
-	35, // 22: agent.TraceStats.cmd_stats:type_name -> agent.CmdStats
-	36, // 23: agent.TraceStats.latency_histograms:type_name -> agent.LatencyHistogram
-	38, // 24: agent.TraceStats.cmd_size_counts:type_name -> agent.CmdSizeCount
-	34, // 25: agent.CmdStats.dtoc:type_name -> agent.LatencyStats
-	34, // 26: agent.CmdStats.ctod:type_name -> agent.LatencyStats
-	34, // 27: agent.CmdStats.ctoc:type_name -> agent.LatencyStats
-	34, // 28: agent.CmdStats.qd:type_name -> agent.LatencyStats
-	37, // 29: agent.LatencyHistogram.buckets:type_name -> agent.LatencyBucket
-	30, // 30: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
-	41, // 31: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
-	44, // 32: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
-	45, // 33: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
-	46, // 34: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
-	47, // 35: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
-	4,  // 36: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
-	6,  // 37: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
-	8,  // 38: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
-	10, // 39: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
-	12, // 40: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
-	15, // 41: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
-	17, // 42: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
-	20, // 43: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
-	24, // 44: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
-	26, // 45: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
-	28, // 46: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
-	31, // 47: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
-	39, // 48: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
-	42, // 49: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
-	5,  // 50: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
-	7,  // 51: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
-	9,  // 52: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
-	11, // 53: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
-	13, // 54: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
-	16, // 55: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
-	18, // 56: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
-	21, // 57: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
-	25, // 58: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
-	27, // 59: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
-	29, // 60: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
-	32, // 61: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
-	40, // 62: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
-	43, // 63: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
-	50, // [50:64] is the sub-list for method output_type
-	36, // [36:50] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	55, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
+	20, // 12: agent.BenchmarkResult.trace_jobs:type_name -> agent.TraceJobMapping
+	1,  // 13: agent.ScenarioStep.tool:type_name -> agent.BenchmarkTool
+	56, // 14: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
+	23, // 15: agent.RunScenarioRequest.steps:type_name -> agent.ScenarioStep
+	24, // 16: agent.RunScenarioRequest.loops:type_name -> agent.ScenarioLoop
+	31, // 17: agent.GetTraceResultRequest.filter:type_name -> agent.TraceFilter
+	34, // 18: agent.GetTraceResultResponse.stats:type_name -> agent.TraceStats
+	35, // 19: agent.TraceStats.dtoc:type_name -> agent.LatencyStats
+	35, // 20: agent.TraceStats.ctod:type_name -> agent.LatencyStats
+	35, // 21: agent.TraceStats.ctoc:type_name -> agent.LatencyStats
+	35, // 22: agent.TraceStats.qd:type_name -> agent.LatencyStats
+	36, // 23: agent.TraceStats.cmd_stats:type_name -> agent.CmdStats
+	37, // 24: agent.TraceStats.latency_histograms:type_name -> agent.LatencyHistogram
+	39, // 25: agent.TraceStats.cmd_size_counts:type_name -> agent.CmdSizeCount
+	35, // 26: agent.CmdStats.dtoc:type_name -> agent.LatencyStats
+	35, // 27: agent.CmdStats.ctod:type_name -> agent.LatencyStats
+	35, // 28: agent.CmdStats.ctoc:type_name -> agent.LatencyStats
+	35, // 29: agent.CmdStats.qd:type_name -> agent.LatencyStats
+	38, // 30: agent.LatencyHistogram.buckets:type_name -> agent.LatencyBucket
+	31, // 31: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
+	42, // 32: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
+	49, // 33: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
+	50, // 34: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
+	51, // 35: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
+	52, // 36: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
+	4,  // 37: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
+	6,  // 38: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
+	8,  // 39: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
+	10, // 40: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
+	12, // 41: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
+	15, // 42: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
+	17, // 43: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
+	21, // 44: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
+	25, // 45: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
+	27, // 46: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
+	29, // 47: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
+	32, // 48: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
+	40, // 49: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
+	43, // 50: agent.DeviceAgent.UploadTraceToMinio:input_type -> agent.UploadTraceRequest
+	45, // 51: agent.DeviceAgent.UploadBenchmarkToMinio:input_type -> agent.UploadBenchmarkRequest
+	47, // 52: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
+	5,  // 53: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
+	7,  // 54: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
+	9,  // 55: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
+	11, // 56: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
+	13, // 57: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
+	16, // 58: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
+	18, // 59: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
+	22, // 60: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
+	26, // 61: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
+	28, // 62: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
+	30, // 63: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
+	33, // 64: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
+	41, // 65: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
+	44, // 66: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
+	46, // 67: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
+	48, // 68: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
+	53, // [53:69] is the sub-list for method output_type
+	37, // [37:53] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -3618,7 +4060,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   49,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

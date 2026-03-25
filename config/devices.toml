@@ -1,4 +1,12 @@
 [server]
 port = 50051
 tools_dir = "./tools"
-trace_dir = "/tmp/agent_trace"
+# trace_dir = 미설정 시 $HOME/agent_trace
+trace_grpc_port = 50053
+
+[minio]
+endpoint = "localhost:9000"
+access_key = "minioadmin"
+secret_key = "minioadmin"
+bucket = "agent"
+use_ssl = false

@@ -243,7 +243,7 @@ func (o *Orchestrator) updateDeviceStatusWithResult(job *Job, deviceID string, s
 	})
 }
 
-func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, rawOutput string, metrics map[string]float64, success bool, errMsg string) {
+func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, rawOutput string, metrics map[string]float64, success bool, errMsg string, traceJobs ...*pb.TraceJobMapping) {
 	result := &pb.BenchmarkResult{
 		DeviceId:   deviceID,
 		Tool:       job.Tool,
@@ -253,6 +253,7 @@ func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, r
 		FinishedAt: time.Now().UnixMilli(),
 		Success:    success,
 		Error:      errMsg,
+		TraceJobs:  traceJobs,
 	}
 	job.mu.Lock()
 	job.Results[deviceID] = result

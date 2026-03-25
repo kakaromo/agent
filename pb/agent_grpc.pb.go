@@ -19,20 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DeviceAgent_ListDevices_FullMethodName          = "/agent.DeviceAgent/ListDevices"
-	DeviceAgent_ConnectDevice_FullMethodName        = "/agent.DeviceAgent/ConnectDevice"
-	DeviceAgent_DisconnectDevice_FullMethodName     = "/agent.DeviceAgent/DisconnectDevice"
-	DeviceAgent_RunBenchmark_FullMethodName         = "/agent.DeviceAgent/RunBenchmark"
-	DeviceAgent_GetJobStatus_FullMethodName         = "/agent.DeviceAgent/GetJobStatus"
-	DeviceAgent_SubscribeJobProgress_FullMethodName = "/agent.DeviceAgent/SubscribeJobProgress"
-	DeviceAgent_GetBenchmarkResult_FullMethodName   = "/agent.DeviceAgent/GetBenchmarkResult"
-	DeviceAgent_DeleteJob_FullMethodName            = "/agent.DeviceAgent/DeleteJob"
-	DeviceAgent_RunScenario_FullMethodName          = "/agent.DeviceAgent/RunScenario"
-	DeviceAgent_StartTrace_FullMethodName           = "/agent.DeviceAgent/StartTrace"
-	DeviceAgent_StopTrace_FullMethodName            = "/agent.DeviceAgent/StopTrace"
-	DeviceAgent_GetTraceResult_FullMethodName       = "/agent.DeviceAgent/GetTraceResult"
-	DeviceAgent_GetTraceRawData_FullMethodName      = "/agent.DeviceAgent/GetTraceRawData"
-	DeviceAgent_MonitorDevices_FullMethodName       = "/agent.DeviceAgent/MonitorDevices"
+	DeviceAgent_ListDevices_FullMethodName            = "/agent.DeviceAgent/ListDevices"
+	DeviceAgent_ConnectDevice_FullMethodName          = "/agent.DeviceAgent/ConnectDevice"
+	DeviceAgent_DisconnectDevice_FullMethodName       = "/agent.DeviceAgent/DisconnectDevice"
+	DeviceAgent_RunBenchmark_FullMethodName           = "/agent.DeviceAgent/RunBenchmark"
+	DeviceAgent_GetJobStatus_FullMethodName           = "/agent.DeviceAgent/GetJobStatus"
+	DeviceAgent_SubscribeJobProgress_FullMethodName   = "/agent.DeviceAgent/SubscribeJobProgress"
+	DeviceAgent_GetBenchmarkResult_FullMethodName     = "/agent.DeviceAgent/GetBenchmarkResult"
+	DeviceAgent_DeleteJob_FullMethodName              = "/agent.DeviceAgent/DeleteJob"
+	DeviceAgent_RunScenario_FullMethodName            = "/agent.DeviceAgent/RunScenario"
+	DeviceAgent_StartTrace_FullMethodName             = "/agent.DeviceAgent/StartTrace"
+	DeviceAgent_StopTrace_FullMethodName              = "/agent.DeviceAgent/StopTrace"
+	DeviceAgent_GetTraceResult_FullMethodName         = "/agent.DeviceAgent/GetTraceResult"
+	DeviceAgent_GetTraceRawData_FullMethodName        = "/agent.DeviceAgent/GetTraceRawData"
+	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
+	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
+	DeviceAgent_MonitorDevices_FullMethodName         = "/agent.DeviceAgent/MonitorDevices"
 )
 
 // DeviceAgentClient is the client API for DeviceAgent service.
@@ -56,6 +58,9 @@ type DeviceAgentClient interface {
 	StopTrace(ctx context.Context, in *StopTraceRequest, opts ...grpc.CallOption) (*StopTraceResponse, error)
 	GetTraceResult(ctx context.Context, in *GetTraceResultRequest, opts ...grpc.CallOption) (*GetTraceResultResponse, error)
 	GetTraceRawData(ctx context.Context, in *GetTraceRawDataRequest, opts ...grpc.CallOption) (*GetTraceRawDataResponse, error)
+	// Upload
+	UploadTraceToMinio(ctx context.Context, in *UploadTraceRequest, opts ...grpc.CallOption) (*UploadTraceResponse, error)
+	UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error)
 	// Monitoring
 	MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error)
 }
@@ -207,6 +212,26 @@ func (c *deviceAgentClient) GetTraceRawData(ctx context.Context, in *GetTraceRaw
 	return out, nil
 }
 
+func (c *deviceAgentClient) UploadTraceToMinio(ctx context.Context, in *UploadTraceRequest, opts ...grpc.CallOption) (*UploadTraceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UploadTraceResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_UploadTraceToMinio_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UploadBenchmarkResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_UploadBenchmarkToMinio_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deviceAgentClient) MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &DeviceAgent_ServiceDesc.Streams[1], DeviceAgent_MonitorDevices_FullMethodName, cOpts...)
@@ -247,6 +272,9 @@ type DeviceAgentServer interface {
 	StopTrace(context.Context, *StopTraceRequest) (*StopTraceResponse, error)
 	GetTraceResult(context.Context, *GetTraceResultRequest) (*GetTraceResultResponse, error)
 	GetTraceRawData(context.Context, *GetTraceRawDataRequest) (*GetTraceRawDataResponse, error)
+	// Upload
+	UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error)
+	UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error)
 	// Monitoring
 	MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error
 	mustEmbedUnimplementedDeviceAgentServer()
@@ -297,6 +325,12 @@ func (UnimplementedDeviceAgentServer) GetTraceResult(context.Context, *GetTraceR
 }
 func (UnimplementedDeviceAgentServer) GetTraceRawData(context.Context, *GetTraceRawDataRequest) (*GetTraceRawDataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTraceRawData not implemented")
+}
+func (UnimplementedDeviceAgentServer) UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UploadTraceToMinio not implemented")
+}
+func (UnimplementedDeviceAgentServer) UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UploadBenchmarkToMinio not implemented")
 }
 func (UnimplementedDeviceAgentServer) MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error {
 	return status.Error(codes.Unimplemented, "method MonitorDevices not implemented")
@@ -549,6 +583,42 @@ func _DeviceAgent_GetTraceRawData_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_UploadTraceToMinio_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadTraceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).UploadTraceToMinio(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_UploadTraceToMinio_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).UploadTraceToMinio(ctx, req.(*UploadTraceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_UploadBenchmarkToMinio_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadBenchmarkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).UploadBenchmarkToMinio(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_UploadBenchmarkToMinio_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).UploadBenchmarkToMinio(ctx, req.(*UploadBenchmarkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAgent_MonitorDevices_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(MonitorDevicesRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -614,6 +684,14 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTraceRawData",
 			Handler:    _DeviceAgent_GetTraceRawData_Handler,
+		},
+		{
+			MethodName: "UploadTraceToMinio",
+			Handler:    _DeviceAgent_UploadTraceToMinio_Handler,
+		},
+		{
+			MethodName: "UploadBenchmarkToMinio",
+			Handler:    _DeviceAgent_UploadBenchmarkToMinio_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

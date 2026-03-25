@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"agent/benchmark"
 	"agent/monitor"
 	pb "agent/pb"
+	"agent/storage"
 	"agent/trace"
 )
 
@@ -19,14 +21,16 @@ type DeviceAgentServer struct {
 	orchestrator *benchmark.Orchestrator
 	collector    *monitor.Collector
 	traceMgr     *trace.Manager
+	minioClient  *storage.MinioClient
 }
 
-func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager) *DeviceAgentServer {
+func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient) *DeviceAgentServer {
 	return &DeviceAgentServer{
 		manager:      manager,
 		orchestrator: orchestrator,
 		collector:    collector,
 		traceMgr:     traceMgr,
+		minioClient:  minioClient,
 	}
 }
 
@@ -193,11 +197,11 @@ func (s *DeviceAgentServer) StopTrace(ctx context.Context, req *pb.StopTraceRequ
 }
 
 func (s *DeviceAgentServer) GetTraceResult(ctx context.Context, req *pb.GetTraceResultRequest) (*pb.GetTraceResultResponse, error) {
-	dirs, err := s.collectParquetDirs(req.JobIds)
+	infos, err := s.collectTraceJobInfos(req.JobIds)
 	if err != nil {
 		return nil, err
 	}
-	stats, err := trace.ComputeStats(dirs, req.Filter, req.LatencyRangesMs)
+	stats, err := trace.ComputeStats(infos, req.Filter, req.LatencyRangesMs)
 	if err != nil {
 		return nil, fmt.Errorf("compute stats: %w", err)
 	}
@@ -205,31 +209,93 @@ func (s *DeviceAgentServer) GetTraceResult(ctx context.Context, req *pb.GetTrace
 }
 
 func (s *DeviceAgentServer) GetTraceRawData(ctx context.Context, req *pb.GetTraceRawDataRequest) (*pb.GetTraceRawDataResponse, error) {
-	dirs, err := s.collectParquetDirs(req.JobIds)
+	infos, err := s.collectTraceJobInfos(req.JobIds)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := trace.GetRawData(dirs, req.Filter)
+	resp, err := trace.GetRawData(infos, req.Filter)
 	if err != nil {
 		return nil, fmt.Errorf("get raw data: %w", err)
 	}
 	return resp, nil
 }
 
-// collectParquetDirs resolves job IDs to parquet directories.
-func (s *DeviceAgentServer) collectParquetDirs(jobIDs []string) ([]string, error) {
+// collectTraceJobInfos resolves job IDs to parquet directories and trace types.
+func (s *DeviceAgentServer) collectTraceJobInfos(jobIDs []string) ([]*trace.TraceJobInfo, error) {
 	if len(jobIDs) == 0 {
 		return nil, fmt.Errorf("no job_ids provided")
 	}
-	var dirs []string
+	var infos []*trace.TraceJobInfo
 	for _, id := range jobIDs {
-		dir, err := s.traceMgr.GetParquetDir(id)
+		info, err := s.traceMgr.GetTraceJobInfo(id)
 		if err != nil {
 			return nil, fmt.Errorf("job %s: %w", id, err)
 		}
-		dirs = append(dirs, dir)
+		infos = append(infos, info)
 	}
-	return dirs, nil
+	return infos, nil
+}
+
+// ==================== Upload to MinIO ====================
+
+func (s *DeviceAgentServer) UploadTraceToMinio(ctx context.Context, req *pb.UploadTraceRequest) (*pb.UploadTraceResponse, error) {
+	if s.minioClient == nil {
+		return &pb.UploadTraceResponse{Success: false, Message: "minio not configured"}, nil
+	}
+	if len(req.JobIds) == 0 {
+		return &pb.UploadTraceResponse{Success: false, Message: "no job_ids provided"}, nil
+	}
+
+	var allUploaded []string
+	for _, jobID := range req.JobIds {
+		info, err := s.traceMgr.GetTraceJobInfo(jobID)
+		if err != nil {
+			return &pb.UploadTraceResponse{Success: false, Message: fmt.Sprintf("job %s: %v", jobID, err)}, nil
+		}
+		remotePath := req.RemotePath + "/" + jobID
+		uploaded, err := s.minioClient.UploadParquetFiles(ctx, info.Dir, remotePath)
+		if err != nil {
+			return &pb.UploadTraceResponse{Success: false, Message: fmt.Sprintf("upload %s: %v", jobID, err)}, nil
+		}
+		allUploaded = append(allUploaded, uploaded...)
+	}
+
+	return &pb.UploadTraceResponse{
+		Success:       true,
+		Message:       fmt.Sprintf("uploaded %d files", len(allUploaded)),
+		UploadedFiles: allUploaded,
+	}, nil
+}
+
+func (s *DeviceAgentServer) UploadBenchmarkToMinio(ctx context.Context, req *pb.UploadBenchmarkRequest) (*pb.UploadBenchmarkResponse, error) {
+	if s.minioClient == nil {
+		return &pb.UploadBenchmarkResponse{Success: false, Message: "minio not configured"}, nil
+	}
+
+	results, err := s.orchestrator.GetBenchmarkResults(req.JobId, "")
+	if err != nil {
+		return &pb.UploadBenchmarkResponse{Success: false, Message: err.Error()}, nil
+	}
+
+	var allUploaded []string
+	for _, r := range results {
+		// Upload result as JSON
+		data, err := json.Marshal(r)
+		if err != nil {
+			continue
+		}
+		remotePath := fmt.Sprintf("%s/%s_result.json", req.RemotePath, r.DeviceId)
+		if err := s.minioClient.UploadResultJSON(ctx, data, remotePath); err != nil {
+			return &pb.UploadBenchmarkResponse{Success: false, Message: err.Error()}, nil
+		}
+		allUploaded = append(allUploaded, remotePath)
+	}
+
+	return &pb.UploadBenchmarkResponse{
+		Success:       true,
+		Message:       fmt.Sprintf("uploaded %d files", len(allUploaded)),
+		UploadedFiles: allUploaded,
+	}, nil
 }
 
 // ==================== Monitoring ====================

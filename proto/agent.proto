@@ -24,6 +24,10 @@ service DeviceAgent {
   rpc GetTraceResult(GetTraceResultRequest) returns (GetTraceResultResponse);
   rpc GetTraceRawData(GetTraceRawDataRequest) returns (GetTraceRawDataResponse);
 
+  // Upload
+  rpc UploadTraceToMinio(UploadTraceRequest) returns (UploadTraceResponse);
+  rpc UploadBenchmarkToMinio(UploadBenchmarkRequest) returns (UploadBenchmarkResponse);
+
   // Monitoring
   rpc MonitorDevices(MonitorDevicesRequest) returns (stream DeviceMetrics);
 }
@@ -149,6 +153,15 @@ message BenchmarkResult {
   int64 finished_at = 6;
   bool success = 7;
   string error = 8;
+  repeated TraceJobMapping trace_jobs = 9;
+}
+
+message TraceJobMapping {
+  string trace_job_id = 1;
+  int32 step_index = 2;
+  int32 loop_index = 3;       // 0 = no loop
+  int32 repeat_index = 4;     // 1-based
+  string trace_type = 5;      // "ufs", "block", "both"
 }
 
 message DeleteJobRequest {
@@ -224,6 +237,7 @@ message TraceFilter {
   repeated uint32 cpu_list = 13;
   repeated string cmd_list = 14;
   repeated uint32 size_list = 15;
+  repeated string action_list = 16;   // "send_req", "complete_rsp", "block_rq_issue", "block_rq_complete"
 }
 
 message GetTraceResultRequest {
@@ -238,7 +252,7 @@ message GetTraceResultResponse {
 }
 
 message TraceStats {
-  int64 total_events = 1;
+  int64 total_events = 1;          // send + complete 전체
   double duration_seconds = 2;
   LatencyStats dtoc = 3;
   LatencyStats ctod = 4;
@@ -247,10 +261,14 @@ message TraceStats {
   repeated CmdStats cmd_stats = 7;
   repeated LatencyHistogram latency_histograms = 8;
   repeated CmdSizeCount cmd_size_counts = 9;
-  int64 continuous_count = 10;
+  int64 continuous_count = 10;     // 연속성 true 개수 (send 기준)
   double continuous_ratio = 11;
   int64 aligned_count = 12;
   double aligned_ratio = 13;
+  uint64 read_total_bytes = 14;
+  uint64 write_total_bytes = 15;
+  uint64 discard_total_bytes = 16;
+  int64 send_count = 17;           // send/issue 이벤트 수 (연속성 분모)
 }
 
 message LatencyStats {
@@ -268,12 +286,16 @@ message LatencyStats {
 
 message CmdStats {
   string cmd = 1;
-  int64 count = 2;
+  int64 count = 2;                 // send + complete 전체
   double ratio = 3;
   LatencyStats dtoc = 4;
   LatencyStats ctod = 5;
   LatencyStats ctoc = 6;
   LatencyStats qd = 7;
+  uint64 total_size_bytes = 8;
+  int64 continuous_count = 9;
+  double continuous_ratio = 10;
+  int64 send_count = 11;           // send/issue 이벤트 수
 }
 
 message LatencyHistogram {
@@ -318,6 +340,31 @@ message TraceEvent {
   string cmd = 8;
   uint32 size = 9;
   bool continuous = 10;
+  string action = 11;          // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+}
+
+// ==================== Upload to MinIO ====================
+
+message UploadTraceRequest {
+  repeated string job_ids = 1;     // trace job IDs to upload
+  string remote_path = 2;          // MinIO path prefix (e.g. "test_2024/trace")
+}
+
+message UploadTraceResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string uploaded_files = 3;
+}
+
+message UploadBenchmarkRequest {
+  string job_id = 1;               // benchmark/scenario job ID
+  string remote_path = 2;          // MinIO path prefix (e.g. "test_2024/perf")
+}
+
+message UploadBenchmarkResponse {
+  bool success = 1;
+  string message = 2;
+  repeated string uploaded_files = 3;
 }
 
 // ==================== Monitoring ====================
