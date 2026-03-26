@@ -14,6 +14,7 @@ service DeviceAgent {
   rpc SubscribeJobProgress(SubscribeJobProgressRequest) returns (stream JobProgress);
   rpc GetBenchmarkResult(GetBenchmarkResultRequest) returns (GetBenchmarkResultResponse);
   rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
 
   // Scenario
   rpc RunScenario(RunScenarioRequest) returns (RunScenarioResponse);
@@ -87,6 +88,7 @@ enum JobState {
   JOB_STATE_COMPLETED = 5;
   JOB_STATE_FAILED = 6;
   JOB_STATE_PARTIALLY_FAILED = 7;
+  JOB_STATE_CANCELLED = 8;
 }
 
 message RunBenchmarkRequest {
@@ -94,6 +96,7 @@ message RunBenchmarkRequest {
   BenchmarkTool tool = 2;
   map<string, string> params = 3;
   string job_name = 4;
+  string busy_policy = 5;         // "reject"(기본), "wait", "force"
 }
 
 message RunBenchmarkResponse {
@@ -173,6 +176,15 @@ message DeleteJobResponse {
   string message = 2;
 }
 
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ==================== Scenario ====================
 
 message ScenarioStep {
@@ -193,6 +205,7 @@ message RunScenarioRequest {
   repeated ScenarioStep steps = 3;
   repeated ScenarioLoop loops = 4;
   int32 repeat = 5;                  // 전체 시나리오 반복 (기본 1)
+  string busy_policy = 6;           // "reject"(기본), "wait", "force"
 }
 
 message RunScenarioResponse {

@@ -107,6 +107,14 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		return "", fmt.Errorf("no steps defined")
 	}
 
+	policy := req.BusyPolicy
+	for _, id := range deviceIDs {
+		if err := o.checkDeviceBusy(id, policy); err != nil {
+			return "", err
+		}
+	}
+
+	jobCtx, jobCancel := context.WithCancel(context.Background())
 	jobID := uuid.New().String()
 	job := &Job{
 		ID:             jobID,
@@ -114,6 +122,7 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		State:          pb.JobState_JOB_STATE_QUEUED,
 		DeviceStatuses: make(map[string]*pb.DeviceJobStatus),
 		Results:        make(map[string]*pb.BenchmarkResult),
+		cancelFunc:     jobCancel,
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{
@@ -128,11 +137,11 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 
 	expanded := expandSteps(req.Steps, req.Loops, req.Repeat)
 
-	go o.executeScenario(context.Background(), job, deviceIDs, expanded)
+	go o.executeScenario(jobCtx, job, deviceIDs, expanded, policy)
 	return jobID, nil
 }
 
-func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs []string, steps []expandedStep) {
+func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs []string, steps []expandedStep, policy string) {
 	defer job.closeSubscribers()
 
 	var wg sync.WaitGroup
@@ -140,6 +149,15 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 		wg.Add(1)
 		go func(devID string) {
 			defer wg.Done()
+			if policy == "wait" {
+				lock := o.getDeviceLock(devID)
+				lock.Lock()
+				defer lock.Unlock()
+			}
+			if ctx.Err() != nil {
+				o.updateDeviceStatus(job, devID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+				return
+			}
 			o.runScenarioOnDevice(ctx, job, devID, steps)
 		}(deviceID)
 	}
@@ -191,6 +209,12 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 	var traceJobMappings []*pb.TraceJobMapping
 
 	for i, es := range steps {
+		// Check cancellation
+		if ctx.Err() != nil {
+			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+			o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+			return
+		}
 		progress := int32(float64(i) / float64(totalSteps) * 100)
 		msg := formatStepMessage(es, totalSteps)
 
@@ -255,7 +279,16 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 	step := es.step
 
 	// Auto trace wrapping: if params has trace="on", wrap step with trace start/stop
+	// Skip if trace is already active (manual trace_start/trace_stop in progress)
 	if step.Params["trace"] == "on" && o.traceMgr != nil {
+		if *activeTraceJobID != "" {
+			// Trace already running, skip auto trace and notify user
+			slog.Info("skipping auto trace: trace already active", "active_trace", *activeTraceJobID)
+			out, metrics, err := o.executeStepInner(ctx, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
+			warnMsg := fmt.Sprintf("TRACE_SKIPPED|step=%d|reason=trace already active (%s)", es.stepIndex, *activeTraceJobID)
+			return warnMsg + "\n" + out, metrics, err
+		}
+
 		traceType := step.Params["trace_type"]
 		if traceType == "" {
 			traceType = "ufs"

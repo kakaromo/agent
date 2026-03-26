@@ -28,7 +28,8 @@ type Job struct {
 	DeviceStatuses map[string]*pb.DeviceJobStatus
 	Results        map[string]*pb.BenchmarkResult
 	subscribers    []chan *pb.JobProgress
-	lastProgress   []*pb.JobProgress // history of all progress messages
+	lastProgress   []*pb.JobProgress
+	cancelFunc     context.CancelFunc
 }
 
 func (j *Job) addSubscriber(ch chan *pb.JobProgress) {
@@ -66,18 +67,50 @@ type TraceController interface {
 
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
-	mu       sync.RWMutex
-	jobs     map[string]*Job
-	manager  *adb.Manager
-	toolsDir string
-	traceMgr TraceController
+	mu          sync.RWMutex
+	jobs        map[string]*Job
+	manager     *adb.Manager
+	toolsDir    string
+	traceMgr    TraceController
+	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
 }
 
 func NewOrchestrator(manager *adb.Manager, toolsDir string) *Orchestrator {
 	return &Orchestrator{
-		jobs:     make(map[string]*Job),
-		manager:  manager,
-		toolsDir: toolsDir,
+		jobs:        make(map[string]*Job),
+		manager:     manager,
+		toolsDir:    toolsDir,
+		deviceLocks: make(map[string]*sync.Mutex),
+	}
+}
+
+// getDeviceLock returns a per-device mutex for sequential execution.
+func (o *Orchestrator) getDeviceLock(deviceID string) *sync.Mutex {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.deviceLocks[deviceID]; !ok {
+		o.deviceLocks[deviceID] = &sync.Mutex{}
+	}
+	return o.deviceLocks[deviceID]
+}
+
+// checkDeviceBusy checks if a device is busy and applies the busy policy.
+// Returns error if policy is "reject" and device is busy.
+func (o *Orchestrator) checkDeviceBusy(deviceID, policy string) error {
+	md, err := o.manager.GetDevice(deviceID)
+	if err != nil {
+		return err
+	}
+	if md.State != pb.DeviceState_DEVICE_STATE_BUSY {
+		return nil
+	}
+	switch policy {
+	case "force":
+		return nil // allow concurrent execution
+	case "wait":
+		return nil // will be serialized via device lock
+	default: // "reject" or empty
+		return fmt.Errorf("device %s is busy (use busy_policy='wait' or 'force')", deviceID)
 	}
 }
 
@@ -96,6 +129,15 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 		return "", fmt.Errorf("no online devices available")
 	}
 
+	policy := req.BusyPolicy
+	// Check busy status for all devices
+	for _, id := range deviceIDs {
+		if err := o.checkDeviceBusy(id, policy); err != nil {
+			return "", err
+		}
+	}
+
+	jobCtx, jobCancel := context.WithCancel(context.Background())
 	jobID := uuid.New().String()
 	job := &Job{
 		ID:             jobID,
@@ -105,6 +147,7 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 		State:          pb.JobState_JOB_STATE_QUEUED,
 		DeviceStatuses: make(map[string]*pb.DeviceJobStatus),
 		Results:        make(map[string]*pb.BenchmarkResult),
+		cancelFunc:     jobCancel,
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{
@@ -117,12 +160,11 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 	o.jobs[jobID] = job
 	o.mu.Unlock()
 
-	// Use background context so the job outlives the RPC call
-	go o.executeJob(context.Background(), job, deviceIDs)
+	go o.executeJob(jobCtx, job, deviceIDs, policy)
 	return jobID, nil
 }
 
-func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []string) {
+func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []string, policy string) {
 	defer job.closeSubscribers()
 
 	var wg sync.WaitGroup
@@ -130,6 +172,17 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 		wg.Add(1)
 		go func(devID string) {
 			defer wg.Done()
+			// If wait policy, acquire device lock for sequential execution
+			if policy == "wait" {
+				lock := o.getDeviceLock(devID)
+				lock.Lock()
+				defer lock.Unlock()
+			}
+			// Check cancellation before starting
+			if ctx.Err() != nil {
+				o.updateDeviceStatus(job, devID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+				return
+			}
 			o.runOnDevice(ctx, job, devID)
 		}(deviceID)
 	}
@@ -137,29 +190,37 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 
 	// Determine overall job state
 	job.mu.Lock()
-	completed, failed := 0, 0
+	completed, failed, cancelled := 0, 0, 0
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
 		case pb.JobState_JOB_STATE_COMPLETED:
 			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+		case pb.JobState_JOB_STATE_CANCELLED:
+			cancelled++
 		}
 	}
 	total := len(job.DeviceStatuses)
-	if failed == total {
+	if cancelled == total {
+		job.State = pb.JobState_JOB_STATE_CANCELLED
+	} else if failed == total {
 		job.State = pb.JobState_JOB_STATE_FAILED
-	} else if failed > 0 {
+	} else if failed > 0 || cancelled > 0 {
 		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
 	} else {
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
 	job.mu.Unlock()
 
-	slog.Info("job finished", "job_id", job.ID, "state", job.State, "completed", completed, "failed", failed)
+	slog.Info("job finished", "job_id", job.ID, "state", job.State, "completed", completed, "failed", failed, "cancelled", cancelled)
 }
 
 func (o *Orchestrator) runOnDevice(ctx context.Context, job *Job, deviceID string) {
+	if ctx.Err() != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+		return
+	}
 	md, err := o.manager.GetDevice(deviceID)
 	if err != nil {
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, err.Error(), 0)
@@ -269,6 +330,25 @@ func (o *Orchestrator) GetJob(jobID string) (*Job, error) {
 		return nil, fmt.Errorf("job not found: %s", jobID)
 	}
 	return job, nil
+}
+
+// CancelJob cancels a running job.
+func (o *Orchestrator) CancelJob(jobID string) error {
+	job, err := o.GetJob(jobID)
+	if err != nil {
+		return err
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if job.State != pb.JobState_JOB_STATE_QUEUED && job.State != pb.JobState_JOB_STATE_RUNNING &&
+		job.State != pb.JobState_JOB_STATE_PUSHING_TOOLS && job.State != pb.JobState_JOB_STATE_COLLECTING {
+		return fmt.Errorf("job not running: %s", jobID)
+	}
+	if job.cancelFunc != nil {
+		job.cancelFunc()
+	}
+	slog.Info("job cancel requested", "job_id", jobID)
+	return nil
 }
 
 // DeleteJob deletes a completed/failed job. Returns error if job is still running.

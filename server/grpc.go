@@ -124,6 +124,18 @@ func (s *DeviceAgentServer) GetBenchmarkResult(ctx context.Context, req *pb.GetB
 	return &pb.GetBenchmarkResultResponse{Results: results}, nil
 }
 
+func (s *DeviceAgentServer) CancelJob(ctx context.Context, req *pb.CancelJobRequest) (*pb.CancelJobResponse, error) {
+	// Try benchmark/scenario job
+	if err := s.orchestrator.CancelJob(req.JobId); err == nil {
+		return &pb.CancelJobResponse{Success: true, Message: "cancel requested"}, nil
+	}
+	// Try trace job
+	if err := s.traceMgr.StopTrace(req.JobId); err == nil {
+		return &pb.CancelJobResponse{Success: true, Message: "trace cancelled"}, nil
+	}
+	return &pb.CancelJobResponse{Success: false, Message: "job not found or not running: " + req.JobId}, nil
+}
+
 func (s *DeviceAgentServer) DeleteJob(ctx context.Context, req *pb.DeleteJobRequest) (*pb.DeleteJobResponse, error) {
 	// Try benchmark/scenario job first
 	// Before deleting, extract trace job IDs from results and clean them up

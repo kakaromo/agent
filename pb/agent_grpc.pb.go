@@ -27,6 +27,7 @@ const (
 	DeviceAgent_SubscribeJobProgress_FullMethodName   = "/agent.DeviceAgent/SubscribeJobProgress"
 	DeviceAgent_GetBenchmarkResult_FullMethodName     = "/agent.DeviceAgent/GetBenchmarkResult"
 	DeviceAgent_DeleteJob_FullMethodName              = "/agent.DeviceAgent/DeleteJob"
+	DeviceAgent_CancelJob_FullMethodName              = "/agent.DeviceAgent/CancelJob"
 	DeviceAgent_RunScenario_FullMethodName            = "/agent.DeviceAgent/RunScenario"
 	DeviceAgent_StartTrace_FullMethodName             = "/agent.DeviceAgent/StartTrace"
 	DeviceAgent_StopTrace_FullMethodName              = "/agent.DeviceAgent/StopTrace"
@@ -51,6 +52,7 @@ type DeviceAgentClient interface {
 	SubscribeJobProgress(ctx context.Context, in *SubscribeJobProgressRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[JobProgress], error)
 	GetBenchmarkResult(ctx context.Context, in *GetBenchmarkResultRequest, opts ...grpc.CallOption) (*GetBenchmarkResultResponse, error)
 	DeleteJob(ctx context.Context, in *DeleteJobRequest, opts ...grpc.CallOption) (*DeleteJobResponse, error)
+	CancelJob(ctx context.Context, in *CancelJobRequest, opts ...grpc.CallOption) (*CancelJobResponse, error)
 	// Scenario
 	RunScenario(ctx context.Context, in *RunScenarioRequest, opts ...grpc.CallOption) (*RunScenarioResponse, error)
 	// Trace
@@ -162,6 +164,16 @@ func (c *deviceAgentClient) DeleteJob(ctx context.Context, in *DeleteJobRequest,
 	return out, nil
 }
 
+func (c *deviceAgentClient) CancelJob(ctx context.Context, in *CancelJobRequest, opts ...grpc.CallOption) (*CancelJobResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelJobResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_CancelJob_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deviceAgentClient) RunScenario(ctx context.Context, in *RunScenarioRequest, opts ...grpc.CallOption) (*RunScenarioResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RunScenarioResponse)
@@ -265,6 +277,7 @@ type DeviceAgentServer interface {
 	SubscribeJobProgress(*SubscribeJobProgressRequest, grpc.ServerStreamingServer[JobProgress]) error
 	GetBenchmarkResult(context.Context, *GetBenchmarkResultRequest) (*GetBenchmarkResultResponse, error)
 	DeleteJob(context.Context, *DeleteJobRequest) (*DeleteJobResponse, error)
+	CancelJob(context.Context, *CancelJobRequest) (*CancelJobResponse, error)
 	// Scenario
 	RunScenario(context.Context, *RunScenarioRequest) (*RunScenarioResponse, error)
 	// Trace
@@ -310,6 +323,9 @@ func (UnimplementedDeviceAgentServer) GetBenchmarkResult(context.Context, *GetBe
 }
 func (UnimplementedDeviceAgentServer) DeleteJob(context.Context, *DeleteJobRequest) (*DeleteJobResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteJob not implemented")
+}
+func (UnimplementedDeviceAgentServer) CancelJob(context.Context, *CancelJobRequest) (*CancelJobResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelJob not implemented")
 }
 func (UnimplementedDeviceAgentServer) RunScenario(context.Context, *RunScenarioRequest) (*RunScenarioResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunScenario not implemented")
@@ -493,6 +509,24 @@ func _DeviceAgent_DeleteJob_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_CancelJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelJobRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).CancelJob(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_CancelJob_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).CancelJob(ctx, req.(*CancelJobRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAgent_RunScenario_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RunScenarioRequest)
 	if err := dec(in); err != nil {
@@ -664,6 +698,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteJob",
 			Handler:    _DeviceAgent_DeleteJob_Handler,
+		},
+		{
+			MethodName: "CancelJob",
+			Handler:    _DeviceAgent_CancelJob_Handler,
 		},
 		{
 			MethodName: "RunScenario",
