@@ -5,8 +5,10 @@ go 1.25.7
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/marcboeker/go-duckdb v1.8.5
 	github.com/minio/minio-go/v7 v7.0.99
+	github.com/soheilhy/cmux v0.1.5
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
 )

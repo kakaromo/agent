@@ -171,6 +171,15 @@ func (m *Manager) GetDevice(deviceID string) (*ManagedDevice, error) {
 	return md, nil
 }
 
+// GetDeviceSerial returns the serial for a device ID (implements screen.DeviceResolver).
+func (m *Manager) GetDeviceSerial(deviceID string) (string, error) {
+	md, err := m.GetDevice(deviceID)
+	if err != nil {
+		return "", err
+	}
+	return md.Serial, nil
+}
+
 // GetOnlineDevices returns DeviceIDs of all online devices.
 func (m *Manager) GetOnlineDevices() []string {
 	m.mu.RLock()

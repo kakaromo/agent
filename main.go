@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,10 +17,12 @@ import (
 	"agent/config"
 	"agent/monitor"
 	pb "agent/pb"
+	"agent/screen"
 	"agent/server"
 	"agent/storage"
 	"agent/trace"
 
+	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -39,7 +42,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Discover connected devices via "adb devices"
+	// Discover connected devices
 	mgr := adb.NewManager()
 	slog.Info("scanning connected devices...")
 	mgr.Refresh(ctx)
@@ -65,21 +68,29 @@ func main() {
 		}
 	}
 
+	// Screen streaming (scrcpy)
+	scrcpyMgr := screen.NewManager(cfg.Server.ToolsDir)
+	screenHandler := screen.NewHandler(scrcpyMgr, mgr)
+
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.Port))
 	if err != nil {
 		slog.Error("failed to listen", "error", err)
 		os.Exit(1)
 	}
 
+	// Use cmux to serve gRPC and HTTP/WebSocket on the same port
+	m := cmux.New(lis)
+	grpcLis := m.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpLis := m.Match(cmux.Any())
+
+	// gRPC server
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(64*1024*1024),
 		grpc.MaxSendMsgSize(64*1024*1024),
-		// Keepalive: server pings client every 30s, client must respond within 5s
 		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    30 * time.Second, // ping client every 30s
-			Timeout: 5 * time.Second,  // wait 5s for ping ack
+			Time:    30 * time.Second,
+			Timeout: 5 * time.Second,
 		}),
-		// Enforce client keepalive: allow ping every 10s minimum
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
@@ -89,15 +100,34 @@ func main() {
 	pb.RegisterDeviceAgentServer(grpcServer, agentServer)
 	reflection.Register(grpcServer)
 
+	// HTTP server for WebSocket screen streaming
+	mux := http.NewServeMux()
+	mux.Handle("/ws/screen/", screenHandler)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	httpServer := &http.Server{Handler: mux}
+
+	// Start servers
+	go func() {
+		if err := grpcServer.Serve(grpcLis); err != nil {
+			slog.Error("grpc server error", "error", err)
+		}
+	}()
+	go func() {
+		if err := httpServer.Serve(httpLis); err != nil && err != http.ErrServerClosed {
+			slog.Error("http server error", "error", err)
+		}
+	}()
+
+	// Graceful shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		slog.Info("shutting down, notifying clients...")
+		slog.Info("shutting down...")
 
-		// Give GracefulStop 5 seconds, then force stop
-		// GracefulStop stops accepting new RPCs and waits for existing ones.
-		// Streaming RPCs will receive context cancellation.
 		done := make(chan struct{})
 		go func() {
 			grpcServer.GracefulStop()
@@ -111,13 +141,15 @@ func main() {
 			slog.Warn("graceful shutdown timed out, forcing stop")
 			grpcServer.Stop()
 		}
+
+		httpServer.Close()
 		traceMgr.StopTraceServer()
 		cancel()
 	}()
 
-	slog.Info("gRPC server starting", "port", cfg.Server.Port)
-	if err := grpcServer.Serve(lis); err != nil {
-		slog.Error("server error", "error", err)
+	slog.Info("agent starting", "port", cfg.Server.Port, "services", "gRPC + WebSocket(screen)")
+	if err := m.Serve(); err != nil {
+		slog.Error("cmux serve error", "error", err)
 		os.Exit(1)
 	}
 }
