@@ -137,7 +137,8 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("tracing directory not found on device %s", req.DeviceId)
 	}
 
-	bgCtx := context.Background()
+	setupCtx, setupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer setupCancel()
 
 	jobID := uuid.New().String()
 	outputDir := filepath.Join(m.outputBase, jobID)
@@ -173,8 +174,8 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	m.mu.Unlock()
 
 	// Stop tracing and clear trace buffer
-	md.Device.Shell(bgCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
-	md.Device.Shell(bgCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
+	md.Device.Shell(setupCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
+	md.Device.Shell(setupCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
 
 	// Enable selected events
 	job.notify(&pb.JobProgress{
@@ -186,21 +187,21 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 
 	switch traceType {
 	case "ufs":
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
 	case "block":
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
 	case "both":
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
-		md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
 	}
 
 	// Start tracing
-	md.Device.Shell(bgCtx, fmt.Sprintf("echo 1 > %s/tracing_on", tracingDir))
+	md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/tracing_on", tracingDir))
 
 	// Start adb shell cat trace_pipe → log file
-	adbCtx, adbCancel := context.WithCancel(bgCtx)
+	adbCtx, adbCancel := context.WithCancel(context.Background())
 	logFd, err := os.Create(logFile)
 	if err != nil {
 		adbCancel()
@@ -220,7 +221,7 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	time.Sleep(500 * time.Millisecond)
 
 	// Start realtime parsing via trace CLI client
-	realtimeCtx, realtimeCancel := context.WithCancel(bgCtx)
+	realtimeCtx, realtimeCancel := context.WithCancel(context.Background())
 	traceBin := filepath.Join(m.toolsDir, "trace")
 	realtimeCmd := exec.CommandContext(realtimeCtx, traceBin,
 		"--client", "realtime",
@@ -293,7 +294,8 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	return jobID, nil
 }
 
-// StopTrace stops trace collection and gracefully stops realtime parsing.
+// StopTrace stops trace collection. Device tracing off + adb kill은 동기,
+// parquet 병합/정리는 백그라운드로 처리하여 즉시 리턴.
 func (m *Manager) StopTrace(jobID string) error {
 	job, err := m.GetJob(jobID)
 	if err != nil {
@@ -312,56 +314,88 @@ func (m *Manager) StopTrace(jobID string) error {
 	traceGrpcJobID := job.TraceGrpcJobID
 	job.Mu.Unlock()
 
-	// 1. Disable tracing on device
+	const shellTimeout = 10 * time.Second
+
+	// 1. Disable tracing on device (동기, 타임아웃)
 	if md, err := m.adbMgr.GetDevice(deviceID); err == nil {
-		md.Device.Shell(context.Background(), fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
-		md.Device.Shell(context.Background(), fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
+		shellCtx, shellCancel := context.WithTimeout(context.Background(), shellTimeout)
+		md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
+		md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
+		shellCancel()
 	}
 
-	// 2. Stop adb trace_pipe (so realtime parser gets no more data)
+	// 2. Stop adb trace_pipe (동기)
 	if adbCancel != nil {
 		adbCancel()
 	}
 
-	// Wait for remaining data to flush to log file
+	// 상태를 COLLECTING으로 변경 (분석은 가능하지만 아직 정리 중)
+	job.Mu.Lock()
+	job.State = pb.JobState_JOB_STATE_COLLECTING
+	job.Mu.Unlock()
+
+	slog.Info("trace collection stopped, finalizing in background", "job_id", jobID)
+
+	// 3. 나머지는 백그라운드에서 처리 (parquet 병합, 로그 삭제)
+	go m.finalizeTrace(job, jobID, deviceID, traceGrpcJobID, realtimeCancel)
+
+	return nil
+}
+
+// finalizeTrace handles parquet merge and cleanup in background.
+func (m *Manager) finalizeTrace(job *TraceJob, jobID, deviceID, traceGrpcJobID string, realtimeCancel context.CancelFunc) {
+	const stopTimeout = 10 * time.Second
+
+	// flush 대기
 	time.Sleep(1 * time.Second)
 
-	// 3. Gracefully stop realtime parsing via trace --client stop
+	// graceful stop realtime parser
 	if traceGrpcJobID != "" {
 		traceBin := filepath.Join(m.toolsDir, "trace")
-		stopCmd := exec.Command(traceBin,
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), stopTimeout)
+
+		stopCmd := exec.CommandContext(stopCtx, traceBin,
 			"--client", "stop",
 			"--server", fmt.Sprintf("localhost:%d", m.traceGrpcPort),
 			"--job-id", traceGrpcJobID,
 		)
 		stopCmd.Stdout = io.Discard
 		stopCmd.Stderr = io.Discard
-		if err := stopCmd.Run(); err != nil {
-			slog.Warn("trace --client stop failed, forcing", "error", err, "trace_job", traceGrpcJobID)
-			// Fallback: force kill
-			if realtimeCancel != nil {
-				realtimeCancel()
+
+		done := make(chan error, 1)
+		go func() { done <- stopCmd.Run() }()
+
+		select {
+		case err := <-done:
+			if err != nil {
+				slog.Warn("trace --client stop failed", "error", err, "trace_job", traceGrpcJobID)
+			} else {
+				slog.Info("trace realtime parsing stopped gracefully", "trace_job", traceGrpcJobID)
 			}
-		} else {
-			slog.Info("trace realtime parsing stopped gracefully", "trace_job", traceGrpcJobID)
+		case <-stopCtx.Done():
+			slog.Warn("trace --client stop timed out, forcing", "timeout", stopTimeout, "trace_job", traceGrpcJobID)
+			if stopCmd.Process != nil {
+				stopCmd.Process.Kill()
+			}
 		}
-	} else {
-		// No trace gRPC job_id captured, force kill
-		slog.Warn("no trace gRPC job_id, forcing realtime parser stop")
-		if realtimeCancel != nil {
-			realtimeCancel()
-		}
+		stopCancel()
 	}
 
-	// Wait for realtime parser to finish writing final parquet
-	time.Sleep(1 * time.Second)
+	// force kill if still running
+	if realtimeCancel != nil {
+		realtimeCancel()
+	}
 
-	// Delete raw trace log (large file, parquet is sufficient)
+	// parquet 병합 대기
+	time.Sleep(2 * time.Second)
+
+	// 로그 파일 삭제
 	if fi, err := os.Stat(job.LogFile); err == nil {
 		slog.Info("deleting trace log", "job_id", jobID, "size_bytes", fi.Size())
 		os.Remove(job.LogFile)
 	}
 
+	// 완료 상태
 	job.Mu.Lock()
 	job.State = pb.JobState_JOB_STATE_COMPLETED
 	job.FinishedAt = time.Now().UnixMilli()
@@ -375,8 +409,7 @@ func (m *Manager) StopTrace(jobID string) error {
 	})
 	job.closeSubscribers()
 
-	slog.Info("trace stopped", "job_id", jobID)
-	return nil
+	slog.Info("trace finalized", "job_id", jobID)
 }
 
 func (m *Manager) failJob(job *TraceJob, errMsg string) {

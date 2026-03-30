@@ -19,17 +19,45 @@ const remoteToolDir = "/data/local/tmp"
 
 // Job represents a benchmark job across one or more devices.
 type Job struct {
-	mu             sync.Mutex
-	ID             string
-	Name           string
-	Tool           pb.BenchmarkTool
-	Params         map[string]string
-	State          pb.JobState
-	DeviceStatuses map[string]*pb.DeviceJobStatus
-	Results        map[string]*pb.BenchmarkResult
-	subscribers    []chan *pb.JobProgress
-	lastProgress   []*pb.JobProgress
-	cancelFunc     context.CancelFunc
+	mu                sync.Mutex
+	ID                string
+	Name              string
+	Tool              pb.BenchmarkTool
+	Params            map[string]string
+	State             pb.JobState
+	DeviceStatuses    map[string]*pb.DeviceJobStatus
+	Results           map[string]*pb.BenchmarkResult
+	subscribers       []chan *pb.JobProgress
+	lastProgress      []*pb.JobProgress
+	cancelFunc        context.CancelFunc
+	RetryCount        int32
+	RetryDelaySeconds int32
+	activeTraceIDs    map[string]string // deviceID → trace job ID
+}
+
+func (j *Job) setActiveTrace(deviceID, traceJobID string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.activeTraceIDs == nil {
+		j.activeTraceIDs = make(map[string]string)
+	}
+	j.activeTraceIDs[deviceID] = traceJobID
+}
+
+func (j *Job) clearActiveTrace(deviceID string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	delete(j.activeTraceIDs, deviceID)
+}
+
+func (j *Job) getActiveTraceIDs() map[string]string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	cp := make(map[string]string, len(j.activeTraceIDs))
+	for k, v := range j.activeTraceIDs {
+		cp[k] = v
+	}
+	return cp
 }
 
 func (j *Job) addSubscriber(ch chan *pb.JobProgress) {
@@ -140,14 +168,16 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 	jobCtx, jobCancel := context.WithCancel(context.Background())
 	jobID := uuid.New().String()
 	job := &Job{
-		ID:             jobID,
-		Name:           req.JobName,
-		Tool:           req.Tool,
-		Params:         req.Params,
-		State:          pb.JobState_JOB_STATE_QUEUED,
-		DeviceStatuses: make(map[string]*pb.DeviceJobStatus),
-		Results:        make(map[string]*pb.BenchmarkResult),
-		cancelFunc:     jobCancel,
+		ID:                jobID,
+		Name:              req.JobName,
+		Tool:              req.Tool,
+		Params:            req.Params,
+		State:             pb.JobState_JOB_STATE_QUEUED,
+		DeviceStatuses:    make(map[string]*pb.DeviceJobStatus),
+		Results:           make(map[string]*pb.BenchmarkResult),
+		cancelFunc:        jobCancel,
+		RetryCount:        req.RetryCount,
+		RetryDelaySeconds: req.RetryDelaySeconds,
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{
@@ -183,7 +213,7 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 				o.updateDeviceStatus(job, devID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
 				return
 			}
-			o.runOnDevice(ctx, job, devID)
+			o.runOnDeviceWithRetry(ctx, job, devID)
 		}(deviceID)
 	}
 	wg.Wait()
@@ -214,6 +244,45 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 	job.mu.Unlock()
 
 	slog.Info("job finished", "job_id", job.ID, "state", job.State, "completed", completed, "failed", failed, "cancelled", cancelled)
+}
+
+func (o *Orchestrator) runOnDeviceWithRetry(ctx context.Context, job *Job, deviceID string) {
+	maxAttempts := int(job.RetryCount) + 1
+	delay := time.Duration(job.RetryDelaySeconds) * time.Second
+	if delay <= 0 {
+		delay = 60 * time.Second
+	}
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+			return
+		}
+
+		if attempt > 0 {
+			slog.Info("retrying device", "job_id", job.ID, "device_id", deviceID, "attempt", attempt+1, "max", maxAttempts)
+			// Reset device status for retry
+			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_QUEUED, fmt.Sprintf("retry %d/%d", attempt+1, maxAttempts), 0)
+			time.Sleep(delay)
+		}
+
+		o.runOnDevice(ctx, job, deviceID)
+
+		// Check if device succeeded
+		job.mu.Lock()
+		ds := job.DeviceStatuses[deviceID]
+		succeeded := ds != nil && ds.State == pb.JobState_JOB_STATE_COMPLETED
+		job.mu.Unlock()
+
+		if succeeded {
+			return
+		}
+
+		// If this was the last attempt, keep the failed status
+		if attempt >= maxAttempts-1 {
+			return
+		}
+	}
 }
 
 func (o *Orchestrator) runOnDevice(ctx context.Context, job *Job, deviceID string) {
@@ -338,6 +407,19 @@ func (o *Orchestrator) CancelJob(jobID string) error {
 	if err != nil {
 		return err
 	}
+
+	// Active trace 먼저 정리 (cancel 성공 여부와 관계없이)
+	traceIDs := job.getActiveTraceIDs()
+	for deviceID, traceID := range traceIDs {
+		if o.traceMgr != nil && traceID != "" {
+			slog.Info("stopping trace on job cancel", "job_id", jobID, "device", deviceID, "trace_job", traceID)
+			if stopErr := o.traceMgr.StopTrace(traceID); stopErr != nil {
+				slog.Warn("trace stop on cancel failed", "trace_job", traceID, "error", stopErr)
+			}
+			job.clearActiveTrace(deviceID)
+		}
+	}
+
 	job.mu.Lock()
 	defer job.mu.Unlock()
 	if job.State != pb.JobState_JOB_STATE_QUEUED && job.State != pb.JobState_JOB_STATE_RUNNING &&

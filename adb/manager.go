@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,13 +17,20 @@ import (
 // ManagedDevice holds the ADB device handle and its current state.
 type ManagedDevice struct {
 	Device         *Device
-	DeviceID       string // usb id (e.g. "2-1.1.2") or serial as fallback
+	DeviceID       string
 	Serial         string
-	UsbID          string // usb port path from "adb devices -l"
+	UsbID          string
 	Product        string
 	Model          string
 	AndroidVersion string
-	TracingDir     string // /sys/kernel/tracing or /sys/kernel/debug/tracing
+	Board          string
+	Platform       string
+	Hardware       string
+	CpuAbi         string
+	BuildID        string
+	Manufacturer   string
+	SdkVersion     int32
+	TracingDir     string
 	State          pb.DeviceState
 }
 
@@ -113,6 +121,31 @@ func (m *Manager) Refresh(ctx context.Context) {
 			}
 		}
 
+		// Board info
+		if v, err := dev.GetProp(ctx, "ro.product.board"); err == nil {
+			md.Board = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.board.platform"); err == nil {
+			md.Platform = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.hardware"); err == nil {
+			md.Hardware = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.product.cpu.abi"); err == nil {
+			md.CpuAbi = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.build.display.id"); err == nil {
+			md.BuildID = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.product.manufacturer"); err == nil {
+			md.Manufacturer = v
+		}
+		if v, err := dev.GetProp(ctx, "ro.build.version.sdk"); err == nil {
+			if sdk, err := strconv.Atoi(v); err == nil {
+				md.SdkVersion = int32(sdk)
+			}
+		}
+
 		// Find tracing directory
 		md.TracingDir = findTracingDir(ctx, dev)
 
@@ -121,7 +154,7 @@ func (m *Manager) Refresh(ctx context.Context) {
 			initTracing(ctx, dev, md.TracingDir)
 		}
 
-		slog.Info("device discovered", "device_id", id, "serial", entry.serial, "usb", entry.usbID, "model", md.Model, "android", md.AndroidVersion, "tracing_dir", md.TracingDir)
+		slog.Info("device discovered", "device_id", id, "serial", entry.serial, "usb", entry.usbID, "model", md.Model, "board", md.Board, "platform", md.Platform, "android", md.AndroidVersion)
 		m.devices[id] = md
 	}
 }
@@ -155,6 +188,13 @@ func (m *Manager) ListDevices() []*pb.DeviceInfo {
 			State:          md.State,
 			AndroidVersion: md.AndroidVersion,
 			Model:          md.Model,
+			Board:          md.Board,
+			Platform:       md.Platform,
+			Hardware:       md.Hardware,
+			CpuAbi:         md.CpuAbi,
+			BuildId:        md.BuildID,
+			Manufacturer:   md.Manufacturer,
+			SdkVersion:     md.SdkVersion,
 		})
 	}
 	return result

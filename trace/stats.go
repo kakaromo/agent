@@ -284,7 +284,7 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctoc),
 		min(qd), max(qd), avg(qd), stddev_pop(qd),
 		percentile_cont(0.99) WITHIN GROUP (ORDER BY qd),
-		COALESCE(sum(CAST(size AS BIGINT)), 0) as total_size,
+		COALESCE(sum(CAST(size AS BIGINT)) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as total_size,
 		count(*) FILTER (WHERE continuous = true) as cont_count,
 		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as cont_ratio,
 		count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')) as send_count

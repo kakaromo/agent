@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,9 +136,14 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 	o.jobs[jobID] = job
 	o.mu.Unlock()
 
-	expanded := expandSteps(req.Steps, req.Loops, req.Repeat)
-
-	go o.executeScenario(jobCtx, job, deviceIDs, expanded, policy)
+	if req.HasBranching && len(req.Edges) > 0 {
+		// DAG 실행 모드 (조건 분기 포함)
+		go o.executeScenarioDAG(jobCtx, job, deviceIDs, req.Steps, req.Edges, req.Repeat, policy)
+	} else {
+		// 기존 선형 실행 모드
+		expanded := expandSteps(req.Steps, req.Loops, req.Repeat)
+		go o.executeScenario(jobCtx, job, deviceIDs, expanded, policy)
+	}
 	return jobID, nil
 }
 
@@ -208,6 +214,19 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 	// Collect trace job mappings
 	var traceJobMappings []*pb.TraceJobMapping
 
+	// 종료 시 active trace 정리
+	defer func() {
+		slog.Info("scenario defer cleanup", "activeTraceJobID", activeTraceJobID, "hasTraceMgr", o.traceMgr != nil)
+		if activeTraceJobID != "" && o.traceMgr != nil {
+			slog.Info("cleaning up active trace on scenario end", "trace_job", activeTraceJobID)
+			if err := o.traceMgr.StopTrace(activeTraceJobID); err != nil {
+				slog.Warn("trace cleanup stop failed", "error", err)
+			} else {
+				slog.Info("trace cleanup stop success", "trace_job", activeTraceJobID)
+			}
+		}
+	}()
+
 	for i, es := range steps {
 		// Check cancellation
 		if ctx.Err() != nil {
@@ -220,9 +239,21 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING, msg, progress)
 
+		prevTraceID := activeTraceJobID
 		stepOut, stepMetrics, err := o.executeStep(ctx, md, es, i, stepFiles, deviceID, &activeTraceJobID)
+
+		// trace 상태가 바뀌었으면 job에 등록/해제 (cancel 시 정리용)
+		if activeTraceJobID != prevTraceID {
+			if activeTraceJobID != "" {
+				job.setActiveTrace(deviceID, activeTraceJobID)
+			} else {
+				job.clearActiveTrace(deviceID)
+			}
+		}
+
 		if err != nil {
 			errMsg := fmt.Sprintf("%s failed: %s", msg, err.Error())
+			slog.Error("scenario step failed", "job_id", job.ID, "device", deviceID, "step", es.stepIndex, "type", es.step.Type, "error", err)
 			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, progress)
 			o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg, traceJobMappings...)
 			return
@@ -261,11 +292,14 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 			prefixedMetrics[key] = v
 		}
 
-		// Send step completion with results if benchmark step
-		if len(stepMetrics) > 0 {
-			stepProgress := int32(float64(i+1) / float64(totalSteps) * 100)
+		// Send step completion with results (benchmark 결과 또는 trace 정보 포함)
+		stepProgress := int32(float64(i+1) / float64(totalSteps) * 100)
+		if len(stepMetrics) > 0 || strings.Contains(stepOut, "TRACE_STOP|") || strings.Contains(stepOut, "TRACE_START|") {
 			o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_RUNNING,
 				msg+" completed", stepProgress, prefixedMetrics, stepOut)
+		} else {
+			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING,
+				msg+" completed", stepProgress)
 		}
 	}
 
@@ -277,6 +311,21 @@ const testDir = "/data/local/tmp/test"
 
 func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, es expandedStep, execIndex int, stepFiles map[int]string, deviceID string, activeTraceJobID *string) (string, map[string]float64, error) {
 	step := es.step
+
+	// Loop 변수 치환: 콤마 구분 리스트 값을 loop index로 선택
+	// 예: bs="4k,8k,16k,32k" + loopIndex=2 → bs="8k"
+	// repeat 변수도 지원: size="1G,2G,4G" + repeatIndex=2 → size="2G"
+	if es.loopTotal > 0 || es.repeatTotal > 1 {
+		resolvedParams := make(map[string]string, len(step.Params))
+		for k, v := range step.Params {
+			resolvedParams[k] = resolveLoopVariable(v, es.loopIndex, es.loopTotal, es.repeatIndex, es.repeatTotal)
+		}
+		// 원본 step을 변경하지 않고 복사본 사용
+		stepCopy := *step
+		stepCopy.Params = resolvedParams
+		step = &stepCopy
+		es.step = step
+	}
 
 	// Auto trace wrapping: if params has trace="on", wrap step with trace start/stop
 	// Skip if trace is already active (manual trace_start/trace_stop in progress)
@@ -309,13 +358,18 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 			return "", nil, fmt.Errorf("auto trace start: %w", err)
 		}
 
+		// auto trace의 job ID를 activeTraceJobID에 저장 (defer cleanup용)
+		*activeTraceJobID = traceJobID
+
 		// Execute the actual step
 		out, metrics, stepErr := o.executeStepInner(ctx, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
 
-		// Stop trace regardless of step result
+		// Stop trace regardless of step result or context cancellation
+		slog.Info("stopping auto trace", "trace_job", traceJobID)
 		if stopErr := o.traceMgr.StopTrace(traceJobID); stopErr != nil {
 			slog.Warn("auto trace stop failed", "error", stopErr)
 		}
+		*activeTraceJobID = "" // 정리 완료
 
 		// Prepend/append trace info to output
 		traceStart := fmt.Sprintf("TRACE_START|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
@@ -420,6 +474,10 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, md *adb.ManagedDevi
 		out := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
 			es.loopIndex, es.stepIndex, es.repeatIndex, stoppedID, traceType)
 		return out, nil, nil
+	case "condition":
+		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
+		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)
+		return "CONDITION_SKIPPED (linear mode)", nil, nil
 	default:
 		return "", nil, fmt.Errorf("unknown step type: %s", step.Type)
 	}
@@ -555,4 +613,507 @@ func parseTraceMapping(line string, es expandedStep) *pb.TraceJobMapping {
 		return nil
 	}
 	return m
+}
+
+// ══════════════════════════════════════════════════════════════
+// DAG Execution Mode (조건 분기 지원)
+// ══════════════════════════════════════════════════════════════
+
+func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceIDs []string,
+	steps []*pb.ScenarioStep, edges []*pb.StepEdge, repeat int32, policy string) {
+	defer job.closeSubscribers()
+
+	var wg sync.WaitGroup
+	for _, deviceID := range deviceIDs {
+		wg.Add(1)
+		go func(devID string) {
+			defer wg.Done()
+			if policy == "wait" {
+				lock := o.getDeviceLock(devID)
+				lock.Lock()
+				defer lock.Unlock()
+			}
+			if ctx.Err() != nil {
+				o.updateDeviceStatus(job, devID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+				return
+			}
+			o.runScenarioOnDeviceDAG(ctx, job, devID, steps, edges, repeat)
+		}(deviceID)
+	}
+	wg.Wait()
+
+	// Determine final state (same as linear mode)
+	job.mu.Lock()
+	completed, failed := 0, 0
+	for _, ds := range job.DeviceStatuses {
+		switch ds.State {
+		case pb.JobState_JOB_STATE_COMPLETED:
+			completed++
+		case pb.JobState_JOB_STATE_FAILED:
+			failed++
+		}
+	}
+	total := len(job.DeviceStatuses)
+	if failed == total {
+		job.State = pb.JobState_JOB_STATE_FAILED
+	} else if failed > 0 {
+		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
+	} else {
+		job.State = pb.JobState_JOB_STATE_COMPLETED
+	}
+	job.mu.Unlock()
+
+	slog.Info("scenario DAG finished", "job_id", job.ID, "state", job.State)
+}
+
+func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, deviceID string,
+	steps []*pb.ScenarioStep, edges []*pb.StepEdge, repeat int32) {
+	md, err := o.manager.GetDevice(deviceID)
+	if err != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, err.Error(), 0)
+		return
+	}
+
+	o.manager.SetState(deviceID, pb.DeviceState_DEVICE_STATE_BUSY)
+	defer o.manager.SetState(deviceID, pb.DeviceState_DEVICE_STATE_ONLINE)
+
+	startedAt := time.Now().UnixMilli()
+	var rawOutput strings.Builder
+	allMetrics := make(map[string]float64)
+	stepFiles := make(map[int]string)
+	var activeTraceJobID string
+	var traceJobMappings []*pb.TraceJobMapping
+
+	// 종료 시 active trace 정리
+	defer func() {
+		if activeTraceJobID != "" && o.traceMgr != nil {
+			slog.Info("cleaning up active trace on DAG scenario end", "trace_job", activeTraceJobID)
+			o.traceMgr.StopTrace(activeTraceJobID)
+		}
+	}()
+
+	// Build adjacency: from_step -> [{to_step, label}]
+	type edgeInfo struct {
+		toStep int
+		label  string
+	}
+	adj := make(map[int][]edgeInfo)
+	for _, e := range edges {
+		adj[int(e.FromStep)] = append(adj[int(e.FromStep)], edgeInfo{toStep: int(e.ToStep), label: e.Label})
+	}
+
+	if repeat <= 0 {
+		repeat = 1
+	}
+
+	// Last benchmark metrics (for condition evaluation)
+	lastBenchmarkMetrics := make(map[string]float64)
+
+	totalRepeat := int(repeat)
+	executedSteps := 0
+
+	for ri := 1; ri <= totalRepeat; ri++ {
+		// DAG walk starting from step 0
+		currentStep := 0
+		visited := make(map[int]int) // step -> visit count (for loop detection safety)
+
+		for currentStep >= 0 && currentStep < len(steps) {
+			if ctx.Err() != nil {
+				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+				return
+			}
+
+			visited[currentStep]++
+			if visited[currentStep] > 1000 {
+				errMsg := fmt.Sprintf("infinite loop detected at step %d", currentStep)
+				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, 0)
+				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg, traceJobMappings...)
+				return
+			}
+
+			step := steps[currentStep]
+			executedSteps++
+
+			msg := fmt.Sprintf("repeat %d/%d, step %d: %s", ri, totalRepeat, currentStep, step.Type)
+			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING, msg, 0)
+
+			// Condition node: evaluate and branch
+			if step.Type == "condition" && step.Condition != nil {
+				cond := step.Condition
+				condResult := false
+				condMsg := ""
+
+				// 스토리지 메트릭 수집 (condition 평가 전 항상)
+				dfOut, _ := md.Device.Shell(ctx, "df /data")
+				if storageMetrics := parseDfOutput(dfOut); storageMetrics != nil {
+					for k, v := range storageMetrics {
+						lastBenchmarkMetrics[k] = v
+					}
+				}
+
+				if len(cond.Rules) > 0 {
+					// 복합 조건: rules + logic (and/or)
+					condResult, condMsg = evaluateCompoundCondition(ctx, md, cond, lastBenchmarkMetrics)
+				} else {
+					// 단일 조건 (하위 호환)
+					condResult, condMsg = evaluateSingleRule(ctx, md, cond.Source, cond.MetricKey, cond.Operator, cond.Threshold, cond.ThresholdString, cond.ShellCommand, cond.ExtractPattern, lastBenchmarkMetrics)
+				}
+
+				slog.Info("condition evaluated", "job_id", job.ID, "device", deviceID,
+					"step", currentStep, "result", condResult, "msg", condMsg)
+
+				rawOutput.WriteString(fmt.Sprintf("=== step %d: condition ===\n%s\n", currentStep, condMsg))
+
+				if condResult {
+					currentStep = int(cond.TrueBranchStep)
+				} else {
+					currentStep = int(cond.FalseBranchStep)
+				}
+				continue
+			}
+
+			// Regular step execution
+			es := expandedStep{
+				step:        step,
+				stepIndex:   currentStep,
+				repeatIndex: ri,
+				repeatTotal: totalRepeat,
+			}
+
+			prevTraceID := activeTraceJobID
+			stepOut, stepMetrics, execErr := o.executeStep(ctx, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
+
+			// trace 상태 변경 → job에 등록/해제
+			if activeTraceJobID != prevTraceID {
+				if activeTraceJobID != "" {
+					job.setActiveTrace(deviceID, activeTraceJobID)
+				} else {
+					job.clearActiveTrace(deviceID)
+				}
+			}
+
+			if execErr != nil {
+				errMsg := fmt.Sprintf("step %d (%s) failed: %s", currentStep, step.Type, execErr.Error())
+				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, 0)
+				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg, traceJobMappings...)
+				return
+			}
+
+			// Collect trace mappings
+			if strings.Contains(stepOut, "TRACE_STOP|") {
+				for _, line := range strings.Split(stepOut, "\n") {
+					if strings.HasPrefix(line, "TRACE_STOP|") {
+						mapping := parseTraceMapping(line, es)
+						if mapping != nil {
+							traceJobMappings = append(traceJobMappings, mapping)
+						}
+					}
+				}
+			}
+
+			if stepOut != "" {
+				rawOutput.WriteString(fmt.Sprintf("=== %s ===\n%s\n", msg, stepOut))
+			}
+
+			// Store metrics
+			prefixedMetrics := make(map[string]float64)
+			for k, v := range stepMetrics {
+				prefix := fmt.Sprintf("r%d_step%d_", ri, currentStep)
+				key := prefix + k
+				allMetrics[key] = v
+				prefixedMetrics[key] = v
+			}
+
+			// Send step completion (benchmark 결과 또는 trace 정보)
+			if len(stepMetrics) > 0 || strings.Contains(stepOut, "TRACE_STOP|") || strings.Contains(stepOut, "TRACE_START|") {
+				o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_RUNNING,
+					msg+" completed", 0, prefixedMetrics, stepOut)
+			}
+
+			// Update last benchmark metrics for condition evaluation
+			if step.Type == "benchmark" && len(stepMetrics) > 0 {
+				lastBenchmarkMetrics = stepMetrics
+			}
+
+			// Find next step via edges
+			nextStep := -1
+			outEdges := adj[currentStep]
+			if len(outEdges) > 0 {
+				// For non-condition nodes, take the first (or unlabeled) edge
+				nextStep = outEdges[0].toStep
+			}
+
+			if nextStep < 0 {
+				break // No outgoing edges: end of DAG path
+			}
+			currentStep = nextStep
+		}
+	}
+
+	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())
+	o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, true, "", traceJobMappings...)
+}
+
+// evaluateShellCondition evaluates a shell command output against a condition.
+// Supports:
+//   - 숫자 비교: extract_pattern으로 숫자 추출 → threshold과 비교 (>, <, >=, <=, ==, !=)
+//   - 문자열 비교: contains/!contains로 threshold_string 포함 여부 확인
+//   - 정규식 추출: extract_pattern에 캡처 그룹 → 첫 번째 그룹에서 숫자 추출
+func evaluateShellCondition(output string, cond *pb.ConditionalBranch) (bool, string) {
+	op := cond.Operator
+
+	// 문자열 비교 (contains / !contains)
+	if op == "contains" || op == "!contains" {
+		target := cond.ThresholdString
+		if target == "" {
+			target = fmt.Sprintf("%.0f", cond.Threshold) // fallback
+		}
+		has := strings.Contains(output, target)
+		result := (op == "contains" && has) || (op == "!contains" && !has)
+		msg := fmt.Sprintf("shell: output %q %s %q = %v", truncate(output, 100), op, target, result)
+		return result, msg
+	}
+
+	// 숫자 비교: extract_pattern이 있으면 정규식으로 추출
+	var numStr string
+	if cond.ExtractPattern != "" {
+		re, err := regexp.Compile(cond.ExtractPattern)
+		if err != nil {
+			return false, fmt.Sprintf("shell: invalid extract_pattern: %s", err.Error())
+		}
+		matches := re.FindStringSubmatch(output)
+		if len(matches) >= 2 {
+			numStr = matches[1] // 첫 번째 캡처 그룹
+		} else if len(matches) >= 1 {
+			numStr = matches[0] // 전체 매치
+		}
+	} else {
+		// 패턴 없으면 출력에서 첫 번째 숫자 추출
+		re := regexp.MustCompile(`[-+]?\d*\.?\d+`)
+		if m := re.FindString(output); m != "" {
+			numStr = m
+		}
+	}
+
+	if numStr == "" {
+		return false, fmt.Sprintf("shell: no number found in output %q", truncate(output, 100))
+	}
+
+	val, err := strconv.ParseFloat(strings.TrimSpace(numStr), 64)
+	if err != nil {
+		return false, fmt.Sprintf("shell: cannot parse number %q: %s", numStr, err.Error())
+	}
+
+	result := evaluateCondition(val, op, cond.Threshold)
+	msg := fmt.Sprintf("shell: extracted %.2f from %q, %s %.2f = %v", val, truncate(output, 60), op, cond.Threshold, result)
+	return result, msg
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
+}
+
+// evaluateSingleRule evaluates one condition rule (metric or shell).
+func evaluateSingleRule(ctx context.Context, md *adb.ManagedDevice, source, metricKey, operator string, threshold float64, thresholdString, shellCommand, extractPattern string, metrics map[string]float64) (bool, string) {
+	if source == "" {
+		source = "metric"
+	}
+
+	if source == "shell" {
+		shellOut, shellErr := md.Device.Shell(ctx, shellCommand)
+		if shellErr != nil {
+			return false, fmt.Sprintf("shell error: %s", shellErr.Error())
+		}
+		shellOut = strings.TrimSpace(shellOut)
+		return evaluateShellCondition(shellOut, &pb.ConditionalBranch{
+			Operator: operator, Threshold: threshold, ThresholdString: thresholdString,
+			ExtractPattern: extractPattern,
+		})
+	}
+
+	// metric
+	val, ok := metrics[metricKey]
+	if !ok {
+		return false, fmt.Sprintf("metric %s not found", metricKey)
+	}
+	result := evaluateCondition(val, operator, threshold)
+	return result, fmt.Sprintf("metric: %s=%.2f %s %.2f → %v", metricKey, val, operator, threshold, result)
+}
+
+// evaluateCompoundCondition evaluates multiple rules with AND/OR logic.
+func evaluateCompoundCondition(ctx context.Context, md *adb.ManagedDevice, cond *pb.ConditionalBranch, metrics map[string]float64) (bool, string) {
+	logic := cond.Logic
+	if logic == "" {
+		logic = "and"
+	}
+
+	var msgs []string
+	finalResult := logic == "and" // and: start true, or: start false
+
+	for i, rule := range cond.Rules {
+		result, msg := evaluateSingleRule(ctx, md,
+			rule.Source, rule.MetricKey, rule.Operator,
+			rule.Threshold, rule.ThresholdString,
+			rule.ShellCommand, rule.ExtractPattern, metrics)
+
+		label := fmt.Sprintf("[%d] %s", i+1, msg)
+		msgs = append(msgs, label)
+
+		if logic == "and" {
+			finalResult = finalResult && result
+		} else {
+			finalResult = finalResult || result
+		}
+	}
+
+	summary := fmt.Sprintf("%s(%s) → %v", strings.ToUpper(logic), strings.Join(msgs, "; "), finalResult)
+	return finalResult, summary
+}
+
+func evaluateCondition(value float64, operator string, threshold float64) bool {
+	switch operator {
+	case ">":
+		return value > threshold
+	case "<":
+		return value < threshold
+	case ">=":
+		return value >= threshold
+	case "<=":
+		return value <= threshold
+	case "==":
+		return value == threshold
+	case "!=":
+		return value != threshold
+	default:
+		return false
+	}
+}
+
+// ══════════════════════════════════════════════════════════════
+// Loop Variable Resolution
+// ══════════════════════════════════════════════════════════════
+
+// resolveLoopVariable resolves comma-separated list values by loop/repeat index.
+//
+// Supported patterns:
+//   - "4k,8k,16k,32k"    → loop index로 선택 (1-based, 인덱스 초과 시 마지막 값)
+//   - "{loop}G"           → loop index 숫자로 치환
+//   - "{repeat}G"         → repeat index 숫자로 치환
+//   - "{loop*2}G"         → loop index × 2로 치환
+//   - "4k"                → 변경 없음 (단일 값)
+func resolveLoopVariable(value string, loopIndex, loopTotal, repeatIndex, repeatTotal int) string {
+	// 1. {loop}, {repeat}, {loop*N} 템플릿 치환
+	if strings.Contains(value, "{") {
+		result := value
+		result = strings.ReplaceAll(result, "{loop}", strconv.Itoa(loopIndex))
+		result = strings.ReplaceAll(result, "{repeat}", strconv.Itoa(repeatIndex))
+		result = strings.ReplaceAll(result, "{loop_total}", strconv.Itoa(loopTotal))
+		result = strings.ReplaceAll(result, "{repeat_total}", strconv.Itoa(repeatTotal))
+
+		// {loop*N} 패턴: 예를 들어 {loop*1024} → loopIndex * 1024
+		for {
+			start := strings.Index(result, "{loop*")
+			if start < 0 {
+				break
+			}
+			end := strings.Index(result[start:], "}")
+			if end < 0 {
+				break
+			}
+			expr := result[start+6 : start+end] // "1024" 부분
+			multiplier, err := strconv.Atoi(strings.TrimSpace(expr))
+			if err == nil {
+				computed := loopIndex * multiplier
+				result = result[:start] + strconv.Itoa(computed) + result[start+end+1:]
+			} else {
+				break
+			}
+		}
+
+		// {repeat*N} 패턴
+		for {
+			start := strings.Index(result, "{repeat*")
+			if start < 0 {
+				break
+			}
+			end := strings.Index(result[start:], "}")
+			if end < 0 {
+				break
+			}
+			expr := result[start+8 : start+end]
+			multiplier, err := strconv.Atoi(strings.TrimSpace(expr))
+			if err == nil {
+				computed := repeatIndex * multiplier
+				result = result[:start] + strconv.Itoa(computed) + result[start+end+1:]
+			} else {
+				break
+			}
+		}
+
+		return result
+	}
+
+	// 2. 콤마 구분 리스트 → loop index로 선택
+	if strings.Contains(value, ",") {
+		parts := strings.Split(value, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		idx := 0
+		if loopIndex > 0 {
+			idx = loopIndex - 1 // loopIndex는 1-based
+		} else if repeatIndex > 0 {
+			idx = repeatIndex - 1
+		}
+		if idx >= len(parts) {
+			idx = len(parts) - 1 // 범위 초과 시 마지막 값
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		return parts[idx]
+	}
+
+	// 3. 단일 값 → 그대로
+	return value
+}
+
+// parseDfOutput parses "df /data" output to extract storage metrics.
+// Output format: "Filesystem  1K-blocks  Used  Available  Use%  Mounted on"
+// Returns: data_usage_percent, data_used_gb, data_avail_gb, data_total_gb
+func parseDfOutput(output string) map[string]float64 {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 2 {
+		return nil
+	}
+	// 마지막 줄이 /data 마운트 정보
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		// Use% 필드에서 % 제거
+		usePct := strings.TrimSuffix(fields[4], "%")
+		pct, err := strconv.ParseFloat(usePct, 64)
+		if err != nil {
+			continue
+		}
+
+		// 1K-blocks 단위
+		totalKB, _ := strconv.ParseFloat(fields[1], 64)
+		usedKB, _ := strconv.ParseFloat(fields[2], 64)
+		availKB, _ := strconv.ParseFloat(fields[3], 64)
+
+		return map[string]float64{
+			"data_usage_percent": pct,
+			"data_used_gb":      usedKB / (1024 * 1024),
+			"data_avail_gb":     availKB / (1024 * 1024),
+			"data_total_gb":     totalKB / (1024 * 1024),
+		}
+	}
+	return nil
 }

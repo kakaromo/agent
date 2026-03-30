@@ -48,6 +48,13 @@ message DeviceInfo {
   DeviceState state = 3;
   string android_version = 4;
   string model = 5;
+  string board = 6;              // ro.product.board (e.g. "sun")
+  string platform = 7;           // ro.board.platform (e.g. "sun")
+  string hardware = 8;           // ro.hardware (e.g. "qcom")
+  string cpu_abi = 9;            // ro.product.cpu.abi (e.g. "arm64-v8a")
+  string build_id = 10;          // ro.build.display.id
+  string manufacturer = 11;      // ro.product.manufacturer (e.g. "samsung")
+  int32 sdk_version = 12;        // ro.build.version.sdk
 }
 
 message ListDevicesRequest {}
@@ -97,6 +104,8 @@ message RunBenchmarkRequest {
   map<string, string> params = 3;
   string job_name = 4;
   string busy_policy = 5;         // "reject"(기본), "wait", "force"
+  int32 retry_count = 6;          // 실패 시 재시도 횟수 (0=재시도 없음)
+  int32 retry_delay_seconds = 7;  // 재시도 간격 (기본 60초)
 }
 
 message RunBenchmarkResponse {
@@ -136,6 +145,7 @@ message JobProgress {
   string error = 6;
   map<string, double> metrics = 7;   // benchmark step 완료 시 결과 포함
   string raw_output = 8;             // benchmark step의 raw output
+  int32 retry_attempt = 9;           // 현재 재시도 횟수 (0=첫 시도)
 }
 
 message GetBenchmarkResultRequest {
@@ -188,9 +198,41 @@ message CancelJobResponse {
 // ==================== Scenario ====================
 
 message ScenarioStep {
-  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop"
+  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop", "condition"
   BenchmarkTool tool = 2;            // benchmark일 때 사용
   map<string, string> params = 3;
+  ConditionalBranch condition = 4;   // type="condition"일 때만 사용
+}
+
+message ConditionalBranch {
+  string metric_key = 1;             // 이전 step의 metrics 키 (예: "iops_read", "bw_write")
+  string operator = 2;               // ">", "<", ">=", "<=", "==", "!=", "contains", "!contains"
+  double threshold = 3;              // 숫자 비교 값 (예: 100000)
+  int32 true_branch_step = 4;        // 조건 참일 때 이동할 step index
+  int32 false_branch_step = 5;       // 거짓일 때 이동할 step index
+  string source = 6;                 // "metric"(기본) 또는 "shell"
+  string shell_command = 7;          // source="shell"일 때 실행할 명령어
+  string extract_pattern = 8;        // 정규식으로 결과에서 값 추출 (예: "(\d+)%")
+  string threshold_string = 9;       // 문자열 비교 값 (contains/!contains용)
+  // 복합 조건: rules가 있으면 위 단일 필드 대신 rules를 평가
+  repeated ConditionRule rules = 10;
+  string logic = 11;                 // "and"(기본) 또는 "or"
+}
+
+message ConditionRule {
+  string source = 1;                 // "metric" 또는 "shell"
+  string metric_key = 2;
+  string operator = 3;
+  double threshold = 4;
+  string threshold_string = 5;
+  string shell_command = 6;
+  string extract_pattern = 7;
+}
+
+message StepEdge {
+  int32 from_step = 1;
+  int32 to_step = 2;
+  string label = 3;                  // "true", "false", "" (순차)
 }
 
 message ScenarioLoop {
@@ -206,6 +248,10 @@ message RunScenarioRequest {
   repeated ScenarioLoop loops = 4;
   int32 repeat = 5;                  // 전체 시나리오 반복 (기본 1)
   string busy_policy = 6;           // "reject"(기본), "wait", "force"
+  int32 retry_count = 7;            // 실패 시 재시도 횟수 (0=재시도 없음)
+  int32 retry_delay_seconds = 8;    // 재시도 간격 (기본 60초)
+  bool has_branching = 9;            // true면 DAG 실행 모드 (edges 사용)
+  repeated StepEdge edges = 10;      // DAG 모드용 엣지 목록
 }
 
 message RunScenarioResponse {
