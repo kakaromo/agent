@@ -31,6 +31,13 @@ service DeviceAgent {
 
   // Monitoring
   rpc MonitorDevices(MonitorDevicesRequest) returns (stream DeviceMetrics);
+
+  // App Macro (이벤트 녹화/재생 + OCR)
+  rpc StartRecording(StartRecordingRequest) returns (StartRecordingResponse);
+  rpc StopRecording(StopRecordingRequest) returns (StopRecordingResponse);
+  rpc ReplayMacro(ReplayMacroRequest) returns (ReplayMacroResponse);
+  rpc TakeScreenshot(TakeScreenshotRequest) returns (TakeScreenshotResponse);
+  rpc ScreenshotOcr(ScreenshotOcrRequest) returns (ScreenshotOcrResponse);
 }
 
 // ==================== Device ====================
@@ -198,10 +205,21 @@ message CancelJobResponse {
 // ==================== Scenario ====================
 
 message ScenarioStep {
-  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop", "condition"
+  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop", "condition", "app_macro"
   BenchmarkTool tool = 2;            // benchmark일 때 사용
   map<string, string> params = 3;
   ConditionalBranch condition = 4;   // type="condition"일 때만 사용
+  AppMacroConfig macro = 5;          // type="app_macro"일 때 사용
+}
+
+message AppMacroConfig {
+  int64 macro_id = 1;                 // DB에 저장된 매크로 ID
+  string macro_name = 2;
+  repeated MacroEvent events = 3;     // 인라인 이벤트 (macro_id 없을 때)
+  int32 source_width = 4;
+  int32 source_height = 5;
+  string package_name = 6;            // 앱 패키지명
+  string clear_mode = 7;             // "none"(기본), "force_stop", "clear" (pm clear)
 }
 
 message ConditionalBranch {
@@ -468,4 +486,95 @@ message FilesystemInfo {
   uint64 used_bytes = 4;
   uint64 available_bytes = 5;
   double usage_percent = 6;
+}
+
+// ==================== App Macro ====================
+
+message MacroEvent {
+  int64 t = 1;                         // 녹화 시작 기준 경과시간 (ms)
+  string type = 2;                     // "tap", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"
+  int32 x = 3;                         // tap 좌표
+  int32 y = 4;
+  int32 x2 = 5;                        // swipe 끝 좌표
+  int32 y2 = 6;
+  int32 duration = 7;                  // swipe 지속시간 (ms)
+  int32 keycode = 8;                   // key 이벤트
+  int32 seconds = 9;                   // wait 대기 초
+  string wait_method = 10;             // wait_until: "activity", "ui_text", "screen_stable"
+  string wait_pattern = 11;            // wait_until: 감지할 문자열/정규식
+  int32 timeout = 12;                  // wait_until: 최대 대기 (초)
+  int32 poll_interval = 13;            // wait_until: 확인 간격 (초)
+  string name = 14;                    // screenshot 이름
+  string direction = 15;               // scroll_capture: "down", "up"
+  int32 max_scrolls = 16;              // scroll_capture: 최대 스크롤 횟수
+  int32 scroll_pause = 17;             // scroll_capture: 스크롤 후 대기 (초)
+  string ocr_pattern = 18;             // scroll_capture: OCR 추출 정규식
+  OcrRegion ocr_region = 19;           // screenshot/scroll_capture: OCR 영역 지정
+}
+
+message OcrRegion {
+  int32 x = 1;
+  int32 y = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message StartRecordingRequest {
+  string device_id = 1;
+}
+
+message StartRecordingResponse {
+  bool success = 1;
+  string session_id = 2;
+}
+
+message StopRecordingRequest {
+  string device_id = 1;
+  string session_id = 2;
+}
+
+message StopRecordingResponse {
+  bool success = 1;
+  repeated MacroEvent events = 2;
+  int32 device_width = 3;
+  int32 device_height = 4;
+}
+
+message ReplayMacroRequest {
+  string device_id = 1;
+  repeated MacroEvent events = 2;
+  int32 source_width = 3;              // 녹화 시 해상도
+  int32 source_height = 4;
+  string job_id = 5;                   // 시나리오 job ID (진행 상황 보고용)
+}
+
+message ReplayMacroResponse {
+  bool success = 1;
+  string message = 2;
+  map<string, string> ocr_results = 3; // screenshot name → OCR 텍스트
+  map<string, double> metrics = 4;     // 추출된 숫자 메트릭 (OCR 정규식 매칭)
+}
+
+message TakeScreenshotRequest {
+  string device_id = 1;
+}
+
+message TakeScreenshotResponse {
+  bool success = 1;
+  bytes image_data = 2;                // PNG 이미지 바이트
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message ScreenshotOcrRequest {
+  string device_id = 1;
+  OcrRegion region = 2;                // null이면 전체 화면
+  string extract_pattern = 3;          // 정규식 (빈 문자열이면 전체 텍스트)
+}
+
+message ScreenshotOcrResponse {
+  bool success = 1;
+  string full_text = 2;               // 전체 OCR 텍스트
+  string extracted_value = 3;          // 정규식 매칭 결과
+  bytes image_data = 4;               // 스크린샷 PNG
 }

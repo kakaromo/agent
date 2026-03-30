@@ -8,6 +8,7 @@ import (
 
 	"agent/adb"
 	"agent/benchmark"
+	"agent/macro"
 	"agent/monitor"
 	pb "agent/pb"
 	"agent/storage"
@@ -22,15 +23,17 @@ type DeviceAgentServer struct {
 	collector    *monitor.Collector
 	traceMgr     *trace.Manager
 	minioClient  *storage.MinioClient
+	macroMgr     *macro.Manager
 }
 
-func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient) *DeviceAgentServer {
+func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient, macroMgr *macro.Manager) *DeviceAgentServer {
 	return &DeviceAgentServer{
 		manager:      manager,
 		orchestrator: orchestrator,
 		collector:    collector,
 		traceMgr:     traceMgr,
 		minioClient:  minioClient,
+		macroMgr:     macroMgr,
 	}
 }
 
@@ -338,4 +341,41 @@ func (s *DeviceAgentServer) MonitorDevices(req *pb.MonitorDevicesRequest, stream
 			}
 		}
 	}
+}
+
+// ==================== App Macro ====================
+
+func (s *DeviceAgentServer) StartRecording(ctx context.Context, req *pb.StartRecordingRequest) (*pb.StartRecordingResponse, error) {
+	if s.macroMgr == nil {
+		return &pb.StartRecordingResponse{Success: false}, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.StartRecording(ctx, req)
+}
+
+func (s *DeviceAgentServer) StopRecording(ctx context.Context, req *pb.StopRecordingRequest) (*pb.StopRecordingResponse, error) {
+	if s.macroMgr == nil {
+		return &pb.StopRecordingResponse{Success: false}, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.StopRecording(ctx, req)
+}
+
+func (s *DeviceAgentServer) ReplayMacro(ctx context.Context, req *pb.ReplayMacroRequest) (*pb.ReplayMacroResponse, error) {
+	if s.macroMgr == nil {
+		return nil, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.ReplayMacro(ctx, req)
+}
+
+func (s *DeviceAgentServer) TakeScreenshot(ctx context.Context, req *pb.TakeScreenshotRequest) (*pb.TakeScreenshotResponse, error) {
+	if s.macroMgr == nil {
+		return &pb.TakeScreenshotResponse{Success: false}, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.TakeScreenshot(ctx, req)
+}
+
+func (s *DeviceAgentServer) ScreenshotOcr(ctx context.Context, req *pb.ScreenshotOcrRequest) (*pb.ScreenshotOcrResponse, error) {
+	if s.macroMgr == nil {
+		return &pb.ScreenshotOcrResponse{Success: false}, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.ScreenshotOcr(ctx, req)
 }

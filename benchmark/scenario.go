@@ -474,6 +474,67 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, md *adb.ManagedDevi
 		out := fmt.Sprintf("TRACE_STOP|loop=%d|step=%d|repeat=%d|job_id=%s|trace_type=%s",
 			es.loopIndex, es.stepIndex, es.repeatIndex, stoppedID, traceType)
 		return out, nil, nil
+	case "app_macro":
+		if o.macroMgr == nil {
+			return "", nil, fmt.Errorf("macro manager not configured")
+		}
+		macroConfig := step.Macro
+		if macroConfig == nil {
+			return "", nil, fmt.Errorf("app_macro step missing macro config")
+		}
+		// Build replay request
+		replayReq := &pb.ReplayMacroRequest{
+			DeviceId:     deviceID,
+			Events:       macroConfig.Events,
+			SourceWidth:  macroConfig.SourceWidth,
+			SourceHeight: macroConfig.SourceHeight,
+		}
+		// Initialize device: wake up + home + unlock
+		slog.Info("app_macro: initializing device", "device", deviceID)
+		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP")    // 화면 깨우기
+		time.Sleep(500 * time.Millisecond)
+		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME")      // 홈 화면
+		time.Sleep(500 * time.Millisecond)
+		md.Device.Shell(ctx, "input swipe 540 2000 540 800 300") // 잠금 화면 스와이프 해제
+		time.Sleep(1 * time.Second)
+
+		// Launch app if packageName specified
+		if macroConfig.PackageName != "" {
+			clearMode := macroConfig.ClearMode
+			if clearMode == "" {
+				clearMode = "force_stop" // 기본값
+			}
+			switch clearMode {
+			case "clear":
+				// pm clear: 앱 데이터 + 캐시 전체 초기화 (첫 실행 상태)
+				slog.Info("app_macro: pm clear", "package", macroConfig.PackageName)
+				md.Device.Shell(ctx, fmt.Sprintf("pm clear %s", macroConfig.PackageName))
+				time.Sleep(1 * time.Second)
+			case "force_stop":
+				// 앱만 종료, 데이터 유지
+				md.Device.Shell(ctx, fmt.Sprintf("am force-stop %s", macroConfig.PackageName))
+				time.Sleep(500 * time.Millisecond)
+			case "none":
+				// 아무것도 안 함
+			}
+			md.Device.Shell(ctx, fmt.Sprintf("monkey -p %s -c android.intent.category.LAUNCHER 1", macroConfig.PackageName))
+			time.Sleep(2 * time.Second)
+		}
+		resp, err := o.macroMgr.ReplayMacro(ctx, replayReq)
+		if err != nil {
+			return "", nil, fmt.Errorf("replay macro: %w", err)
+		}
+		// Collect metrics from OCR results
+		metrics := make(map[string]float64)
+		for k, v := range resp.Metrics {
+			metrics[k] = v
+		}
+		var outParts []string
+		outParts = append(outParts, fmt.Sprintf("APP_MACRO|name=%s|success=%t", macroConfig.MacroName, resp.Success))
+		for k, v := range resp.OcrResults {
+			outParts = append(outParts, fmt.Sprintf("OCR|%s=%s", k, v))
+		}
+		return strings.Join(outParts, "\n"), metrics, nil
 	case "condition":
 		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
 		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)

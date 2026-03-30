@@ -15,6 +15,7 @@ import (
 	"agent/adb"
 	"agent/benchmark"
 	"agent/config"
+	"agent/macro"
 	"agent/monitor"
 	pb "agent/pb"
 	"agent/screen"
@@ -72,6 +73,11 @@ func main() {
 	scrcpyMgr := screen.NewManager(cfg.Server.ToolsDir)
 	screenHandler := screen.NewHandler(scrcpyMgr, mgr)
 
+	// App Macro (recording, replay, OCR)
+	macroMgr := macro.NewManager(mgr, scrcpyMgr)
+	orch.SetMacroController(macroMgr)
+	screenHandler.SetRecorder(macroMgr)
+
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.Port))
 	if err != nil {
 		slog.Error("failed to listen", "error", err)
@@ -96,7 +102,7 @@ func main() {
 			PermitWithoutStream: true,
 		}),
 	)
-	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr, minioClient)
+	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr, minioClient, macroMgr)
 	pb.RegisterDeviceAgentServer(grpcServer, agentServer)
 	reflection.Register(grpcServer)
 

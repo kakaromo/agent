@@ -26,10 +26,19 @@ type ControlMessage struct {
 	Scroll *ScrollEvent    `json:"scroll,omitempty"`
 }
 
+// EventRecorder records input events during macro recording.
+type EventRecorder interface {
+	IsRecording(deviceID string) bool
+	RecordTouchEvent(deviceID string, action int, x, y float64, width, height int)
+	RecordKeyEvent(deviceID string, keycode int)
+	RecordScrollEvent(deviceID string, x, y float64, hScroll, vScroll int)
+}
+
 // Handler handles WebSocket connections for screen streaming.
 type Handler struct {
 	scrcpyMgr  *Manager
 	adbManager DeviceResolver
+	recorder   EventRecorder
 }
 
 // DeviceResolver resolves device_id to serial.
@@ -55,6 +64,11 @@ func NewHandler(scrcpyMgr *Manager, resolver DeviceResolver) *Handler {
 		scrcpyMgr:  scrcpyMgr,
 		adbManager: resolver,
 	}
+}
+
+// SetRecorder sets the event recorder for macro recording.
+func (h *Handler) SetRecorder(r EventRecorder) {
+	h.recorder = r
 }
 
 // ServeHTTP handles WebSocket upgrade for /ws/screen/{device_id}
@@ -180,17 +194,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case "touch":
 				if ctrl.Touch != nil {
 					data = EncodeInjectTouchEvent(*ctrl.Touch)
+					// Record for macro
+					if h.recorder != nil && h.recorder.IsRecording(deviceID) {
+						h.recorder.RecordTouchEvent(deviceID, ctrl.Touch.Action,
+							ctrl.Touch.X, ctrl.Touch.Y, ctrl.Touch.Width, ctrl.Touch.Height)
+					}
 				}
 			case "key":
 				if ctrl.Key != nil {
 					data = EncodeInjectKeycode(*ctrl.Key)
+					if h.recorder != nil && h.recorder.IsRecording(deviceID) && ctrl.Key.Action == ActionDown {
+						h.recorder.RecordKeyEvent(deviceID, ctrl.Key.Keycode)
+					}
 				}
 			case "scroll":
 				if ctrl.Scroll != nil {
 					data = EncodeInjectScrollEvent(*ctrl.Scroll)
+					if h.recorder != nil && h.recorder.IsRecording(deviceID) {
+						h.recorder.RecordScrollEvent(deviceID, ctrl.Scroll.X, ctrl.Scroll.Y,
+							ctrl.Scroll.HScroll, ctrl.Scroll.VScroll)
+					}
 				}
 			case "back":
 				data = EncodeBackOrScreenOn(ActionDown)
+				if h.recorder != nil && h.recorder.IsRecording(deviceID) {
+					h.recorder.RecordKeyEvent(deviceID, 4) // KEYCODE_BACK
+				}
 			case "requestSync":
 				// Send cached config + keyframe to reinit decoder
 				select {

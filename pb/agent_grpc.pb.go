@@ -36,6 +36,11 @@ const (
 	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
 	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
 	DeviceAgent_MonitorDevices_FullMethodName         = "/agent.DeviceAgent/MonitorDevices"
+	DeviceAgent_StartRecording_FullMethodName         = "/agent.DeviceAgent/StartRecording"
+	DeviceAgent_StopRecording_FullMethodName          = "/agent.DeviceAgent/StopRecording"
+	DeviceAgent_ReplayMacro_FullMethodName            = "/agent.DeviceAgent/ReplayMacro"
+	DeviceAgent_TakeScreenshot_FullMethodName         = "/agent.DeviceAgent/TakeScreenshot"
+	DeviceAgent_ScreenshotOcr_FullMethodName          = "/agent.DeviceAgent/ScreenshotOcr"
 )
 
 // DeviceAgentClient is the client API for DeviceAgent service.
@@ -65,6 +70,12 @@ type DeviceAgentClient interface {
 	UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error)
 	// Monitoring
 	MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error)
+	// App Macro (이벤트 녹화/재생 + OCR)
+	StartRecording(ctx context.Context, in *StartRecordingRequest, opts ...grpc.CallOption) (*StartRecordingResponse, error)
+	StopRecording(ctx context.Context, in *StopRecordingRequest, opts ...grpc.CallOption) (*StopRecordingResponse, error)
+	ReplayMacro(ctx context.Context, in *ReplayMacroRequest, opts ...grpc.CallOption) (*ReplayMacroResponse, error)
+	TakeScreenshot(ctx context.Context, in *TakeScreenshotRequest, opts ...grpc.CallOption) (*TakeScreenshotResponse, error)
+	ScreenshotOcr(ctx context.Context, in *ScreenshotOcrRequest, opts ...grpc.CallOption) (*ScreenshotOcrResponse, error)
 }
 
 type deviceAgentClient struct {
@@ -263,6 +274,56 @@ func (c *deviceAgentClient) MonitorDevices(ctx context.Context, in *MonitorDevic
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DeviceAgent_MonitorDevicesClient = grpc.ServerStreamingClient[DeviceMetrics]
 
+func (c *deviceAgentClient) StartRecording(ctx context.Context, in *StartRecordingRequest, opts ...grpc.CallOption) (*StartRecordingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartRecordingResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_StartRecording_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) StopRecording(ctx context.Context, in *StopRecordingRequest, opts ...grpc.CallOption) (*StopRecordingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StopRecordingResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_StopRecording_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) ReplayMacro(ctx context.Context, in *ReplayMacroRequest, opts ...grpc.CallOption) (*ReplayMacroResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplayMacroResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_ReplayMacro_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) TakeScreenshot(ctx context.Context, in *TakeScreenshotRequest, opts ...grpc.CallOption) (*TakeScreenshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TakeScreenshotResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_TakeScreenshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) ScreenshotOcr(ctx context.Context, in *ScreenshotOcrRequest, opts ...grpc.CallOption) (*ScreenshotOcrResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScreenshotOcrResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_ScreenshotOcr_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeviceAgentServer is the server API for DeviceAgent service.
 // All implementations must embed UnimplementedDeviceAgentServer
 // for forward compatibility.
@@ -290,6 +351,12 @@ type DeviceAgentServer interface {
 	UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error)
 	// Monitoring
 	MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error
+	// App Macro (이벤트 녹화/재생 + OCR)
+	StartRecording(context.Context, *StartRecordingRequest) (*StartRecordingResponse, error)
+	StopRecording(context.Context, *StopRecordingRequest) (*StopRecordingResponse, error)
+	ReplayMacro(context.Context, *ReplayMacroRequest) (*ReplayMacroResponse, error)
+	TakeScreenshot(context.Context, *TakeScreenshotRequest) (*TakeScreenshotResponse, error)
+	ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error)
 	mustEmbedUnimplementedDeviceAgentServer()
 }
 
@@ -350,6 +417,21 @@ func (UnimplementedDeviceAgentServer) UploadBenchmarkToMinio(context.Context, *U
 }
 func (UnimplementedDeviceAgentServer) MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error {
 	return status.Error(codes.Unimplemented, "method MonitorDevices not implemented")
+}
+func (UnimplementedDeviceAgentServer) StartRecording(context.Context, *StartRecordingRequest) (*StartRecordingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartRecording not implemented")
+}
+func (UnimplementedDeviceAgentServer) StopRecording(context.Context, *StopRecordingRequest) (*StopRecordingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopRecording not implemented")
+}
+func (UnimplementedDeviceAgentServer) ReplayMacro(context.Context, *ReplayMacroRequest) (*ReplayMacroResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReplayMacro not implemented")
+}
+func (UnimplementedDeviceAgentServer) TakeScreenshot(context.Context, *TakeScreenshotRequest) (*TakeScreenshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TakeScreenshot not implemented")
+}
+func (UnimplementedDeviceAgentServer) ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ScreenshotOcr not implemented")
 }
 func (UnimplementedDeviceAgentServer) mustEmbedUnimplementedDeviceAgentServer() {}
 func (UnimplementedDeviceAgentServer) testEmbeddedByValue()                     {}
@@ -664,6 +746,96 @@ func _DeviceAgent_MonitorDevices_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DeviceAgent_MonitorDevicesServer = grpc.ServerStreamingServer[DeviceMetrics]
 
+func _DeviceAgent_StartRecording_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartRecordingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).StartRecording(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_StartRecording_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).StartRecording(ctx, req.(*StartRecordingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_StopRecording_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StopRecordingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).StopRecording(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_StopRecording_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).StopRecording(ctx, req.(*StopRecordingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_ReplayMacro_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplayMacroRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).ReplayMacro(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_ReplayMacro_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).ReplayMacro(ctx, req.(*ReplayMacroRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_TakeScreenshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TakeScreenshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).TakeScreenshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_TakeScreenshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).TakeScreenshot(ctx, req.(*TakeScreenshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_ScreenshotOcr_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScreenshotOcrRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).ScreenshotOcr(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_ScreenshotOcr_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).ScreenshotOcr(ctx, req.(*ScreenshotOcrRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeviceAgent_ServiceDesc is the grpc.ServiceDesc for DeviceAgent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -730,6 +902,26 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UploadBenchmarkToMinio",
 			Handler:    _DeviceAgent_UploadBenchmarkToMinio_Handler,
+		},
+		{
+			MethodName: "StartRecording",
+			Handler:    _DeviceAgent_StartRecording_Handler,
+		},
+		{
+			MethodName: "StopRecording",
+			Handler:    _DeviceAgent_StopRecording_Handler,
+		},
+		{
+			MethodName: "ReplayMacro",
+			Handler:    _DeviceAgent_ReplayMacro_Handler,
+		},
+		{
+			MethodName: "TakeScreenshot",
+			Handler:    _DeviceAgent_TakeScreenshot_Handler,
+		},
+		{
+			MethodName: "ScreenshotOcr",
+			Handler:    _DeviceAgent_ScreenshotOcr_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

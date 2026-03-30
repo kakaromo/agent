@@ -93,6 +93,11 @@ type TraceController interface {
 	StopTrace(jobID string) error
 }
 
+// MacroController interface to avoid circular imports with macro package.
+type MacroController interface {
+	ReplayMacro(ctx context.Context, req *pb.ReplayMacroRequest) (*pb.ReplayMacroResponse, error)
+}
+
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
 	mu          sync.RWMutex
@@ -100,6 +105,7 @@ type Orchestrator struct {
 	manager     *adb.Manager
 	toolsDir    string
 	traceMgr    TraceController
+	macroMgr    MacroController
 	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
 }
 
@@ -145,6 +151,11 @@ func (o *Orchestrator) checkDeviceBusy(deviceID, policy string) error {
 // SetTraceController sets the trace controller for scenario trace_start/trace_stop steps.
 func (o *Orchestrator) SetTraceController(tc TraceController) {
 	o.traceMgr = tc
+}
+
+// SetMacroController sets the macro controller for app_macro steps.
+func (o *Orchestrator) SetMacroController(mc MacroController) {
+	o.macroMgr = mc
 }
 
 // RunBenchmark starts a new benchmark job and returns immediately with a job ID.
