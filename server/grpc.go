@@ -345,6 +345,13 @@ func (s *DeviceAgentServer) MonitorDevices(req *pb.MonitorDevicesRequest, stream
 
 // ==================== App Macro ====================
 
+func (s *DeviceAgentServer) ListInstalledApps(ctx context.Context, req *pb.ListInstalledAppsRequest) (*pb.ListInstalledAppsResponse, error) {
+	if s.macroMgr == nil {
+		return nil, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.ListInstalledApps(ctx, req)
+}
+
 func (s *DeviceAgentServer) StartRecording(ctx context.Context, req *pb.StartRecordingRequest) (*pb.StartRecordingResponse, error) {
 	if s.macroMgr == nil {
 		return &pb.StartRecordingResponse{Success: false}, fmt.Errorf("macro manager not configured")

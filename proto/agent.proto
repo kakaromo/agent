@@ -33,6 +33,7 @@ service DeviceAgent {
   rpc MonitorDevices(MonitorDevicesRequest) returns (stream DeviceMetrics);
 
   // App Macro (이벤트 녹화/재생 + OCR)
+  rpc ListInstalledApps(ListInstalledAppsRequest) returns (ListInstalledAppsResponse);
   rpc StartRecording(StartRecordingRequest) returns (StartRecordingResponse);
   rpc StopRecording(StopRecordingRequest) returns (StopRecordingResponse);
   rpc ReplayMacro(ReplayMacroRequest) returns (ReplayMacroResponse);
@@ -517,6 +518,19 @@ message OcrRegion {
   int32 y = 2;
   int32 width = 3;
   int32 height = 4;
+}
+
+message ListInstalledAppsRequest {
+  string device_id = 1;
+}
+
+message ListInstalledAppsResponse {
+  repeated InstalledApp apps = 1;
+}
+
+message InstalledApp {
+  string package_name = 1;       // com.antutu.ABenchMark
+  string app_name = 2;           // AnTuTu Benchmark
 }
 
 message StartRecordingRequest {

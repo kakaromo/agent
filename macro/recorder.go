@@ -103,6 +103,25 @@ func getDeviceUIText(ctx context.Context, dev *adb.Device, pattern string) (bool
 	return strings.Contains(out, pattern), nil
 }
 
+// getAppLabel retrieves the human-readable app name from dumpsys.
+func getAppLabel(ctx context.Context, dev *adb.Device, packageName string) string {
+	// Try dumpsys package to get the app label
+	out, err := dev.Shell(ctx, fmt.Sprintf("dumpsys package %s | grep 'label=' | head -1", packageName))
+	if err == nil {
+		out = strings.TrimSpace(out)
+		// Format: "label=AnTuTu Benchmark" or similar
+		if idx := strings.Index(out, "label="); idx >= 0 {
+			label := strings.TrimSpace(out[idx+6:])
+			if label != "" {
+				return label
+			}
+		}
+	}
+	// Fallback: use last part of package name
+	parts := strings.Split(packageName, ".")
+	return parts[len(parts)-1]
+}
+
 // tesseractAvailable checks if tesseract is installed.
 func tesseractAvailable() bool {
 	_, err := exec.LookPath("tesseract")

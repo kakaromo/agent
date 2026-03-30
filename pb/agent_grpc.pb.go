@@ -36,6 +36,7 @@ const (
 	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
 	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
 	DeviceAgent_MonitorDevices_FullMethodName         = "/agent.DeviceAgent/MonitorDevices"
+	DeviceAgent_ListInstalledApps_FullMethodName      = "/agent.DeviceAgent/ListInstalledApps"
 	DeviceAgent_StartRecording_FullMethodName         = "/agent.DeviceAgent/StartRecording"
 	DeviceAgent_StopRecording_FullMethodName          = "/agent.DeviceAgent/StopRecording"
 	DeviceAgent_ReplayMacro_FullMethodName            = "/agent.DeviceAgent/ReplayMacro"
@@ -71,6 +72,7 @@ type DeviceAgentClient interface {
 	// Monitoring
 	MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error)
 	// App Macro (이벤트 녹화/재생 + OCR)
+	ListInstalledApps(ctx context.Context, in *ListInstalledAppsRequest, opts ...grpc.CallOption) (*ListInstalledAppsResponse, error)
 	StartRecording(ctx context.Context, in *StartRecordingRequest, opts ...grpc.CallOption) (*StartRecordingResponse, error)
 	StopRecording(ctx context.Context, in *StopRecordingRequest, opts ...grpc.CallOption) (*StopRecordingResponse, error)
 	ReplayMacro(ctx context.Context, in *ReplayMacroRequest, opts ...grpc.CallOption) (*ReplayMacroResponse, error)
@@ -274,6 +276,16 @@ func (c *deviceAgentClient) MonitorDevices(ctx context.Context, in *MonitorDevic
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DeviceAgent_MonitorDevicesClient = grpc.ServerStreamingClient[DeviceMetrics]
 
+func (c *deviceAgentClient) ListInstalledApps(ctx context.Context, in *ListInstalledAppsRequest, opts ...grpc.CallOption) (*ListInstalledAppsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListInstalledAppsResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_ListInstalledApps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deviceAgentClient) StartRecording(ctx context.Context, in *StartRecordingRequest, opts ...grpc.CallOption) (*StartRecordingResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StartRecordingResponse)
@@ -352,6 +364,7 @@ type DeviceAgentServer interface {
 	// Monitoring
 	MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error
 	// App Macro (이벤트 녹화/재생 + OCR)
+	ListInstalledApps(context.Context, *ListInstalledAppsRequest) (*ListInstalledAppsResponse, error)
 	StartRecording(context.Context, *StartRecordingRequest) (*StartRecordingResponse, error)
 	StopRecording(context.Context, *StopRecordingRequest) (*StopRecordingResponse, error)
 	ReplayMacro(context.Context, *ReplayMacroRequest) (*ReplayMacroResponse, error)
@@ -417,6 +430,9 @@ func (UnimplementedDeviceAgentServer) UploadBenchmarkToMinio(context.Context, *U
 }
 func (UnimplementedDeviceAgentServer) MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error {
 	return status.Error(codes.Unimplemented, "method MonitorDevices not implemented")
+}
+func (UnimplementedDeviceAgentServer) ListInstalledApps(context.Context, *ListInstalledAppsRequest) (*ListInstalledAppsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListInstalledApps not implemented")
 }
 func (UnimplementedDeviceAgentServer) StartRecording(context.Context, *StartRecordingRequest) (*StartRecordingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartRecording not implemented")
@@ -746,6 +762,24 @@ func _DeviceAgent_MonitorDevices_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DeviceAgent_MonitorDevicesServer = grpc.ServerStreamingServer[DeviceMetrics]
 
+func _DeviceAgent_ListInstalledApps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListInstalledAppsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).ListInstalledApps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_ListInstalledApps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).ListInstalledApps(ctx, req.(*ListInstalledAppsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAgent_StartRecording_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StartRecordingRequest)
 	if err := dec(in); err != nil {
@@ -902,6 +936,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UploadBenchmarkToMinio",
 			Handler:    _DeviceAgent_UploadBenchmarkToMinio_Handler,
+		},
+		{
+			MethodName: "ListInstalledApps",
+			Handler:    _DeviceAgent_ListInstalledApps_Handler,
 		},
 		{
 			MethodName: "StartRecording",

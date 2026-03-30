@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"agent/adb"
@@ -121,6 +122,40 @@ func (m *Manager) RecordKeyEvent(deviceID string, keycode int) {
 func (m *Manager) RecordScrollEvent(deviceID string, x, y float64, hScroll, vScroll int) {
 	// Convert scroll to swipe gesture
 	// Not directly recorded as scroll — user can add wait/screenshot events manually
+}
+
+// ListInstalledApps returns third-party installed apps on the device.
+func (m *Manager) ListInstalledApps(ctx context.Context, req *pb.ListInstalledAppsRequest) (*pb.ListInstalledAppsResponse, error) {
+	serial, err := m.adbMgr.GetDeviceSerial(req.DeviceId)
+	if err != nil {
+		return nil, fmt.Errorf("device not found: %w", err)
+	}
+
+	dev := adb.NewDevice(serial)
+
+	// Get third-party packages
+	out, err := dev.Shell(ctx, "pm list packages -3")
+	if err != nil {
+		return nil, fmt.Errorf("pm list packages: %w", err)
+	}
+
+	var apps []*pb.InstalledApp
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		pkg := strings.TrimPrefix(line, "package:")
+		if pkg == "" || pkg == line {
+			continue
+		}
+
+		// Get app label
+		label := getAppLabel(ctx, dev, pkg)
+		apps = append(apps, &pb.InstalledApp{
+			PackageName: pkg,
+			AppName:     label,
+		})
+	}
+
+	return &pb.ListInstalledAppsResponse{Apps: apps}, nil
 }
 
 // ReplayMacro replays recorded events on the device using ADB input commands.
