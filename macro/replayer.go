@@ -164,6 +164,7 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 }
 
 // waitUntil polls for a condition until timeout.
+// ui_text/activity: 텍스트가 이미 있으면 사라질 때까지 기다린 후, 다시 나타날 때까지 대기
 func (r *Replayer) waitUntil(ctx context.Context, ev *pb.MacroEvent) error {
 	timeout := time.Duration(ev.Timeout) * time.Second
 	if timeout <= 0 {
@@ -178,6 +179,45 @@ func (r *Replayer) waitUntil(ctx context.Context, ev *pb.MacroEvent) error {
 	pattern := ev.WaitPattern
 	method := ev.WaitMethod
 
+	// Phase 1: 텍스트가 이미 있으면 사라질 때까지 대기 (최대 30초)
+	if method == "ui_text" || method == "activity" {
+		alreadyPresent := false
+		if method == "ui_text" {
+			found, err := getDeviceUIText(ctx, r.dev, pattern)
+			alreadyPresent = err == nil && found
+		} else {
+			focus, err := getDeviceActivityFocus(ctx, r.dev)
+			alreadyPresent = err == nil && pattern != "" && strings.Contains(focus, pattern)
+		}
+
+		if alreadyPresent {
+			slog.Info("wait_until: pattern already present, waiting for it to disappear first", "pattern", pattern)
+			disappearDeadline := time.Now().Add(30 * time.Second)
+			for time.Now().Before(disappearDeadline) {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				time.Sleep(2 * time.Second)
+
+				stillPresent := false
+				if method == "ui_text" {
+					found, err := getDeviceUIText(ctx, r.dev, pattern)
+					stillPresent = err == nil && found
+				} else {
+					focus, err := getDeviceActivityFocus(ctx, r.dev)
+					stillPresent = err == nil && pattern != "" && strings.Contains(focus, pattern)
+				}
+				if !stillPresent {
+					slog.Info("wait_until: pattern disappeared, now waiting for reappearance", "pattern", pattern)
+					break
+				}
+			}
+		}
+	}
+
+	// Phase 2: 텍스트가 나타날 때까지 대기
 	// For screen_stable: track previous screenshot hash
 	var prevScreenHash string
 
