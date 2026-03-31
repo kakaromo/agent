@@ -1,5 +1,7 @@
 # Binary
 agent
+agent.exe
+dist/
 
 # Tools (ARM64 binaries, too large for git)
 tools/fio

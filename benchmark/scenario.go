@@ -321,9 +321,12 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 			resolvedParams[k] = resolveLoopVariable(v, es.loopIndex, es.loopTotal, es.repeatIndex, es.repeatTotal)
 		}
 		// 원본 step을 변경하지 않고 복사본 사용
-		stepCopy := *step
-		stepCopy.Params = resolvedParams
-		step = &stepCopy
+		stepCopy := &pb.ScenarioStep{
+			Type:   step.Type,
+			Tool:   step.Tool,
+			Params: resolvedParams,
+		}
+		step = stepCopy
 		es.step = step
 	}
 

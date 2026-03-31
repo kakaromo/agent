@@ -130,7 +130,7 @@ func main() {
 	// Graceful shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
 		slog.Info("shutting down...")
 
