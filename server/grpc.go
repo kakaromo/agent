@@ -242,6 +242,15 @@ func (s *DeviceAgentServer) collectTraceJobInfos(jobIDs []string) ([]*trace.Trac
 	}
 	var infos []*trace.TraceJobInfo
 	for _, id := range jobIDs {
+		// REPARSING 중이면 쿼리 차단
+		if job, err := s.traceMgr.GetJob(id); err == nil {
+			job.Mu.Lock()
+			state := job.State
+			job.Mu.Unlock()
+			if state == pb.JobState_JOB_STATE_REPARSING {
+				return nil, fmt.Errorf("job %s is currently being reparsed", id)
+			}
+		}
 		info, err := s.traceMgr.GetTraceJobInfo(id)
 		if err != nil {
 			return nil, fmt.Errorf("job %s: %w", id, err)
@@ -385,4 +394,13 @@ func (s *DeviceAgentServer) ScreenshotOcr(ctx context.Context, req *pb.Screensho
 		return &pb.ScreenshotOcrResponse{Success: false}, fmt.Errorf("macro manager not configured")
 	}
 	return s.macroMgr.ScreenshotOcr(ctx, req)
+}
+
+// ==================== Trace Reparse ====================
+
+func (s *DeviceAgentServer) ReparseTrace(ctx context.Context, req *pb.ReparseTraceRequest) (*pb.ReparseTraceResponse, error) {
+	if err := s.traceMgr.ReparseTrace(req.JobId); err != nil {
+		return &pb.ReparseTraceResponse{Success: false, Message: err.Error()}, nil
+	}
+	return &pb.ReparseTraceResponse{Success: true, Message: "reparse started"}, nil
 }

@@ -42,6 +42,7 @@ const (
 	DeviceAgent_ReplayMacro_FullMethodName            = "/agent.DeviceAgent/ReplayMacro"
 	DeviceAgent_TakeScreenshot_FullMethodName         = "/agent.DeviceAgent/TakeScreenshot"
 	DeviceAgent_ScreenshotOcr_FullMethodName          = "/agent.DeviceAgent/ScreenshotOcr"
+	DeviceAgent_ReparseTrace_FullMethodName           = "/agent.DeviceAgent/ReparseTrace"
 )
 
 // DeviceAgentClient is the client API for DeviceAgent service.
@@ -78,6 +79,8 @@ type DeviceAgentClient interface {
 	ReplayMacro(ctx context.Context, in *ReplayMacroRequest, opts ...grpc.CallOption) (*ReplayMacroResponse, error)
 	TakeScreenshot(ctx context.Context, in *TakeScreenshotRequest, opts ...grpc.CallOption) (*TakeScreenshotResponse, error)
 	ScreenshotOcr(ctx context.Context, in *ScreenshotOcrRequest, opts ...grpc.CallOption) (*ScreenshotOcrResponse, error)
+	// Trace Reparse
+	ReparseTrace(ctx context.Context, in *ReparseTraceRequest, opts ...grpc.CallOption) (*ReparseTraceResponse, error)
 }
 
 type deviceAgentClient struct {
@@ -336,6 +339,16 @@ func (c *deviceAgentClient) ScreenshotOcr(ctx context.Context, in *ScreenshotOcr
 	return out, nil
 }
 
+func (c *deviceAgentClient) ReparseTrace(ctx context.Context, in *ReparseTraceRequest, opts ...grpc.CallOption) (*ReparseTraceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReparseTraceResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_ReparseTrace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeviceAgentServer is the server API for DeviceAgent service.
 // All implementations must embed UnimplementedDeviceAgentServer
 // for forward compatibility.
@@ -370,6 +383,8 @@ type DeviceAgentServer interface {
 	ReplayMacro(context.Context, *ReplayMacroRequest) (*ReplayMacroResponse, error)
 	TakeScreenshot(context.Context, *TakeScreenshotRequest) (*TakeScreenshotResponse, error)
 	ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error)
+	// Trace Reparse
+	ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error)
 	mustEmbedUnimplementedDeviceAgentServer()
 }
 
@@ -448,6 +463,9 @@ func (UnimplementedDeviceAgentServer) TakeScreenshot(context.Context, *TakeScree
 }
 func (UnimplementedDeviceAgentServer) ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ScreenshotOcr not implemented")
+}
+func (UnimplementedDeviceAgentServer) ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReparseTrace not implemented")
 }
 func (UnimplementedDeviceAgentServer) mustEmbedUnimplementedDeviceAgentServer() {}
 func (UnimplementedDeviceAgentServer) testEmbeddedByValue()                     {}
@@ -870,6 +888,24 @@ func _DeviceAgent_ScreenshotOcr_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_ReparseTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReparseTraceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).ReparseTrace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_ReparseTrace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).ReparseTrace(ctx, req.(*ReparseTraceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeviceAgent_ServiceDesc is the grpc.ServiceDesc for DeviceAgent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -960,6 +996,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ScreenshotOcr",
 			Handler:    _DeviceAgent_ScreenshotOcr_Handler,
+		},
+		{
+			MethodName: "ReparseTrace",
+			Handler:    _DeviceAgent_ReparseTrace_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -389,10 +389,9 @@ func (m *Manager) finalizeTrace(job *TraceJob, jobID, deviceID, traceGrpcJobID s
 	// parquet 병합 대기
 	time.Sleep(2 * time.Second)
 
-	// 로그 파일 삭제
+	// trace.log 보존 (reparsing 용)
 	if fi, err := os.Stat(job.LogFile); err == nil {
-		slog.Info("deleting trace log", "job_id", jobID, "size_bytes", fi.Size())
-		os.Remove(job.LogFile)
+		slog.Info("trace log preserved for reparse", "job_id", jobID, "size_bytes", fi.Size())
 	}
 
 	// 완료 상태
@@ -497,8 +496,8 @@ func (m *Manager) DeleteJob(jobID string) error {
 		job.Mu.Lock()
 		state := job.State
 		job.Mu.Unlock()
-		if state == pb.JobState_JOB_STATE_RUNNING {
-			return fmt.Errorf("cannot delete running trace job: %s", jobID)
+		if state == pb.JobState_JOB_STATE_RUNNING || state == pb.JobState_JOB_STATE_REPARSING {
+			return fmt.Errorf("cannot delete %s trace job: %s", state.String(), jobID)
 		}
 		delete(m.jobs, jobID)
 	}
@@ -512,4 +511,149 @@ func (m *Manager) DeleteJob(jobID string) error {
 
 	slog.Info("trace job deleted", "job_id", jobID)
 	return nil
+}
+
+// ReparseTrace re-parses a completed trace job's raw log file to regenerate parquet files.
+func (m *Manager) ReparseTrace(jobID string) error {
+	m.mu.Lock()
+	job, ok := m.jobs[jobID]
+	m.mu.Unlock()
+
+	if !ok {
+		// 디스크에서 복원 시도
+		baseDir := filepath.Join(m.outputBase, jobID)
+		logFile := filepath.Join(baseDir, "trace.log")
+		realtimeDir := filepath.Join(baseDir, "realtime")
+
+		if _, err := os.Stat(logFile); err != nil {
+			return fmt.Errorf("trace.log not found for job %s — cannot reparse", jobID)
+		}
+		if _, err := os.Stat(realtimeDir); err != nil {
+			os.MkdirAll(realtimeDir, 0755)
+		}
+
+		job = &TraceJob{
+			ID:          jobID,
+			State:       pb.JobState_JOB_STATE_COMPLETED,
+			OutputDir:   baseDir,
+			RealtimeDir: realtimeDir,
+			LogFile:     logFile,
+			TraceType:   "both",
+		}
+		m.mu.Lock()
+		m.jobs[jobID] = job
+		m.mu.Unlock()
+	}
+
+	job.Mu.Lock()
+	state := job.State
+	job.Mu.Unlock()
+
+	switch state {
+	case pb.JobState_JOB_STATE_RUNNING, pb.JobState_JOB_STATE_COLLECTING, pb.JobState_JOB_STATE_REPARSING:
+		return fmt.Errorf("job %s is in state %s, cannot reparse", jobID, state.String())
+	}
+
+	// trace.log 존재 확인
+	if _, err := os.Stat(job.LogFile); err != nil {
+		return fmt.Errorf("trace.log not found: %s", job.LogFile)
+	}
+
+	// 상태 전이
+	job.Mu.Lock()
+	job.State = pb.JobState_JOB_STATE_REPARSING
+	job.FinishedAt = 0
+	job.Error = ""
+	job.subscribers = nil
+	job.Mu.Unlock()
+
+	slog.Info("starting trace reparse", "job_id", jobID, "log_file", job.LogFile)
+	go m.doReparse(job)
+	return nil
+}
+
+func (m *Manager) doReparse(job *TraceJob) {
+	jobID := job.ID
+
+	job.notify(&pb.JobProgress{
+		JobId:   jobID,
+		State:   pb.JobState_JOB_STATE_REPARSING,
+		Message: "reparse started",
+	})
+
+	// 1. 기존 parquet 삭제
+	entries, _ := os.ReadDir(job.RealtimeDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".parquet") {
+			os.Remove(filepath.Join(job.RealtimeDir, e.Name()))
+		}
+	}
+	slog.Info("cleared old parquet files", "job_id", jobID, "dir", job.RealtimeDir)
+
+	// 2. trace --parquet-only 실행
+	// 사용법: ./trace <log_file> <output_prefix> --parquet-only
+	traceBin := filepath.Join(m.toolsDir, "trace")
+	outputPrefix := filepath.Join(job.RealtimeDir, "realtime")
+	cmd := exec.Command(traceBin, job.LogFile, outputPrefix, "--parquet-only")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		m.failReparse(job, fmt.Sprintf("stdout pipe: %v", err))
+		return
+	}
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		m.failReparse(job, fmt.Sprintf("start trace: %v", err))
+		return
+	}
+
+	// stdout 파싱으로 진행률 보고
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			slog.Debug("reparse output", "job_id", jobID, "line", line)
+			job.notify(&pb.JobProgress{
+				JobId:   jobID,
+				State:   pb.JobState_JOB_STATE_REPARSING,
+				Message: line,
+			})
+		}
+	}()
+
+	if err := cmd.Wait(); err != nil {
+		m.failReparse(job, fmt.Sprintf("trace reparse failed: %v", err))
+		return
+	}
+
+	// 3. 완료
+	job.Mu.Lock()
+	job.State = pb.JobState_JOB_STATE_COMPLETED
+	job.FinishedAt = time.Now().UnixMilli()
+	job.Mu.Unlock()
+
+	job.notify(&pb.JobProgress{
+		JobId:   jobID,
+		State:   pb.JobState_JOB_STATE_COMPLETED,
+		Message: "reparse completed",
+	})
+
+	slog.Info("trace reparse completed", "job_id", jobID)
+}
+
+func (m *Manager) failReparse(job *TraceJob, errMsg string) {
+	slog.Error("trace reparse failed", "job_id", job.ID, "error", errMsg)
+	job.Mu.Lock()
+	job.State = pb.JobState_JOB_STATE_FAILED
+	job.Error = errMsg
+	job.FinishedAt = time.Now().UnixMilli()
+	job.Mu.Unlock()
+
+	job.notify(&pb.JobProgress{
+		JobId:   job.ID,
+		State:   pb.JobState_JOB_STATE_FAILED,
+		Message: errMsg,
+		Error:   errMsg,
+	})
 }

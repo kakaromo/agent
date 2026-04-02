@@ -39,6 +39,9 @@ service DeviceAgent {
   rpc ReplayMacro(ReplayMacroRequest) returns (ReplayMacroResponse);
   rpc TakeScreenshot(TakeScreenshotRequest) returns (TakeScreenshotResponse);
   rpc ScreenshotOcr(ScreenshotOcrRequest) returns (ScreenshotOcrResponse);
+
+  // Trace Reparse
+  rpc ReparseTrace(ReparseTraceRequest) returns (ReparseTraceResponse);
 }
 
 // ==================== Device ====================
@@ -104,6 +107,7 @@ enum JobState {
   JOB_STATE_FAILED = 6;
   JOB_STATE_PARTIALLY_FAILED = 7;
   JOB_STATE_CANCELLED = 8;
+  JOB_STATE_REPARSING = 9;
 }
 
 message RunBenchmarkRequest {
@@ -591,4 +595,15 @@ message ScreenshotOcrResponse {
   string full_text = 2;               // 전체 OCR 텍스트
   string extracted_value = 3;          // 정규식 매칭 결과
   bytes image_data = 4;               // 스크린샷 PNG
+}
+
+// ==================== Trace Reparse ====================
+
+message ReparseTraceRequest {
+  string job_id = 1;
+}
+
+message ReparseTraceResponse {
+  bool success = 1;
+  string message = 2;
 }

@@ -137,6 +137,7 @@ const (
 	JobState_JOB_STATE_FAILED           JobState = 6
 	JobState_JOB_STATE_PARTIALLY_FAILED JobState = 7
 	JobState_JOB_STATE_CANCELLED        JobState = 8
+	JobState_JOB_STATE_REPARSING        JobState = 9
 )
 
 // Enum value maps for JobState.
@@ -151,6 +152,7 @@ var (
 		6: "JOB_STATE_FAILED",
 		7: "JOB_STATE_PARTIALLY_FAILED",
 		8: "JOB_STATE_CANCELLED",
+		9: "JOB_STATE_REPARSING",
 	}
 	JobState_value = map[string]int32{
 		"JOB_STATE_UNKNOWN":          0,
@@ -162,6 +164,7 @@ var (
 		"JOB_STATE_FAILED":           6,
 		"JOB_STATE_PARTIALLY_FAILED": 7,
 		"JOB_STATE_CANCELLED":        8,
+		"JOB_STATE_REPARSING":        9,
 	}
 )
 
@@ -5165,6 +5168,102 @@ func (x *ScreenshotOcrResponse) GetImageData() []byte {
 	return nil
 }
 
+type ReparseTraceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReparseTraceRequest) Reset() {
+	*x = ReparseTraceRequest{}
+	mi := &file_proto_agent_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReparseTraceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReparseTraceRequest) ProtoMessage() {}
+
+func (x *ReparseTraceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReparseTraceRequest.ProtoReflect.Descriptor instead.
+func (*ReparseTraceRequest) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *ReparseTraceRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+type ReparseTraceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReparseTraceResponse) Reset() {
+	*x = ReparseTraceResponse{}
+	mi := &file_proto_agent_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReparseTraceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReparseTraceResponse) ProtoMessage() {}
+
+func (x *ReparseTraceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReparseTraceResponse.ProtoReflect.Descriptor instead.
+func (*ReparseTraceResponse) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *ReparseTraceResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReparseTraceResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
@@ -5623,7 +5722,12 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\tfull_text\x18\x02 \x01(\tR\bfullText\x12'\n" +
 	"\x0fextracted_value\x18\x03 \x01(\tR\x0eextractedValue\x12\x1d\n" +
 	"\n" +
-	"image_data\x18\x04 \x01(\fR\timageData*q\n" +
+	"image_data\x18\x04 \x01(\fR\timageData\",\n" +
+	"\x13ReparseTraceRequest\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"J\n" +
+	"\x14ReparseTraceResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*q\n" +
 	"\vDeviceState\x12\x18\n" +
 	"\x14DEVICE_STATE_UNKNOWN\x10\x00\x12\x17\n" +
 	"\x13DEVICE_STATE_ONLINE\x10\x01\x12\x18\n" +
@@ -5633,7 +5737,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x1aBENCHMARK_TOOL_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12BENCHMARK_TOOL_FIO\x10\x01\x12\x19\n" +
 	"\x15BENCHMARK_TOOL_IOZONE\x10\x02\x12\x1a\n" +
-	"\x16BENCHMARK_TOOL_TIOTEST\x10\x03*\xed\x01\n" +
+	"\x16BENCHMARK_TOOL_TIOTEST\x10\x03*\x86\x02\n" +
 	"\bJobState\x12\x15\n" +
 	"\x11JOB_STATE_UNKNOWN\x10\x00\x12\x14\n" +
 	"\x10JOB_STATE_QUEUED\x10\x01\x12\x1b\n" +
@@ -5643,7 +5747,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x13JOB_STATE_COMPLETED\x10\x05\x12\x14\n" +
 	"\x10JOB_STATE_FAILED\x10\x06\x12\x1e\n" +
 	"\x1aJOB_STATE_PARTIALLY_FAILED\x10\a\x12\x17\n" +
-	"\x13JOB_STATE_CANCELLED\x10\b2\xdf\r\n" +
+	"\x13JOB_STATE_CANCELLED\x10\b\x12\x17\n" +
+	"\x13JOB_STATE_REPARSING\x10\t2\xa8\x0e\n" +
 	"\vDeviceAgent\x12D\n" +
 	"\vListDevices\x12\x19.agent.ListDevicesRequest\x1a\x1a.agent.ListDevicesResponse\x12J\n" +
 	"\rConnectDevice\x12\x1b.agent.ConnectDeviceRequest\x1a\x1c.agent.ConnectDeviceResponse\x12S\n" +
@@ -5668,7 +5773,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\rStopRecording\x12\x1b.agent.StopRecordingRequest\x1a\x1c.agent.StopRecordingResponse\x12D\n" +
 	"\vReplayMacro\x12\x19.agent.ReplayMacroRequest\x1a\x1a.agent.ReplayMacroResponse\x12M\n" +
 	"\x0eTakeScreenshot\x12\x1c.agent.TakeScreenshotRequest\x1a\x1d.agent.TakeScreenshotResponse\x12J\n" +
-	"\rScreenshotOcr\x12\x1b.agent.ScreenshotOcrRequest\x1a\x1c.agent.ScreenshotOcrResponseB\n" +
+	"\rScreenshotOcr\x12\x1b.agent.ScreenshotOcrRequest\x1a\x1c.agent.ScreenshotOcrResponse\x12G\n" +
+	"\fReparseTrace\x12\x1a.agent.ReparseTraceRequest\x1a\x1b.agent.ReparseTraceResponseB\n" +
 	"Z\bagent/pbb\x06proto3"
 
 var (
@@ -5684,7 +5790,7 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 77)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 79)
 var file_proto_agent_proto_goTypes = []any{
 	(DeviceState)(0),                    // 0: agent.DeviceState
 	(BenchmarkTool)(0),                  // 1: agent.BenchmarkTool
@@ -5760,29 +5866,31 @@ var file_proto_agent_proto_goTypes = []any{
 	(*TakeScreenshotResponse)(nil),      // 71: agent.TakeScreenshotResponse
 	(*ScreenshotOcrRequest)(nil),        // 72: agent.ScreenshotOcrRequest
 	(*ScreenshotOcrResponse)(nil),       // 73: agent.ScreenshotOcrResponse
-	nil,                                 // 74: agent.RunBenchmarkRequest.ParamsEntry
-	nil,                                 // 75: agent.JobProgress.MetricsEntry
-	nil,                                 // 76: agent.BenchmarkResult.MetricsEntry
-	nil,                                 // 77: agent.ScenarioStep.ParamsEntry
-	nil,                                 // 78: agent.ReplayMacroResponse.OcrResultsEntry
-	nil,                                 // 79: agent.ReplayMacroResponse.MetricsEntry
+	(*ReparseTraceRequest)(nil),         // 74: agent.ReparseTraceRequest
+	(*ReparseTraceResponse)(nil),        // 75: agent.ReparseTraceResponse
+	nil,                                 // 76: agent.RunBenchmarkRequest.ParamsEntry
+	nil,                                 // 77: agent.JobProgress.MetricsEntry
+	nil,                                 // 78: agent.BenchmarkResult.MetricsEntry
+	nil,                                 // 79: agent.ScenarioStep.ParamsEntry
+	nil,                                 // 80: agent.ReplayMacroResponse.OcrResultsEntry
+	nil,                                 // 81: agent.ReplayMacroResponse.MetricsEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: agent.DeviceInfo.state:type_name -> agent.DeviceState
 	3,  // 1: agent.ListDevicesResponse.devices:type_name -> agent.DeviceInfo
 	1,  // 2: agent.RunBenchmarkRequest.tool:type_name -> agent.BenchmarkTool
-	74, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
+	76, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
 	2,  // 4: agent.GetJobStatusResponse.state:type_name -> agent.JobState
 	14, // 5: agent.GetJobStatusResponse.device_statuses:type_name -> agent.DeviceJobStatus
 	2,  // 6: agent.DeviceJobStatus.state:type_name -> agent.JobState
 	2,  // 7: agent.JobProgress.state:type_name -> agent.JobState
-	75, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
+	77, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
 	19, // 9: agent.GetBenchmarkResultResponse.results:type_name -> agent.BenchmarkResult
 	1,  // 10: agent.BenchmarkResult.tool:type_name -> agent.BenchmarkTool
-	76, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
+	78, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
 	20, // 12: agent.BenchmarkResult.trace_jobs:type_name -> agent.TraceJobMapping
 	1,  // 13: agent.ScenarioStep.tool:type_name -> agent.BenchmarkTool
-	77, // 14: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
+	79, // 14: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
 	27, // 15: agent.ScenarioStep.condition:type_name -> agent.ConditionalBranch
 	26, // 16: agent.ScenarioStep.macro:type_name -> agent.AppMacroConfig
 	59, // 17: agent.AppMacroConfig.events:type_name -> agent.MacroEvent
@@ -5814,8 +5922,8 @@ var file_proto_agent_proto_depIdxs = []int32{
 	63, // 43: agent.ListInstalledAppsResponse.apps:type_name -> agent.InstalledApp
 	59, // 44: agent.StopRecordingResponse.events:type_name -> agent.MacroEvent
 	59, // 45: agent.ReplayMacroRequest.events:type_name -> agent.MacroEvent
-	78, // 46: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
-	79, // 47: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
+	80, // 46: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
+	81, // 47: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
 	60, // 48: agent.ScreenshotOcrRequest.region:type_name -> agent.OcrRegion
 	4,  // 49: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
 	6,  // 50: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
@@ -5840,31 +5948,33 @@ var file_proto_agent_proto_depIdxs = []int32{
 	68, // 69: agent.DeviceAgent.ReplayMacro:input_type -> agent.ReplayMacroRequest
 	70, // 70: agent.DeviceAgent.TakeScreenshot:input_type -> agent.TakeScreenshotRequest
 	72, // 71: agent.DeviceAgent.ScreenshotOcr:input_type -> agent.ScreenshotOcrRequest
-	5,  // 72: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
-	7,  // 73: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
-	9,  // 74: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
-	11, // 75: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
-	13, // 76: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
-	16, // 77: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
-	18, // 78: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
-	22, // 79: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
-	24, // 80: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
-	32, // 81: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
-	34, // 82: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
-	36, // 83: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
-	39, // 84: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
-	47, // 85: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
-	50, // 86: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
-	52, // 87: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
-	54, // 88: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
-	62, // 89: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
-	65, // 90: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
-	67, // 91: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
-	69, // 92: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
-	71, // 93: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
-	73, // 94: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
-	72, // [72:95] is the sub-list for method output_type
-	49, // [49:72] is the sub-list for method input_type
+	74, // 72: agent.DeviceAgent.ReparseTrace:input_type -> agent.ReparseTraceRequest
+	5,  // 73: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
+	7,  // 74: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
+	9,  // 75: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
+	11, // 76: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
+	13, // 77: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
+	16, // 78: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
+	18, // 79: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
+	22, // 80: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
+	24, // 81: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
+	32, // 82: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
+	34, // 83: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
+	36, // 84: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
+	39, // 85: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
+	47, // 86: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
+	50, // 87: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
+	52, // 88: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
+	54, // 89: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
+	62, // 90: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
+	65, // 91: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
+	67, // 92: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
+	69, // 93: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
+	71, // 94: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
+	73, // 95: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
+	75, // 96: agent.DeviceAgent.ReparseTrace:output_type -> agent.ReparseTraceResponse
+	73, // [73:97] is the sub-list for method output_type
+	49, // [49:73] is the sub-list for method input_type
 	49, // [49:49] is the sub-list for extension type_name
 	49, // [49:49] is the sub-list for extension extendee
 	0,  // [0:49] is the sub-list for field type_name
@@ -5881,7 +5991,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   77,
+			NumMessages:   79,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
