@@ -29,6 +29,12 @@ service DeviceAgent {
   rpc UploadTraceToMinio(UploadTraceRequest) returns (UploadTraceResponse);
   rpc UploadBenchmarkToMinio(UploadBenchmarkRequest) returns (UploadBenchmarkResponse);
 
+  // Trace Archive — presigned URL 받아 nginx 경유 PUT (raw + realtime parquet)
+  rpc UploadTraceArchive(UploadTraceArchiveRequest) returns (stream UploadTraceArchiveProgress);
+
+  // Archive 대상 파일 메타 조회 — portal 이 init 시 정확한 file size/count 를 알고 presign 발급
+  rpc GetArchiveFilesInfo(GetArchiveFilesInfoRequest) returns (GetArchiveFilesInfoResponse);
+
   // Monitoring
   rpc MonitorDevices(MonitorDevicesRequest) returns (stream DeviceMetrics);
 
@@ -95,6 +101,7 @@ enum BenchmarkTool {
   BENCHMARK_TOOL_FIO = 1;
   BENCHMARK_TOOL_IOZONE = 2;
   BENCHMARK_TOOL_TIOTEST = 3;
+  BENCHMARK_TOOL_IOTEST = 4;
 }
 
 enum JobState {
@@ -447,6 +454,69 @@ message UploadBenchmarkResponse {
   bool success = 1;
   string message = 2;
   repeated string uploaded_files = 3;
+}
+
+// ==================== Trace Archive (presigned multipart) ====================
+//
+// Portal 이 S3 multipart presigned URL 을 발급해서 보내고, agent 는 nginx 경유로 PUT.
+// 단방향 원칙: agent → portal outbound 호출 없음. ETag 는 stream 으로 portal 에 보고.
+
+message UploadTraceArchiveRequest {
+  string job_id = 1;
+  PresignedTarget raw = 2;                    // trace.log
+  repeated PresignedTarget parquet_files = 3; // realtime parquet 파일들
+}
+
+message PresignedTarget {
+  string local_path = 1;            // agent 디스크 절대 경로 (참조용 — agent 가 매핑)
+  string trace_type = 2;            // "ufs" | "block" | "ufscustom" (parquet 만)
+  // multipart 여부: parts 가 있으면 multipart, single_put_url 이 있으면 단일 PUT
+  string upload_id = 3;             // S3 multipart uploadId
+  repeated PresignedPart parts = 4; // 각 part 의 presigned PUT URL
+  string single_put_url = 5;        // 작은 파일용 단일 PUT URL
+  int64 total_bytes = 6;
+  int64 part_size = 7;              // multipart 의 part 크기
+}
+
+message PresignedPart {
+  int32 part_number = 1;            // 1-based
+  string url = 2;                   // presigned PUT URL
+}
+
+message UploadTraceArchiveProgress {
+  string job_id = 1;
+  string current_file = 2;          // 표시용 (e.g. "trace.log", "realtime_ufs_001.parquet")
+  int64 bytes_uploaded = 3;         // 누적
+  int64 bytes_total = 4;
+  int32 files_done = 5;
+  int32 files_total = 6;
+  // part 1개 완료 시 ETag 보고 — portal 이 모아서 S3 complete 호출
+  optional CompletedPartReport completed_part = 7;
+  optional bool finished = 8;       // 마지막 메시지에서 true
+  optional string error = 9;
+}
+
+message CompletedPartReport {
+  string local_path = 1;            // 어떤 파일의 part 인지 (raw 면 raw, parquet 면 해당 path)
+  int32 part_number = 2;
+  string etag = 3;
+}
+
+message GetArchiveFilesInfoRequest {
+  string job_id = 1;
+}
+
+message GetArchiveFilesInfoResponse {
+  string job_id = 1;
+  int64  raw_size = 2;              // trace.log 바이트 수
+  string raw_local_path = 3;        // base name (e.g. "trace.log")
+  repeated ArchiveParquetInfo parquet_files = 4;
+}
+
+message ArchiveParquetInfo {
+  string local_path = 1;            // base name (e.g. "realtime_ufs_001.parquet")
+  string trace_type = 2;            // "ufs" | "block" | "ufscustom"
+  int64  size = 3;
 }
 
 // ==================== Monitoring ====================

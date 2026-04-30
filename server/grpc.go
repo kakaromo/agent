@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
+
+	"google.golang.org/grpc"
 
 	"agent/adb"
 	"agent/benchmark"
@@ -321,6 +325,213 @@ func (s *DeviceAgentServer) UploadBenchmarkToMinio(ctx context.Context, req *pb.
 		UploadedFiles: allUploaded,
 	}, nil
 }
+
+// ==================== Trace Archive — file info ====================
+
+// GetArchiveFilesInfo — portal 이 init 단계에서 정확한 file size/count 를 알기 위한 메타 조회.
+// 단방향 원칙 유지: portal 이 호출, agent 가 디스크 스캔만 수행.
+func (s *DeviceAgentServer) GetArchiveFilesInfo(ctx context.Context, req *pb.GetArchiveFilesInfoRequest) (*pb.GetArchiveFilesInfoResponse, error) {
+	if req.JobId == "" {
+		return nil, fmt.Errorf("job_id is required")
+	}
+	rawPath, rawSize, parquetFiles, err := s.traceMgr.GetArchiveFiles(req.JobId)
+	if err != nil {
+		return nil, err
+	}
+	rawBase := rawPath
+	if idx := strings.LastIndex(rawBase, "/"); idx >= 0 {
+		rawBase = rawBase[idx+1:]
+	}
+	resp := &pb.GetArchiveFilesInfoResponse{
+		JobId:        req.JobId,
+		RawSize:      rawSize,
+		RawLocalPath: rawBase,
+	}
+	for _, pf := range parquetFiles {
+		resp.ParquetFiles = append(resp.ParquetFiles, &pb.ArchiveParquetInfo{
+			LocalPath: pf.BaseName,
+			TraceType: pf.TraceType,
+			Size:      pf.Size,
+		})
+	}
+	return resp, nil
+}
+
+// ==================== Trace Archive (presigned multipart) ====================
+
+// archiveSender — server-streaming RPC 의 stream.Send 는 동시 호출 시 race / panic 가능.
+// multipart 4-way 병렬 PUT goroutine 들이 progress 보고를 동시에 보내므로 mutex 로 직렬화.
+type archiveSender struct {
+	mu     sync.Mutex
+	stream grpc.ServerStreamingServer[pb.UploadTraceArchiveProgress]
+}
+
+func (s *archiveSender) send(msg *pb.UploadTraceArchiveProgress) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = s.stream.Send(msg)
+}
+
+// UploadTraceArchive — portal 이 발급한 presigned URL 로 trace.log + realtime parquet 을 nginx 경유 PUT.
+// SDK 미사용 (legacy UploadTraceToMinio 와 다름) — 표준 HTTP PUT 만 사용해 endpoint 협상 우회.
+//
+// 흐름:
+//  1. trace.log 검증 + 각 parquet 검증 (req.parquet_files 의 local_path 가 archive 후보와 일치하는지)
+//  2. raw 먼저 PUT (단일 또는 multipart) → 각 part complete 마다 stream.Send
+//  3. parquet 순차 PUT → 각 part complete 마다 stream.Send
+//  4. 마지막에 finished=true 메시지
+func (s *DeviceAgentServer) UploadTraceArchive(req *pb.UploadTraceArchiveRequest, stream grpc.ServerStreamingServer[pb.UploadTraceArchiveProgress]) error {
+	if req.JobId == "" {
+		return fmt.Errorf("job_id is required")
+	}
+	if req.Raw == nil {
+		return fmt.Errorf("raw target is required")
+	}
+	ctx := stream.Context()
+	sender := &archiveSender{stream: stream}
+
+	// archive 파일 목록 조회 — agent 가 가진 실제 파일과 portal 의 presigned 매핑이 일치하는지 검증
+	rawPath, _, parquetFiles, err := s.traceMgr.GetArchiveFiles(req.JobId)
+	if err != nil {
+		sender.send(&pb.UploadTraceArchiveProgress{
+			JobId: req.JobId,
+			Error: ptrString(fmt.Sprintf("archive files: %v", err)),
+		})
+		return err
+	}
+
+	// 총 바이트/파일 수 (진행률 표시용)
+	bytesTotal := req.Raw.TotalBytes
+	for _, pf := range req.ParquetFiles {
+		bytesTotal += pf.TotalBytes
+	}
+	filesTotal := int32(1 + len(req.ParquetFiles))
+	var bytesUploaded int64
+	var filesDone int32
+
+	// 1) raw trace.log 업로드
+	if err := uploadOneTarget(ctx, sender, req.JobId, rawPath, req.Raw,
+		&bytesUploaded, bytesTotal, &filesDone, filesTotal); err != nil {
+		sender.send(&pb.UploadTraceArchiveProgress{
+			JobId: req.JobId,
+			Error: ptrString(fmt.Sprintf("raw upload: %v", err)),
+		})
+		return err
+	}
+
+	// 2) parquet 파일 업로드 — req.parquet_files 의 local_path 가 agent 의 archive 후보와 매칭돼야 함.
+	knownByName := map[string]string{}
+	for _, e := range parquetFiles {
+		knownByName[e.BaseName] = e.LocalPath
+	}
+	for _, pf := range req.ParquetFiles {
+		baseName := pf.LocalPath
+		if idx := strings.LastIndex(baseName, "/"); idx >= 0 {
+			baseName = baseName[idx+1:]
+		}
+		actualPath, ok := knownByName[baseName]
+		if !ok {
+			err := fmt.Errorf("parquet not found in archive: %s", baseName)
+			sender.send(&pb.UploadTraceArchiveProgress{
+				JobId: req.JobId,
+				Error: ptrString(err.Error()),
+			})
+			return err
+		}
+		if err := uploadOneTarget(ctx, sender, req.JobId, actualPath, pf,
+			&bytesUploaded, bytesTotal, &filesDone, filesTotal); err != nil {
+			sender.send(&pb.UploadTraceArchiveProgress{
+				JobId: req.JobId,
+				Error: ptrString(fmt.Sprintf("parquet upload %s: %v", baseName, err)),
+			})
+			return err
+		}
+	}
+
+	finished := true
+	sender.send(&pb.UploadTraceArchiveProgress{
+		JobId:         req.JobId,
+		BytesUploaded: bytesUploaded,
+		BytesTotal:    bytesTotal,
+		FilesDone:     filesDone,
+		FilesTotal:    filesTotal,
+		Finished:      &finished,
+	})
+	return nil
+}
+
+// uploadOneTarget — 단일 PresignedTarget 처리. parts 가 있으면 multipart, 없으면 single PUT.
+// 진행률(bytesUploaded/filesDone)을 카운터로 갱신하며 part complete 마다 sender.send (race-safe).
+func uploadOneTarget(
+	ctx context.Context,
+	sender *archiveSender,
+	jobID, localPath string,
+	target *pb.PresignedTarget,
+	bytesUploaded *int64,
+	bytesTotal int64,
+	filesDone *int32,
+	filesTotal int32,
+) error {
+	// 표시용 baseName
+	displayName := localPath
+	if idx := strings.LastIndex(displayName, "/"); idx >= 0 {
+		displayName = displayName[idx+1:]
+	}
+
+	if target.SinglePutUrl != "" && len(target.Parts) == 0 {
+		// 단일 PUT (0-byte 또는 partSize 이하 작은 파일)
+		etag, err := storage.UploadFilePresigned(ctx, localPath, target.SinglePutUrl)
+		if err != nil {
+			return err
+		}
+		atomic.AddInt64(bytesUploaded, target.TotalBytes)
+		atomic.AddInt32(filesDone, 1)
+		sender.send(&pb.UploadTraceArchiveProgress{
+			JobId:         jobID,
+			CurrentFile:   displayName,
+			BytesUploaded: atomic.LoadInt64(bytesUploaded),
+			BytesTotal:    bytesTotal,
+			FilesDone:     atomic.LoadInt32(filesDone),
+			FilesTotal:    filesTotal,
+			CompletedPart: &pb.CompletedPartReport{
+				LocalPath:  target.LocalPath,
+				PartNumber: 1,
+				Etag:       etag,
+			},
+		})
+		return nil
+	}
+
+	// multipart
+	parts := make([]storage.PartURL, 0, len(target.Parts))
+	for _, p := range target.Parts {
+		parts = append(parts, storage.PartURL{PartNumber: p.PartNumber, URL: p.Url})
+	}
+	_, err := storage.UploadFileMultipart(ctx, localPath, parts, target.PartSize, func(pp storage.PartProgress) {
+		// part 완료 시 ETag stream-back (sender.send 가 mutex 로 직렬화)
+		atomic.AddInt64(bytesUploaded, pp.BytesPut)
+		sender.send(&pb.UploadTraceArchiveProgress{
+			JobId:         jobID,
+			CurrentFile:   displayName,
+			BytesUploaded: atomic.LoadInt64(bytesUploaded),
+			BytesTotal:    bytesTotal,
+			FilesDone:     atomic.LoadInt32(filesDone),
+			FilesTotal:    filesTotal,
+			CompletedPart: &pb.CompletedPartReport{
+				LocalPath:  target.LocalPath,
+				PartNumber: pp.PartNumber,
+				Etag:       pp.ETag,
+			},
+		})
+	})
+	if err != nil {
+		return err
+	}
+	atomic.AddInt32(filesDone, 1)
+	return nil
+}
+
+func ptrString(s string) *string { return &s }
 
 // ==================== Monitoring ====================
 

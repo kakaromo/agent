@@ -35,6 +35,8 @@ const (
 	DeviceAgent_GetTraceRawData_FullMethodName        = "/agent.DeviceAgent/GetTraceRawData"
 	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
 	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
+	DeviceAgent_UploadTraceArchive_FullMethodName     = "/agent.DeviceAgent/UploadTraceArchive"
+	DeviceAgent_GetArchiveFilesInfo_FullMethodName    = "/agent.DeviceAgent/GetArchiveFilesInfo"
 	DeviceAgent_MonitorDevices_FullMethodName         = "/agent.DeviceAgent/MonitorDevices"
 	DeviceAgent_ListInstalledApps_FullMethodName      = "/agent.DeviceAgent/ListInstalledApps"
 	DeviceAgent_StartRecording_FullMethodName         = "/agent.DeviceAgent/StartRecording"
@@ -70,6 +72,10 @@ type DeviceAgentClient interface {
 	// Upload
 	UploadTraceToMinio(ctx context.Context, in *UploadTraceRequest, opts ...grpc.CallOption) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error)
+	// Trace Archive — presigned URL 받아 nginx 경유 PUT (raw + realtime parquet)
+	UploadTraceArchive(ctx context.Context, in *UploadTraceArchiveRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UploadTraceArchiveProgress], error)
+	// Archive 대상 파일 메타 조회 — portal 이 init 시 정확한 file size/count 를 알고 presign 발급
+	GetArchiveFilesInfo(ctx context.Context, in *GetArchiveFilesInfoRequest, opts ...grpc.CallOption) (*GetArchiveFilesInfoResponse, error)
 	// Monitoring
 	MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error)
 	// App Macro (이벤트 녹화/재생 + OCR)
@@ -260,9 +266,38 @@ func (c *deviceAgentClient) UploadBenchmarkToMinio(ctx context.Context, in *Uplo
 	return out, nil
 }
 
+func (c *deviceAgentClient) UploadTraceArchive(ctx context.Context, in *UploadTraceArchiveRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UploadTraceArchiveProgress], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DeviceAgent_ServiceDesc.Streams[1], DeviceAgent_UploadTraceArchive_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[UploadTraceArchiveRequest, UploadTraceArchiveProgress]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DeviceAgent_UploadTraceArchiveClient = grpc.ServerStreamingClient[UploadTraceArchiveProgress]
+
+func (c *deviceAgentClient) GetArchiveFilesInfo(ctx context.Context, in *GetArchiveFilesInfoRequest, opts ...grpc.CallOption) (*GetArchiveFilesInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetArchiveFilesInfoResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_GetArchiveFilesInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deviceAgentClient) MonitorDevices(ctx context.Context, in *MonitorDevicesRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DeviceMetrics], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DeviceAgent_ServiceDesc.Streams[1], DeviceAgent_MonitorDevices_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DeviceAgent_ServiceDesc.Streams[2], DeviceAgent_MonitorDevices_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +409,10 @@ type DeviceAgentServer interface {
 	// Upload
 	UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error)
+	// Trace Archive — presigned URL 받아 nginx 경유 PUT (raw + realtime parquet)
+	UploadTraceArchive(*UploadTraceArchiveRequest, grpc.ServerStreamingServer[UploadTraceArchiveProgress]) error
+	// Archive 대상 파일 메타 조회 — portal 이 init 시 정확한 file size/count 를 알고 presign 발급
+	GetArchiveFilesInfo(context.Context, *GetArchiveFilesInfoRequest) (*GetArchiveFilesInfoResponse, error)
 	// Monitoring
 	MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error
 	// App Macro (이벤트 녹화/재생 + OCR)
@@ -442,6 +481,12 @@ func (UnimplementedDeviceAgentServer) UploadTraceToMinio(context.Context, *Uploa
 }
 func (UnimplementedDeviceAgentServer) UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadBenchmarkToMinio not implemented")
+}
+func (UnimplementedDeviceAgentServer) UploadTraceArchive(*UploadTraceArchiveRequest, grpc.ServerStreamingServer[UploadTraceArchiveProgress]) error {
+	return status.Error(codes.Unimplemented, "method UploadTraceArchive not implemented")
+}
+func (UnimplementedDeviceAgentServer) GetArchiveFilesInfo(context.Context, *GetArchiveFilesInfoRequest) (*GetArchiveFilesInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetArchiveFilesInfo not implemented")
 }
 func (UnimplementedDeviceAgentServer) MonitorDevices(*MonitorDevicesRequest, grpc.ServerStreamingServer[DeviceMetrics]) error {
 	return status.Error(codes.Unimplemented, "method MonitorDevices not implemented")
@@ -769,6 +814,35 @@ func _DeviceAgent_UploadBenchmarkToMinio_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_UploadTraceArchive_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(UploadTraceArchiveRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DeviceAgentServer).UploadTraceArchive(m, &grpc.GenericServerStream[UploadTraceArchiveRequest, UploadTraceArchiveProgress]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DeviceAgent_UploadTraceArchiveServer = grpc.ServerStreamingServer[UploadTraceArchiveProgress]
+
+func _DeviceAgent_GetArchiveFilesInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetArchiveFilesInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).GetArchiveFilesInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_GetArchiveFilesInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).GetArchiveFilesInfo(ctx, req.(*GetArchiveFilesInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAgent_MonitorDevices_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(MonitorDevicesRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -974,6 +1048,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DeviceAgent_UploadBenchmarkToMinio_Handler,
 		},
 		{
+			MethodName: "GetArchiveFilesInfo",
+			Handler:    _DeviceAgent_GetArchiveFilesInfo_Handler,
+		},
+		{
 			MethodName: "ListInstalledApps",
 			Handler:    _DeviceAgent_ListInstalledApps_Handler,
 		},
@@ -1006,6 +1084,11 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeJobProgress",
 			Handler:       _DeviceAgent_SubscribeJobProgress_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "UploadTraceArchive",
+			Handler:       _DeviceAgent_UploadTraceArchive_Handler,
 			ServerStreams: true,
 		},
 		{

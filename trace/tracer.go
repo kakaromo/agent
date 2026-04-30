@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -485,6 +486,96 @@ func (m *Manager) GetTraceJobInfo(jobID string) (*TraceJobInfo, error) {
 		return &TraceJobInfo{Dir: dir, TraceType: "both"}, nil
 	}
 	return nil, fmt.Errorf("trace job not found: %s", jobID)
+}
+
+// ArchiveParquetEntry — archive 흐름에서 portal 에 보낼 realtime parquet 파일 1개의 메타.
+type ArchiveParquetEntry struct {
+	LocalPath string // 절대 경로
+	TraceType string // "ufs" | "block" | "ufscustom" — 파일명 prefix 로 판별
+	Size      int64
+	BaseName  string // 정렬 + portal 키 매핑용 (e.g. "realtime_ufs_001.parquet")
+}
+
+// GetArchiveFiles — Trace Archive 흐름에서 업로드할 파일 목록을 반환한다.
+//
+// 반환:
+//   - rawPath: trace.log 절대 경로 (없으면 에러)
+//   - rawSize: trace.log 바이트 수
+//   - parquetFiles: realtime parquet 파일 (시퀀스 번호 순으로 정렬됨 → 시간순과 일치하도록 agent 가 부여)
+//
+// 정렬 정책: 파일명 lexicographic = 시퀀스 번호 순 = 시간순 (Portal 의 read_parquet 호출자 정렬 책임).
+func (m *Manager) GetArchiveFiles(jobID string) (rawPath string, rawSize int64, parquetFiles []ArchiveParquetEntry, err error) {
+	info, ierr := m.GetTraceJobInfo(jobID)
+	if ierr != nil {
+		err = ierr
+		return
+	}
+
+	// trace.log: realtime dir 의 부모 = base dir 안에 있음. dir 이 base 일 수도 있어 두 케이스 다 시도.
+	candidates := []string{
+		filepath.Join(filepath.Dir(info.Dir), "trace.log"),
+		filepath.Join(info.Dir, "trace.log"),
+		filepath.Join(m.outputBase, jobID, "trace.log"),
+	}
+	var logPath string
+	var logFi os.FileInfo
+	for _, c := range candidates {
+		if fi, e := os.Stat(c); e == nil && !fi.IsDir() {
+			logPath = c
+			logFi = fi
+			break
+		}
+	}
+	if logPath == "" {
+		err = fmt.Errorf("trace.log not found for job %s (tried: %v)", jobID, candidates)
+		return
+	}
+	rawPath = logPath
+	rawSize = logFi.Size()
+
+	// realtime parquet 수집
+	entries, rerr := os.ReadDir(info.Dir)
+	if rerr != nil {
+		err = fmt.Errorf("read realtime dir %s: %w", info.Dir, rerr)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".parquet") {
+			continue
+		}
+		name := e.Name()
+		traceType := detectTraceTypeFromFilename(name)
+		fp := filepath.Join(info.Dir, name)
+		fi, ferr := os.Stat(fp)
+		if ferr != nil {
+			continue
+		}
+		parquetFiles = append(parquetFiles, ArchiveParquetEntry{
+			LocalPath: fp,
+			TraceType: traceType,
+			Size:      fi.Size(),
+			BaseName:  name,
+		})
+	}
+	sort.Slice(parquetFiles, func(i, j int) bool {
+		return parquetFiles[i].BaseName < parquetFiles[j].BaseName
+	})
+	return
+}
+
+// detectTraceTypeFromFilename — "realtime_ufs_001.parquet" / "realtime_block_..." / "realtime_ufscustom_..."
+// 패턴이 아니면 "unknown" 반환 (호출자가 거부).
+func detectTraceTypeFromFilename(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "_ufscustom_"):
+		return "ufscustom"
+	case strings.Contains(lower, "_ufs_"):
+		return "ufs"
+	case strings.Contains(lower, "_block_"):
+		return "block"
+	}
+	return "unknown"
 }
 
 // DeleteJob deletes a completed/failed trace job and its output files.
