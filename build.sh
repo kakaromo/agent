@@ -35,6 +35,15 @@ else
     CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o "${DIST_DIR}/agent-windows-amd64.exe" .
 fi
 
+# ── iotest (Android arm64 전용) ──
+echo ""
+echo "=== Building iotest (Android arm64) ==="
+GOOS=linux GOARCH=arm64 go build -o "tools/iotest" ./cmd/iotest/
+echo "  tools/iotest built ($(du -h tools/iotest | cut -f1))"
+
 echo ""
 echo "=== Build complete ==="
 ls -lh "${DIST_DIR}/"
+echo ""
+echo "=== Tools ==="
+ls -lh tools/iotest

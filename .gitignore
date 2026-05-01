@@ -1,6 +1,7 @@
 # Binary
 agent
 agent.exe
+/iotest
 dist/
 
 # Tools (ARM64 binaries, too large for git)
@@ -8,6 +9,7 @@ tools/fio
 tools/iozone
 tools/tiotest
 tools/trace
+tools/iotest
 
 # Trace output
 /tmp/agent_trace/

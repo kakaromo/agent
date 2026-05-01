@@ -552,6 +552,8 @@ func toolNameFor(tool pb.BenchmarkTool) string {
 		return "iozone"
 	case pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST:
 		return "tiotest"
+	case pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST:
+		return "iotest"
 	default:
 		return ""
 	}
@@ -574,6 +576,8 @@ func buildCommand(tool pb.BenchmarkTool, remotePath string, params map[string]st
 		return buildIozoneCommand(remotePath, params)
 	case pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST:
 		return buildTiotestCommand(remotePath, params)
+	case pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST:
+		return buildIOTestCommand(remotePath, params)
 	default:
 		return remotePath
 	}
@@ -587,6 +591,8 @@ func parseResults(tool pb.BenchmarkTool, output string) map[string]float64 {
 		return parseIozoneResults(output)
 	case pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST:
 		return parseTiotestResults(output)
+	case pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST:
+		return parseIOTestResults(output)
 	default:
 		return nil
 	}
