@@ -1,11 +1,14 @@
 package adb
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +44,82 @@ func (d *Device) Disconnect(ctx context.Context) error {
 // Shell runs a shell command on the device and returns stdout.
 func (d *Device) Shell(ctx context.Context, cmd string) (string, error) {
 	return d.run(ctx, "-s", d.Serial, "shell", cmd)
+}
+
+// ShellStream runs a shell command and streams stdout/stderr line-by-line via callbacks.
+// onStdout/onStderr 콜백은 각각 다른 goroutine 에서 호출되므로 콜백 측이 thread-safe 해야 한다.
+// 콜백은 라인 한 줄씩(개행 제외) 받는다. 명령이 끝나면 모인 stdout 전체를 반환한다 (기존
+// Shell 호환을 위해 — iotest 결과 JSON 은 stdout 마지막에 한 번에 출력됨).
+//
+// ctx deadline 이 없으면 defaultTimeout 적용. 즉시 종료가 필요하면 ctx 를 cancel 하면 됨.
+func (d *Device) ShellStream(
+	ctx context.Context,
+	cmd string,
+	onStdout func(line string),
+	onStderr func(line string),
+) (string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultTimeout)
+		defer cancel()
+	}
+
+	c := exec.CommandContext(ctx, "adb", "-s", d.Serial, "shell", cmd)
+	stdoutPipe, err := c.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := c.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := c.Start(); err != nil {
+		return "", fmt.Errorf("adb start: %w", err)
+	}
+
+	// stdout 은 콜백 + 전체 모음 (호출자가 결과 JSON 파싱). stderr 는 콜백만.
+	var stdoutBuf bytes.Buffer
+	var stdoutMu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		streamLines(stdoutPipe, func(line string) {
+			stdoutMu.Lock()
+			stdoutBuf.WriteString(line)
+			stdoutBuf.WriteByte('\n')
+			stdoutMu.Unlock()
+			if onStdout != nil {
+				onStdout(line)
+			}
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		streamLines(stderrPipe, func(line string) {
+			if onStderr != nil {
+				onStderr(line)
+			}
+		})
+	}()
+
+	wg.Wait()
+	if err := c.Wait(); err != nil {
+		return stdoutBuf.String(), fmt.Errorf("adb wait: %w", err)
+	}
+	return stdoutBuf.String(), nil
+}
+
+// streamLines reads a Reader line by line (개행 제외) and invokes onLine for each.
+// 64MB 까지 라인 길이 허용 — iotest 결과 JSON 한 줄이 클 수 있어 여유.
+func streamLines(r io.Reader, onLine func(line string)) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	for sc.Scan() {
+		onLine(sc.Text())
+	}
 }
 
 // Push pushes a local file to the device.

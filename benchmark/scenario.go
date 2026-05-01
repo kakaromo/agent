@@ -240,7 +240,7 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING, msg, progress)
 
 		prevTraceID := activeTraceJobID
-		stepOut, stepMetrics, err := o.executeStep(ctx, md, es, i, stepFiles, deviceID, &activeTraceJobID)
+		stepOut, stepMetrics, err := o.executeStep(ctx, job, md, es, i, stepFiles, deviceID, &activeTraceJobID)
 
 		// trace 상태가 바뀌었으면 job에 등록/해제 (cancel 시 정리용)
 		if activeTraceJobID != prevTraceID {
@@ -309,7 +309,7 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 
 const testDir = "/data/local/tmp/test"
 
-func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, es expandedStep, execIndex int, stepFiles map[int]string, deviceID string, activeTraceJobID *string) (string, map[string]float64, error) {
+func (o *Orchestrator) executeStep(ctx context.Context, job *Job, md *adb.ManagedDevice, es expandedStep, execIndex int, stepFiles map[int]string, deviceID string, activeTraceJobID *string) (string, map[string]float64, error) {
 	step := es.step
 
 	// Loop 변수 치환: 콤마 구분 리스트 값을 loop index로 선택
@@ -336,7 +336,7 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 		if *activeTraceJobID != "" {
 			// Trace already running, skip auto trace and notify user
 			slog.Info("skipping auto trace: trace already active", "active_trace", *activeTraceJobID)
-			out, metrics, err := o.executeStepInner(ctx, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
+			out, metrics, err := o.executeStepInner(ctx, job, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
 			warnMsg := fmt.Sprintf("TRACE_SKIPPED|step=%d|reason=trace already active (%s)", es.stepIndex, *activeTraceJobID)
 			return warnMsg + "\n" + out, metrics, err
 		}
@@ -365,7 +365,7 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 		*activeTraceJobID = traceJobID
 
 		// Execute the actual step
-		out, metrics, stepErr := o.executeStepInner(ctx, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
+		out, metrics, stepErr := o.executeStepInner(ctx, job, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
 
 		// Stop trace regardless of step result or context cancellation
 		slog.Info("stopping auto trace", "trace_job", traceJobID)
@@ -384,15 +384,29 @@ func (o *Orchestrator) executeStep(ctx context.Context, md *adb.ManagedDevice, e
 		return fullOut, metrics, stepErr
 	}
 
-	return o.executeStepInner(ctx, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
+	return o.executeStepInner(ctx, job, md, es, execIndex, stepFiles, deviceID, activeTraceJobID)
 }
 
-func (o *Orchestrator) executeStepInner(ctx context.Context, md *adb.ManagedDevice, es expandedStep, execIndex int, stepFiles map[int]string, deviceID string, activeTraceJobID *string) (string, map[string]float64, error) {
+func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.ManagedDevice, es expandedStep, execIndex int, stepFiles map[int]string, deviceID string, activeTraceJobID *string) (string, map[string]float64, error) {
 	step := es.step
 
 	switch step.Type {
 	case "benchmark":
 		return o.executeBenchmarkStep(ctx, md, step, es, execIndex, stepFiles)
+	case "iotest":
+		// iotest stderr 진행률을 IOTEST|... 메시지로 forward (frontend ScenarioCanvas 가 파싱).
+		onProg := func(line string) {
+			if job == nil {
+				return
+			}
+			job.notify(&pb.JobProgress{
+				JobId:    job.ID,
+				DeviceId: deviceID,
+				State:    pb.JobState_JOB_STATE_RUNNING,
+				Message:  line,
+			})
+		}
+		return o.executeIOTestStep(ctx, md, step, onProg)
 	case "shell":
 		cmd := step.Params["cmd"]
 		if cmd == "" {
@@ -650,6 +664,8 @@ func formatStepMessage(es expandedStep, totalSteps int) string {
 		stepDesc += fmt.Sprintf(": shell(%s)", cmd)
 	case "cleanup":
 		stepDesc += ": cleanup"
+	case "iotest":
+		stepDesc += ": iotest"
 	case "sleep":
 		stepDesc += fmt.Sprintf(": sleep %ss", es.step.Params["seconds"])
 	}
@@ -846,7 +862,7 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 
 			prevTraceID := activeTraceJobID
-			stepOut, stepMetrics, execErr := o.executeStep(ctx, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
+			stepOut, stepMetrics, execErr := o.executeStep(ctx, job, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
 
 			// trace 상태 변경 → job에 등록/해제
 			if activeTraceJobID != prevTraceID {
