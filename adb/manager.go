@@ -46,6 +46,13 @@ func NewManager() *Manager {
 	}
 }
 
+// Count returns the number of currently tracked devices.
+func (m *Manager) Count() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.devices)
+}
+
 // adbDeviceEntry holds parsed info from "adb devices -l".
 type adbDeviceEntry struct {
 	serial  string
