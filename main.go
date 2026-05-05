@@ -109,10 +109,7 @@ func main() {
 	// HTTP server for WebSocket screen streaming
 	mux := http.NewServeMux()
 	mux.Handle("/ws/screen/", screenHandler)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+	mux.HandleFunc("/health", newHealthHandler(mgr))
 	httpServer := &http.Server{Handler: mux}
 
 	// Start servers
