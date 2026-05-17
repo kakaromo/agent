@@ -7,6 +7,9 @@ cd "$SCRIPT_DIR"
 CONFIG="${1:-config/devices.toml}"
 BINARY="./agent"
 
+echo "=== Building UI ==="
+./build-ui.sh
+
 echo "=== Building agent ==="
 go build -o "$BINARY" .
 

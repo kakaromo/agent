@@ -1,0 +1,370 @@
+package server
+
+import (
+	pb "agent/pb"
+)
+
+// portal AgentController 와 동일한 enum 문자열 변환.
+// portal frontend 가 이 정확한 문자열을 기대한다.
+
+func deviceStateString(s pb.DeviceState) string {
+	switch s {
+	case pb.DeviceState_DEVICE_STATE_ONLINE:
+		return "online"
+	case pb.DeviceState_DEVICE_STATE_OFFLINE:
+		return "offline"
+	case pb.DeviceState_DEVICE_STATE_BUSY:
+		return "busy"
+	default:
+		return "unknown"
+	}
+}
+
+func jobStateString(s pb.JobState) string {
+	switch s {
+	case pb.JobState_JOB_STATE_QUEUED:
+		return "queued"
+	case pb.JobState_JOB_STATE_PUSHING_TOOLS:
+		return "pushing_tools"
+	case pb.JobState_JOB_STATE_RUNNING:
+		return "running"
+	case pb.JobState_JOB_STATE_COLLECTING:
+		return "collecting"
+	case pb.JobState_JOB_STATE_COMPLETED:
+		return "completed"
+	case pb.JobState_JOB_STATE_FAILED:
+		return "failed"
+	case pb.JobState_JOB_STATE_PARTIALLY_FAILED:
+		return "partially_failed"
+	case pb.JobState_JOB_STATE_CANCELLED:
+		return "cancelled"
+	case pb.JobState_JOB_STATE_REPARSING:
+		return "reparsing"
+	default:
+		return "unknown"
+	}
+}
+
+func benchmarkToolString(t pb.BenchmarkTool) string {
+	switch t {
+	case pb.BenchmarkTool_BENCHMARK_TOOL_FIO:
+		return "fio"
+	case pb.BenchmarkTool_BENCHMARK_TOOL_IOZONE:
+		return "iozone"
+	case pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST:
+		return "tiotest"
+	case pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST:
+		return "iotest"
+	default:
+		return "unspecified"
+	}
+}
+
+func parseBenchmarkTool(s string) pb.BenchmarkTool {
+	switch s {
+	case "FIO", "fio", "BENCHMARK_TOOL_FIO":
+		return pb.BenchmarkTool_BENCHMARK_TOOL_FIO
+	case "IOZONE", "iozone", "BENCHMARK_TOOL_IOZONE":
+		return pb.BenchmarkTool_BENCHMARK_TOOL_IOZONE
+	case "TIOTEST", "tiotest", "BENCHMARK_TOOL_TIOTEST":
+		return pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST
+	case "IOTEST", "iotest", "BENCHMARK_TOOL_IOTEST":
+		return pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST
+	default:
+		return pb.BenchmarkTool_BENCHMARK_TOOL_UNSPECIFIED
+	}
+}
+
+// ---------- proto → map (portal LinkedHashMap 직렬화 흉내) ----------
+
+func deviceToMap(d *pb.DeviceInfo) map[string]any {
+	return map[string]any{
+		"deviceId":       d.GetDeviceId(),
+		"serial":         d.GetSerial(),
+		"state":          deviceStateString(d.GetState()),
+		"androidVersion": d.GetAndroidVersion(),
+		"model":          d.GetModel(),
+		"board":          d.GetBoard(),
+		"platform":       d.GetPlatform(),
+		"hardware":       d.GetHardware(),
+		"cpuAbi":         d.GetCpuAbi(),
+		"buildId":        d.GetBuildId(),
+		"manufacturer":   d.GetManufacturer(),
+		"sdkVersion":     d.GetSdkVersion(),
+	}
+}
+
+func deviceJobStatusToMap(s *pb.DeviceJobStatus) map[string]any {
+	return map[string]any{
+		"deviceId":        s.GetDeviceId(),
+		"state":           jobStateString(s.GetState()),
+		"message":         s.GetMessage(),
+		"progressPercent": s.GetProgressPercent(),
+	}
+}
+
+func benchmarkResultToMap(r *pb.BenchmarkResult) map[string]any {
+	m := map[string]any{
+		"deviceId":   r.GetDeviceId(),
+		"tool":       benchmarkToolString(r.GetTool()),
+		"rawOutput":  r.GetRawOutput(),
+		"metrics":    r.GetMetrics(),
+		"startedAt":  r.GetStartedAt(),
+		"finishedAt": r.GetFinishedAt(),
+		"success":    r.GetSuccess(),
+		"error":      r.GetError(),
+	}
+	if len(r.GetTraceJobs()) > 0 {
+		jobs := make([]map[string]any, 0, len(r.GetTraceJobs()))
+		for _, tj := range r.GetTraceJobs() {
+			jobs = append(jobs, map[string]any{
+				"traceJobId":  tj.GetTraceJobId(),
+				"stepIndex":   tj.GetStepIndex(),
+				"loopIndex":   tj.GetLoopIndex(),
+				"repeatIndex": tj.GetRepeatIndex(),
+				"traceType":   tj.GetTraceType(),
+			})
+		}
+		m["traceJobs"] = jobs
+	}
+	return m
+}
+
+func metricsToMap(m *pb.DeviceMetrics) map[string]any {
+	result := map[string]any{
+		"deviceId":  m.GetDeviceId(),
+		"timestamp": m.GetTimestamp(),
+	}
+	if c := m.GetCpu(); c != nil {
+		result["cpu"] = map[string]any{
+			"usagePercent":   c.GetUsagePercent(),
+			"perCorePercent": c.GetPerCorePercent(),
+		}
+	}
+	if mem := m.GetMemory(); mem != nil {
+		result["memory"] = map[string]any{
+			"totalKb":      mem.GetTotalKb(),
+			"availableKb":  mem.GetAvailableKb(),
+			"usedKb":       mem.GetUsedKb(),
+			"usagePercent": mem.GetUsagePercent(),
+		}
+	}
+	if d := m.GetDisk(); d != nil {
+		result["disk"] = map[string]any{
+			"readBytes":  d.GetReadBytes(),
+			"writeBytes": d.GetWriteBytes(),
+			"readIos":    d.GetReadIos(),
+			"writeIos":   d.GetWriteIos(),
+		}
+	}
+	if dp := m.GetDataPartition(); dp != nil {
+		result["dataPartition"] = map[string]any{
+			"mountPoint":     dp.GetMountPoint(),
+			"filesystem":     dp.GetFilesystem(),
+			"totalBytes":     dp.GetTotalBytes(),
+			"usedBytes":      dp.GetUsedBytes(),
+			"availableBytes": dp.GetAvailableBytes(),
+			"usagePercent":   dp.GetUsagePercent(),
+		}
+	}
+	return result
+}
+
+// ---------- TraceStats / TraceEvent → map (portal toTraceStatsMap 그대로) ----------
+
+func latencyStatsToMap(l *pb.LatencyStats) map[string]any {
+	if l == nil {
+		return nil
+	}
+	return map[string]any{
+		"min":     l.GetMin(),
+		"max":     l.GetMax(),
+		"avg":     l.GetAvg(),
+		"stddev":  l.GetStddev(),
+		"median":  l.GetMedian(),
+		"p99":     l.GetP99(),
+		"p999":    l.GetP999(),
+		"p9999":   l.GetP9999(),
+		"p99999":  l.GetP99999(),
+		"p999999": l.GetP999999(),
+	}
+}
+
+func traceStatsToMap(s *pb.TraceStats) map[string]any {
+	if s == nil {
+		return nil
+	}
+	cmdStats := make([]map[string]any, 0, len(s.GetCmdStats()))
+	for _, c := range s.GetCmdStats() {
+		cmdStats = append(cmdStats, map[string]any{
+			"cmd":             c.GetCmd(),
+			"count":           c.GetCount(),
+			"ratio":           c.GetRatio(),
+			"dtoc":            latencyStatsToMap(c.GetDtoc()),
+			"ctod":            latencyStatsToMap(c.GetCtod()),
+			"ctoc":            latencyStatsToMap(c.GetCtoc()),
+			"qd":              latencyStatsToMap(c.GetQd()),
+			"totalSizeBytes":  c.GetTotalSizeBytes(),
+			"continuousCount": c.GetContinuousCount(),
+			"continuousRatio": c.GetContinuousRatio(),
+			"sendCount":       c.GetSendCount(),
+		})
+	}
+	hists := make([]map[string]any, 0, len(s.GetLatencyHistograms()))
+	for _, h := range s.GetLatencyHistograms() {
+		buckets := make([]map[string]any, 0, len(h.GetBuckets()))
+		for _, b := range h.GetBuckets() {
+			buckets = append(buckets, map[string]any{
+				"rangeStartMs": b.GetRangeStartMs(),
+				"rangeEndMs":   b.GetRangeEndMs(),
+				"count":        b.GetCount(),
+			})
+		}
+		hists = append(hists, map[string]any{
+			"cmd":         h.GetCmd(),
+			"latencyType": h.GetLatencyType(),
+			"buckets":     buckets,
+		})
+	}
+	sizes := make([]map[string]any, 0, len(s.GetCmdSizeCounts()))
+	for _, c := range s.GetCmdSizeCounts() {
+		sizes = append(sizes, map[string]any{
+			"cmd":   c.GetCmd(),
+			"size":  c.GetSize(),
+			"count": c.GetCount(),
+		})
+	}
+	return map[string]any{
+		"totalEvents":       s.GetTotalEvents(),
+		"durationSeconds":   s.GetDurationSeconds(),
+		"dtoc":              latencyStatsToMap(s.GetDtoc()),
+		"ctod":              latencyStatsToMap(s.GetCtod()),
+		"ctoc":              latencyStatsToMap(s.GetCtoc()),
+		"qd":                latencyStatsToMap(s.GetQd()),
+		"cmdStats":          cmdStats,
+		"latencyHistograms": hists,
+		"cmdSizeCounts":     sizes,
+		"continuousCount":   s.GetContinuousCount(),
+		"continuousRatio":   s.GetContinuousRatio(),
+		"alignedCount":      s.GetAlignedCount(),
+		"alignedRatio":      s.GetAlignedRatio(),
+		"readTotalBytes":    s.GetReadTotalBytes(),
+		"writeTotalBytes":   s.GetWriteTotalBytes(),
+		"discardTotalBytes": s.GetDiscardTotalBytes(),
+		"sendCount":         s.GetSendCount(),
+	}
+}
+
+func traceEventToMap(e *pb.TraceEvent) map[string]any {
+	return map[string]any{
+		"time":       e.GetTime(),
+		"lba":        e.GetLba(),
+		"qd":         e.GetQd(),
+		"cpu":        e.GetCpu(),
+		"dtoc":       e.GetDtoc(),
+		"ctod":       e.GetCtod(),
+		"ctoc":       e.GetCtoc(),
+		"cmd":        e.GetCmd(),
+		"size":       e.GetSize(),
+		"continuous": e.GetContinuous(),
+		"action":     e.GetAction(),
+	}
+}
+
+// ---------- TraceFilter body → proto ----------
+
+// buildTraceFilter — portal 의 buildTraceFilter 와 동일한 키 매핑.
+// 전달된 map 은 body["filter"] 의 내용물.
+func buildTraceFilter(f map[string]any) *pb.TraceFilter {
+	if f == nil {
+		return nil
+	}
+	out := &pb.TraceFilter{}
+	if v, ok := numberOf(f["startTime"]); ok {
+		out.StartTime = v
+	}
+	if v, ok := numberOf(f["endTime"]); ok {
+		out.EndTime = v
+	}
+	if v, ok := numberOf(f["startLba"]); ok {
+		out.StartLba = uint64(v)
+	}
+	if v, ok := numberOf(f["endLba"]); ok {
+		out.EndLba = uint64(v)
+	}
+	if v, ok := numberOf(f["minDtoc"]); ok {
+		out.MinDtoc = v
+	}
+	if v, ok := numberOf(f["maxDtoc"]); ok {
+		out.MaxDtoc = v
+	}
+	if v, ok := numberOf(f["minCtoc"]); ok {
+		out.MinCtoc = v
+	}
+	if v, ok := numberOf(f["maxCtoc"]); ok {
+		out.MaxCtoc = v
+	}
+	if v, ok := numberOf(f["minCtod"]); ok {
+		out.MinCtod = v
+	}
+	if v, ok := numberOf(f["maxCtod"]); ok {
+		out.MaxCtod = v
+	}
+	if v, ok := numberOf(f["minQd"]); ok {
+		out.MinQd = uint32(v)
+	}
+	if v, ok := numberOf(f["maxQd"]); ok {
+		out.MaxQd = uint32(v)
+	}
+	if arr, ok := f["cpuList"].([]any); ok {
+		for _, x := range arr {
+			if n, ok := numberOf(x); ok {
+				out.CpuList = append(out.CpuList, uint32(n))
+			}
+		}
+	}
+	if arr, ok := f["cmdList"].([]any); ok {
+		for _, x := range arr {
+			if s, ok := x.(string); ok {
+				out.CmdList = append(out.CmdList, s)
+			}
+		}
+	}
+	if arr, ok := f["sizeList"].([]any); ok {
+		for _, x := range arr {
+			if n, ok := numberOf(x); ok {
+				out.SizeList = append(out.SizeList, uint32(n))
+			}
+		}
+	}
+	if arr, ok := f["actionList"].([]any); ok {
+		for _, x := range arr {
+			if s, ok := x.(string); ok {
+				out.ActionList = append(out.ActionList, s)
+			}
+		}
+	}
+	return out
+}
+
+// numberOf — JSON unmarshal 시 모든 숫자는 float64. int/float 어떤 형태로 와도 float64 변환.
+func numberOf(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}

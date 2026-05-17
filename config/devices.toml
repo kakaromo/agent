@@ -4,6 +4,12 @@ tools_dir = "./tools"
 # trace_dir = 미설정 시 $HOME/agent_trace
 trace_grpc_port = 50053
 
+# Standalone 모드 — 출장 시 노트북 단독 사용.
+# Enabled=true 시 127.0.0.1 만 바인딩, Svelte UI 서빙, tools/trace 대신 Go 내장 파서 사용.
+# CLI 플래그(--standalone)로도 켤 수 있다.
+[standalone]
+enabled = false
+
 [minio]
 endpoint = "localhost:9000"
 access_key = "admin"

@@ -9,8 +9,21 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `toml:"server"`
-	Minio  MinioConfig  `toml:"minio"`
+	Server     ServerConfig     `toml:"server"`
+	Minio      MinioConfig      `toml:"minio"`
+	Standalone StandaloneConfig `toml:"standalone"`
+}
+
+// StandaloneConfig — 출장 시 노트북 단독 사용 모드.
+// Enabled=true 시:
+//   - 127.0.0.1 만 바인딩 (외부 노출 차단)
+//   - UI 임베드(ui/build) 활성화, '/' 에서 Svelte SPA 서빙
+//   - AGENT_PARSER=go 자동 설정 → tools/trace 외부 바이너리 미사용
+//   - SQLite 영속화 활성화 (DBPath 미지정 시 $HOME/.agent-standalone/agent.db)
+type StandaloneConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	DBPath      string `toml:"db_path"`
+	ArchiveBase string `toml:"archive_base"` // 비어있으면 $HOME/.agent-standalone/archive
 }
 
 type ServerConfig struct {

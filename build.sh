@@ -8,6 +8,9 @@ VERSION=$(git describe --tags --always 2>/dev/null || echo "dev")
 DIST_DIR="dist"
 mkdir -p "$DIST_DIR"
 
+echo "=== Building UI (standalone embed) ==="
+./build-ui.sh
+
 echo "=== Building agent v${VERSION} ==="
 
 # macOS ARM64
