@@ -2,6 +2,7 @@
 agent
 agent.exe
 /iotest
+/goparse
 dist/
 
 # Tools (ARM64 binaries, too large for git)
