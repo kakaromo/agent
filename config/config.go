@@ -14,10 +14,12 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port          int    `toml:"port"`
-	ToolsDir      string `toml:"tools_dir"`
-	TraceDir      string `toml:"trace_dir"`
-	TraceGrpcPort int    `toml:"trace_grpc_port"`
+	Port     int    `toml:"port"`
+	ToolsDir string `toml:"tools_dir"`
+	TraceDir string `toml:"trace_dir"`
+	// TraceGrpcPort 는 deprecated — 실시간 파싱 경로(50053 gRPC) 제거 후 사용되지 않는다.
+	// toml 호환을 위해 필드는 남겨두지만 무시된다.
+	TraceGrpcPort int `toml:"trace_grpc_port,omitempty"`
 }
 
 type MinioConfig struct {
@@ -46,9 +48,6 @@ func Load(path string) (*Config, error) {
 	if cfg.Server.TraceDir == "" {
 		home, _ := os.UserHomeDir()
 		cfg.Server.TraceDir = filepath.Join(home, "agent_trace")
-	}
-	if cfg.Server.TraceGrpcPort == 0 {
-		cfg.Server.TraceGrpcPort = 50053
 	}
 	if cfg.Minio.Bucket == "" {
 		cfg.Minio.Bucket = "agent"

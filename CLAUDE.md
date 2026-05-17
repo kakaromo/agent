@@ -41,91 +41,60 @@ Proto 컴파일: `protoc --go_out=. --go-grpc_out=. proto/agent.proto`
 
 ## Trace 수집 흐름
 
-### 기본 흐름 (현재 구현)
+### 현재 구현 (parquet-only 단일화)
+
+수집 중 윈도우 단위 실시간 파싱(`--client realtime` + 50053 gRPC) 은 폐기됐다.
+StopTrace 후 보존된 trace.log 를 `tools/trace --parquet-only` 로 한 번에 파싱해
+`result_<type>.parquet` 을 생성한다. ReparseTrace 는 같은 경로를 재호출한다.
 
 ```
-StartTrace → adb trace_pipe → trace.log 파일 수집
-StopTrace  → trace 바이너리로 일괄 파싱 (--parquet-only) → Parquet 생성
-GetTraceResult → DuckDB로 Parquet 읽어서 통계 반환
+[StartTrace]
+   ├─ ftrace 이벤트 enable + tracing_on=1
+   └─ adb shell cat trace_pipe → trace.log (append, append 만 함)
+
+[StopTrace]
+   ├─ tracing_on=0, adb 프로세스 종료 (동기)
+   ├─ 상태 COLLECTING 으로 전환 후 즉시 RPC 리턴
+   └─ 백그라운드: runParquetOnly
+        ├─ trace <log> <OutputDir>/result --parquet-only
+        ├─ stdout 진행률 → SubscribeJobProgress forward
+        └─ 완료 시 상태 COMPLETED, trace.log 는 보존
+
+[GetTraceResult] / [GetTraceRawData]
+   ├─ RUNNING/COLLECTING/REPARSING 상태면 명시적 차단
+   └─ DuckDB 가 result_*.parquet 을 읽어 통계/raw 반환
+
+[ReparseTrace]
+   └─ runParquetOnly 재호출 (기존 result_*.parquet 정리 후 재생성)
 ```
 
-- `StartTrace`: 디바이스의 ftrace 이벤트 활성화 → `adb shell cat trace_pipe` → 로그 파일 기록
-- `StopTrace`: tracing 비활성화 → adb 프로세스 종료 → `tools/trace --parquet-only <log> <output>` 실행
+- `StartTrace`: 디바이스 ftrace 이벤트 활성화 → `adb shell cat trace_pipe` → trace.log.
+  파싱 자식 프로세스는 띄우지 않는다.
+- `StopTrace`: tracing 중지 + adb 종료(동기) → COLLECTING → 백그라운드에서
+  parquet-only 1회 → COMPLETED. **trace.log 는 삭제하지 않고 보존** (ReparseTrace 용).
 - trace_type: `ufs`, `block`, `both` 지원
 
-### 실시간 파싱 모드 (trace 서버 기능)
+### runParquetOnly (`trace/tracer.go`)
 
-trace 바이너리(`tools/trace`)에는 실시간 파싱 기능이 있어, 로그가 쌓이는 동안 실시간으로 Parquet를 생성할 수 있습니다.
+`finalizeTrace` 와 `doReparse` 가 공유하는 단일 함수. `tools/trace <log> <prefix> --parquet-only`
+를 호출해 산출 prefix(`OutputDir/result`) 로 `result_<type>.parquet` 을 만든다.
+호출 전 기존 `result_*.parquet` / legacy `realtime_*.parquet` 를 정리한다.
 
-#### 실시간 파싱 아키텍처
+### 운영 영향
 
-```
-[adb trace_pipe] → trace.log (계속 append)
-                      ↓
-              [trace gRPC 서버] tail -f 방식 감시
-                      ↓
-              윈도우(기본 1초)마다 Parquet 생성
-                realtime_000001.parquet (완료)
-                realtime_000002.parquet (완료)
-                realtime_000003.parquet (작성 중)
-```
+- 수집 도중 조회 불가: COLLECTING 동안 `GetTraceResult` 호출 시 명시적 에러.
+- stop 후 parquet 생성까지 latency: trace.log 크기에 비례한 일괄 파싱 시간 만큼 대기.
+- agent 기동 시 자식 프로세스 없음: 50053 gRPC 서버, `--client realtime` 모두 사용 안 함.
+- `config.devices.toml` 의 `trace_grpc_port` 는 deprecated 필드 (toml 호환 위해 남김, 무시됨).
 
-#### 실시간 파싱 사용법
+### 통계 조회 시 parquet 매칭
 
-trace 바이너리의 gRPC 서버를 별도로 실행해야 합니다:
+`trace/stats.go` 는 다음 파일명 패턴을 인식 (legacy 잡 호환):
+  - 현재:    `result_ufs.parquet` / `result_block.parquet` / `result_ufscustom.parquet`
+  - merged:  `ufs.parquet` / `block.parquet` / `ufscustom.parquet`
+  - legacy:  `realtime_ufs_NNNNNN.parquet` / `realtime_block_*` / `realtime_ufscustom_*`
 
-```bash
-# 1. trace gRPC 서버 실행 (MinIO 환경변수 필요)
-export MINIO_ENDPOINT=http://localhost:9000
-export MINIO_ACCESS_KEY=admin
-export MINIO_SECRET_KEY=<secret>
-export MINIO_BUCKET=trace
-./tools/trace --grpc-server --port 50053
-
-# 2. 실시간 파싱 시작 (다른 터미널)
-./tools/trace --client realtime \
-  --server localhost:50053 \
-  --source-path /tmp/agent_trace/<job_id>/trace.log \
-  --output-dir /tmp/agent_trace/<job_id>/realtime \
-  --log-type ufs \
-  --window 1
-
-# 3. 실시간 파싱 중지
-./tools/trace --client stop --server localhost:50053 --job-id <REALTIME_JOB_ID>
-```
-
-#### 실시간 파싱 핵심 특성
-
-- **윈도우별 파일 생성**: 지정 시간(기본 1초)마다 새 Parquet 파일 생성 (`realtime_NNNNNN.parquet`)
-- **Atomic 쓰기**: `.tmp`에 먼저 쓰고 완료 후 `.parquet`로 rename → 읽기 충돌 없음
-- **Bottom Half 증분 처리**: UFS/Block의 send↔complete 매칭을 윈도우 간에 상태 유지
-- **DuckDB 호환**: `read_parquet('realtime_*.parquet')` 글로브 패턴으로 전체 조회 가능
-- log_type: `ufs`, `block`, `ufscustom` 지원
-
-#### 중단 시 Parquet 병합
-
-실시간 파싱 중단(`stop`) 후 윈도우별 파일들을 하나로 병합해야 합니다. trace 바이너리에는 자동 merge 기능이 없으므로 DuckDB로 직접 병합:
-
-```sql
-COPY (
-  SELECT * FROM read_parquet('/tmp/agent_trace/<job_id>/realtime/realtime_*.parquet')
-  ORDER BY time
-) TO '/tmp/agent_trace/<job_id>/result.parquet' (FORMAT PARQUET);
-```
-
-또는 Go 코드에서 DuckDB를 이용해 병합:
-```go
-db.Exec(`COPY (SELECT * FROM read_parquet(?) ORDER BY time) TO ? (FORMAT PARQUET)`,
-    filepath.Join(outputDir, "realtime_*.parquet"),
-    filepath.Join(outputDir, "result.parquet"))
-```
-
-#### agent에서 활용 시나리오
-
-1. `StartTrace`로 adb trace_pipe 수집 시작
-2. trace gRPC 서버의 realtime 모드로 로그 파일을 실시간 파싱
-3. 실시간으로 생성되는 Parquet를 DuckDB로 읽어 라이브 통계 제공
-4. `StopTrace` 시 realtime 파싱도 중지 → DuckDB로 윈도우 파일 병합 → 단일 Parquet로 결과 조회
+mixed schema (UFS + Block 동시 수집) 는 DuckDB `union_by_name=true` 로 합쳐 읽는다.
 
 ### Parquet 스키마 (trace 바이너리 출력)
 

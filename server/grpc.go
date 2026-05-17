@@ -240,18 +240,25 @@ func (s *DeviceAgentServer) GetTraceRawData(ctx context.Context, req *pb.GetTrac
 }
 
 // collectTraceJobInfos resolves job IDs to parquet directories and trace types.
+//
+// parquet-only 단일화 후 RUNNING/COLLECTING/REPARSING 동안에는 result_*.parquet 가
+// 존재하지 않으므로 조회를 명시적으로 차단한다.
 func (s *DeviceAgentServer) collectTraceJobInfos(jobIDs []string) ([]*trace.TraceJobInfo, error) {
 	if len(jobIDs) == 0 {
 		return nil, fmt.Errorf("no job_ids provided")
 	}
 	var infos []*trace.TraceJobInfo
 	for _, id := range jobIDs {
-		// REPARSING 중이면 쿼리 차단
 		if job, err := s.traceMgr.GetJob(id); err == nil {
 			job.Mu.Lock()
 			state := job.State
 			job.Mu.Unlock()
-			if state == pb.JobState_JOB_STATE_REPARSING {
+			switch state {
+			case pb.JobState_JOB_STATE_RUNNING:
+				return nil, fmt.Errorf("job %s is still collecting — stop trace first", id)
+			case pb.JobState_JOB_STATE_COLLECTING:
+				return nil, fmt.Errorf("job %s is parsing trace.log — wait for COMPLETED", id)
+			case pb.JobState_JOB_STATE_REPARSING:
 				return nil, fmt.Errorf("job %s is currently being reparsed", id)
 			}
 		}
@@ -544,12 +551,38 @@ func (s *DeviceAgentServer) MonitorDevices(req *pb.MonitorDevicesRequest, stream
 		return fmt.Errorf("no online devices to monitor")
 	}
 
-	ctx := stream.Context()
+	// stream.Context() 는 RPC 종료 시 cancel 되지만, stream.Send 실패로 핸들러가 먼저
+	// 리턴해야 하는 경우 collector goroutine 들을 즉시 깨우려면 자식 ctx 가 필요하다.
+	// 또한 핸들러 리턴 후 collector goroutine 이 ch 에 쓰려다 hang 되는 것을 막기 위해
+	// 종료 시 명시적 cancel + WaitGroup 으로 모든 collector 가 멈출 때까지 대기한다.
+	ctx, cancel := context.WithCancel(stream.Context())
 	ch := make(chan *pb.DeviceMetrics, len(deviceIDs)*4)
-
+	var wg sync.WaitGroup
 	for _, id := range deviceIDs {
-		go s.collector.StreamMetrics(ctx, id, req.IntervalSeconds, ch)
+		wg.Add(1)
+		go func(devID string) {
+			defer wg.Done()
+			s.collector.StreamMetrics(ctx, devID, req.IntervalSeconds, ch)
+		}(id)
 	}
+
+	// 정리 순서:
+	//   1) cancel() — collector 들이 ctx.Done 을 감지하고 종료에 들어감
+	//   2) drain goroutine — collector 가 ctx 체크 직전 ch <- 시도 중일 수 있어 막힘 방지
+	//   3) wg.Wait() — 모든 collector 가 실제로 리턴할 때까지 대기
+	//   4) close(ch) — drain goroutine 종료
+	defer func() {
+		cancel()
+		drainDone := make(chan struct{})
+		go func() {
+			for range ch {
+			}
+			close(drainDone)
+		}()
+		wg.Wait()
+		close(ch)
+		<-drainDone
+	}()
 
 	for {
 		select {

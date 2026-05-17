@@ -14,18 +14,17 @@ import (
 var defaultLatencyRanges = []float64{0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000}
 
 // parquetGlobPatterns returns file glob patterns for a trace type.
-// Covers all naming conventions:
-//   realtime:    realtime_ufs_000001.parquet
-//   parquet-only: result_ufs.parquet
-//   merged:      ufs.parquet
+//
+// parquet-only 단일화 후 산출물은 result_<type>.parquet 한 개. legacy 잡과의 호환을
+// 위해 merged 명(<type>.parquet) 과 윈도우 분할(realtime_<type>_*.parquet) 도 인식한다.
 func parquetGlobPatterns(traceType string) []string {
 	switch traceType {
 	case "ufs":
-		return []string{"realtime_ufs_*.parquet", "result_ufs.parquet", "ufs.parquet"}
+		return []string{"result_ufs.parquet", "ufs.parquet", "realtime_ufs_*.parquet"}
 	case "block":
-		return []string{"realtime_block_*.parquet", "result_block.parquet", "block.parquet"}
+		return []string{"result_block.parquet", "block.parquet", "realtime_block_*.parquet"}
 	case "ufscustom":
-		return []string{"realtime_ufscustom_*.parquet", "result_ufscustom.parquet", "ufscustom.parquet"}
+		return []string{"result_ufscustom.parquet", "ufscustom.parquet", "realtime_ufscustom_*.parquet"}
 	default:
 		return []string{"*.parquet"}
 	}

@@ -51,10 +51,7 @@ func main() {
 
 	orch := benchmark.NewOrchestrator(mgr, cfg.Server.ToolsDir)
 	coll := monitor.NewCollector(mgr)
-	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir, cfg.Server.TraceGrpcPort)
-	if err := traceMgr.StartTraceServer(); err != nil {
-		slog.Warn("failed to start trace gRPC server", "error", err)
-	}
+	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir)
 	orch.SetTraceController(traceMgr)
 
 	// MinIO client (optional)
@@ -146,7 +143,6 @@ func main() {
 		}
 
 		httpServer.Close()
-		traceMgr.StopTraceServer()
 		cancel()
 	}()
 
