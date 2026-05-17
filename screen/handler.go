@@ -97,20 +97,38 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 	ws.EnableWriteCompression(false) // compression adds latency
 
+	// gorilla/websocket 은 동시 Write 비허용 — video frame, requestSync 응답, 초기 info JSON
+	// 이 모두 같은 conn 에 쓰므로 mutex 로 직렬화한다.
+	var wsWriteMu sync.Mutex
+	wsWriteBinary := func(data []byte) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteMessage(websocket.BinaryMessage, data)
+	}
+	wsWriteJSON := func(v interface{}) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteJSON(v)
+	}
+	wsWriteClose := func(closeCode int, msg string) {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(closeCode, msg))
+	}
+
 	slog.Info("screen session requested", "device", deviceID, "serial", serial)
 
 	// Start scrcpy session
 	session, err := h.scrcpyMgr.StartSession(r.Context(), deviceID, serial, 1080, 4000000)
 	if err != nil {
 		slog.Error("start scrcpy session failed", "device", deviceID, "error", err)
-		ws.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()))
+		wsWriteClose(websocket.CloseInternalServerErr, err.Error())
 		return
 	}
 	defer h.scrcpyMgr.StopSession(deviceID)
 
 	// Send initial info message with resolution
-	ws.WriteJSON(map[string]interface{}{
+	wsWriteJSON(map[string]interface{}{
 		"type":    "info",
 		"device":  deviceID,
 		"serial":  serial,
@@ -128,9 +146,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Read scrcpy video packets and forward H.264 data to WebSocket.
 	// scrcpy v2.x packet: [PTS:8bytes][size:4bytes][H.264 data:size bytes]
-	done := make(chan struct{})
+	//
+	// 두 goroutine (video read, control read) 모두 추적해야 누수가 없다:
+	//   - video 가 먼저 끝나면 ws.Close() 로 control 의 ws.ReadMessage 를 깨운다
+	//   - control 이 먼저 끝나면 session.Close() 로 video 의 VideoConn.Read 를 깨운다
+	//   - 마지막에 두 goroutine 모두 종료 대기
+	videoDone := make(chan struct{})
+	controlDone := make(chan struct{})
 	go func() {
-		defer close(done)
+		defer close(videoDone)
 		hdr := make([]byte, 12)
 		for {
 			if _, err := io.ReadFull(session.VideoConn, hdr); err != nil {
@@ -165,7 +189,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			cacheMu.Unlock()
 
-			if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			if err := wsWriteBinary(frame); err != nil {
 				slog.Debug("ws write error", "error", err)
 				return
 			}
@@ -174,6 +198,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Read control messages from WebSocket and forward to scrcpy
 	go func() {
+		defer close(controlDone)
 		for {
 			_, msg, err := ws.ReadMessage()
 			if err != nil {
@@ -227,13 +252,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				default:
 				}
 				cacheMu.Lock()
-				if lastConfig != nil {
-					ws.WriteMessage(websocket.BinaryMessage, lastConfig)
-				}
-				if lastKeyframe != nil {
-					ws.WriteMessage(websocket.BinaryMessage, lastKeyframe)
-				}
+				cfg := lastConfig
+				kf := lastKeyframe
 				cacheMu.Unlock()
+				if cfg != nil {
+					wsWriteBinary(cfg)
+				}
+				if kf != nil {
+					wsWriteBinary(kf)
+				}
 				continue
 			}
 
@@ -243,7 +270,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Wait for video stream to end
-	<-done
+	// video 가 끝나면 control 의 ReadMessage 를 ws.Close() 로 깨워 종료시킨다.
+	// 그 다음 두 goroutine 모두 끝날 때까지 대기 — 누수 방지.
+	<-videoDone
+	ws.Close()
+	<-controlDone
 	slog.Info("screen session ended", "device", deviceID)
 }
