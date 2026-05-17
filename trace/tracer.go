@@ -78,6 +78,13 @@ type Manager struct {
 }
 
 func NewManager(adbMgr *adb.Manager, toolsDir, traceDir string) *Manager {
+	if traceDir == "" {
+		// 빈 문자열이면 outputDir 가 jobID 한 글자가 되어 cwd 에 trace.log 가 쌓인다.
+		// config.Load 가 default 를 채워주지만, NewManager 직접 호출자나 home 디렉토리
+		// 조회 실패 같은 엣지 케이스를 위한 마지막 방어선.
+		traceDir = filepath.Join(os.TempDir(), "agent_trace")
+		slog.Warn("trace dir empty, falling back to temp", "trace_dir", traceDir)
+	}
 	return &Manager{
 		jobs:       make(map[string]*TraceJob),
 		adbMgr:     adbMgr,
@@ -191,9 +198,24 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	slog.Info("trace started", "job_id", jobID, "device", req.DeviceId, "type", traceType,
 		"output_dir", outputDir)
 
-	// Wait for adb process in background
+	// Wait for adb process in background.
+	// adbCancel 이 호출되면 exec.CommandContext 가 SIGKILL 을 보내므로 Wait 가 즉시 풀린다.
+	// 그래도 adb 가 좀비/uninterruptible 상태로 빠질 가능성을 대비해 timeout 후 강제 Kill.
 	go func() {
-		adbCmd.Wait()
+		done := make(chan struct{})
+		go func() {
+			adbCmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			slog.Warn("adb trace_pipe wait timeout, force killing", "job_id", jobID, "pid", adbCmd.Process.Pid)
+			if adbCmd.Process != nil {
+				adbCmd.Process.Kill()
+			}
+			<-done // 짧게는 반환된다 (Kill 후)
+		}
 		logFd.Close()
 	}()
 
