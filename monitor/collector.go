@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -129,7 +130,11 @@ func parseCPUFields(line string) []uint64 {
 	}
 	vals := make([]uint64, 0, len(fields)-1)
 	for _, f := range fields[1:] {
-		v, _ := strconv.ParseUint(f, 10, 64)
+		v, err := strconv.ParseUint(f, 10, 64)
+		if err != nil {
+			// /proc/stat 첫 필드가 정수 아니면 커널 포맷 변화 가능성 — 1회 경고 후 0 으로 진행.
+			slog.Warn("parse /proc/stat field failed", "cpu_label", fields[0], "value", f, "error", err)
+		}
 		vals = append(vals, v)
 	}
 	return vals
@@ -190,7 +195,11 @@ func parseMemValue(line string) uint64 {
 	if len(fields) < 2 {
 		return 0
 	}
-	v, _ := strconv.ParseUint(fields[1], 10, 64)
+	v, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		slog.Warn("parse /proc/meminfo value failed", "key", fields[0], "value", fields[1], "error", err)
+		return 0
+	}
 	return v
 }
 
@@ -204,10 +213,14 @@ func parseDiskStats(data string) *pb.DiskMetrics {
 		// Look for common block devices
 		devName := fields[2]
 		if devName == "sda" || devName == "dm-0" || devName == "mmcblk0" || devName == "vda" {
-			readIOs, _ := strconv.ParseUint(fields[3], 10, 64)
-			readSectors, _ := strconv.ParseUint(fields[5], 10, 64)
-			writeIOs, _ := strconv.ParseUint(fields[7], 10, 64)
-			writeSectors, _ := strconv.ParseUint(fields[9], 10, 64)
+			readIOs, err1 := strconv.ParseUint(fields[3], 10, 64)
+			readSectors, err2 := strconv.ParseUint(fields[5], 10, 64)
+			writeIOs, err3 := strconv.ParseUint(fields[7], 10, 64)
+			writeSectors, err4 := strconv.ParseUint(fields[9], 10, 64)
+			if err := firstErr(err1, err2, err3, err4); err != nil {
+				slog.Warn("parse /proc/diskstats failed", "device", devName, "error", err)
+				continue
+			}
 			m.ReadIos += readIOs
 			m.ReadBytes += readSectors * 512
 			m.WriteIos += writeIOs
@@ -237,9 +250,13 @@ func parseDfAndMount(dfData, mountData string) *pb.FilesystemInfo {
 		if lastField == "/data" || strings.HasPrefix(lastField, "/data/") {
 			// df output: Filesystem 1K-blocks Used Available Use% Mounted
 			if len(fields) >= 6 {
-				total, _ := strconv.ParseUint(fields[1], 10, 64)
-				used, _ := strconv.ParseUint(fields[2], 10, 64)
-				avail, _ := strconv.ParseUint(fields[3], 10, 64)
+				total, err1 := strconv.ParseUint(fields[1], 10, 64)
+				used, err2 := strconv.ParseUint(fields[2], 10, 64)
+				avail, err3 := strconv.ParseUint(fields[3], 10, 64)
+				if err := firstErr(err1, err2, err3); err != nil {
+					slog.Warn("parse df output failed", "line", line, "error", err)
+					break
+				}
 				fi.TotalBytes = total * 1024
 				fi.UsedBytes = used * 1024
 				fi.AvailableBytes = avail * 1024
@@ -264,4 +281,13 @@ func parseDfAndMount(dfData, mountData string) *pb.FilesystemInfo {
 	}
 
 	return fi
+}
+
+func firstErr(errs ...error) error {
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+	return nil
 }
