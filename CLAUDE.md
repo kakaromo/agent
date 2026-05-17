@@ -80,6 +80,18 @@ StopTrace 후 보존된 trace.log 를 `tools/trace --parquet-only` 로 한 번�
 를 호출해 산출 prefix(`OutputDir/result`) 로 `result_<type>.parquet` 을 만든다.
 호출 전 기존 `result_*.parquet` / legacy `realtime_*.parquet` 를 정리한다.
 
+### Go 내장 파서 (`trace/parser/`)
+
+`AGENT_PARSER=go` 환경변수가 설정되면 Rust 자식 프로세스 대신 Go 내장 파서를 사용한다.
+정합성 검증/A-B 비교용 분기이며, 안정화 후 기본값을 Go 로 전환할 예정.
+
+```bash
+AGENT_PARSER=go ./agent -config config/devices.toml
+```
+
+같은 trace.log 로 두 파서를 각각 돌려 DuckDB `EXCEPT` 로 row-by-row 비교 (Rust 결과
+ground truth). 차이가 0 이 되면 Rust 의존 제거를 검토한다.
+
 ### 운영 영향
 
 - 수집 도중 조회 불가: COLLECTING 동안 `GetTraceResult` 호출 시 명시적 에러.

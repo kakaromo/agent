@@ -15,6 +15,7 @@ import (
 
 	"agent/adb"
 	pb "agent/pb"
+	"agent/trace/parser"
 
 	"github.com/google/uuid"
 )
@@ -288,6 +289,10 @@ func (m *Manager) finalizeTrace(job *TraceJob) {
 // runParquetOnly — trace.log 를 일괄 파싱해 OutputDir 에 result_*.parquet 을 생성한다.
 // progressState 는 진행률 알림에 실어 보낼 JobState (COLLECTING 또는 REPARSING).
 // 호출 전에 기존 result_*.parquet 가 있으면 삭제한다.
+//
+// AGENT_PARSER=go 환경변수가 설정되면 Go 내장 파서(`trace/parser`) 를 사용한다.
+// 기본은 Rust `tools/trace --parquet-only` 자식 프로세스. 1단계 안정 운영 후 Go 파서로
+// 정합성 검증을 거쳐 점진적으로 전환한다.
 func (m *Manager) runParquetOnly(job *TraceJob, progressState pb.JobState) error {
 	jobID := job.ID
 
@@ -312,6 +317,19 @@ func (m *Manager) runParquetOnly(job *TraceJob, progressState pb.JobState) error
 				_ = os.Remove(filepath.Join(legacyDir, e.Name()))
 			}
 		}
+	}
+
+	// Go 내장 파서 분기 — AGENT_PARSER=go 일 때만.
+	if os.Getenv("AGENT_PARSER") == "go" {
+		slog.Info("using Go embedded parser", "job_id", jobID, "trace_type", job.TraceType)
+		progressFn := func(line string) {
+			job.notify(&pb.JobProgress{
+				JobId:   jobID,
+				State:   progressState,
+				Message: line,
+			})
+		}
+		return parser.RunParquetOnly(job.LogFile, job.OutputDir, job.TraceType, progressFn)
 	}
 
 	traceBin := filepath.Join(m.toolsDir, "trace")
