@@ -71,6 +71,14 @@ func (e *adbDeviceEntry) deviceID() string {
 }
 
 // Refresh discovers devices via "adb devices -l" and updates the internal state.
+//
+// 락 보유 시간 최소화 정책:
+//  1. 락 잡고 → state 갱신(disconnect/reconnect) + 신규 디바이스 후보 추출 후 즉시 unlock
+//  2. 락 밖에서 → 신규 디바이스마다 getprop/initTracing 병렬 수행 (디바이스당 16+ adb shell 호출)
+//  3. 락 다시 잡고 → 결과를 map 에 반영
+//
+// 이렇게 하지 않으면 디바이스 5대 신규일 때 80+ adb shell 호출이 락 안에서 직렬로 돌아
+// ListDevices/GetDevice 등 다른 RPC 가 수 초간 블로킹된다.
 func (m *Manager) Refresh(ctx context.Context) {
 	entries, err := listAdbDevices(ctx)
 	if err != nil {
@@ -78,15 +86,14 @@ func (m *Manager) Refresh(ctx context.Context) {
 		return
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Build set of current device IDs
-	currentIDs := make(map[string]bool)
+	// === Phase 1: 락 안에서 빠른 작업만 ===
+	currentIDs := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		currentIDs[e.deviceID()] = true
 	}
 
+	var newEntries []adbDeviceEntry
+	m.mu.Lock()
 	// Mark missing devices as offline
 	for id, md := range m.devices {
 		if !currentIDs[id] && md.State != pb.DeviceState_DEVICE_STATE_OFFLINE {
@@ -94,12 +101,10 @@ func (m *Manager) Refresh(ctx context.Context) {
 			md.State = pb.DeviceState_DEVICE_STATE_OFFLINE
 		}
 	}
-
-	// Add new devices or bring back online
+	// 기존 디바이스는 reconnect 처리, 신규는 phase 2 후보로 모음
 	for _, entry := range entries {
 		id := entry.deviceID()
 		if md, ok := m.devices[id]; ok {
-			// Update serial in case it changed (reconnect)
 			md.Serial = entry.serial
 			if md.State == pb.DeviceState_DEVICE_STATE_OFFLINE {
 				slog.Info("device reconnected", "device_id", id, "serial", entry.serial)
@@ -107,63 +112,104 @@ func (m *Manager) Refresh(ctx context.Context) {
 			}
 			continue
 		}
-
-		dev := NewDevice(entry.serial)
-		md := &ManagedDevice{
-			Device:   dev,
-			DeviceID: id,
-			Serial:   entry.serial,
-			UsbID:    entry.usbID,
-			Product:  entry.product,
-			Model:    entry.model,
-			State:    pb.DeviceState_DEVICE_STATE_ONLINE,
-		}
-
-		if ver, err := dev.GetProp(ctx, "ro.build.version.release"); err == nil {
-			md.AndroidVersion = ver
-		}
-		if md.Model == "" {
-			if model, err := dev.GetProp(ctx, "ro.product.model"); err == nil {
-				md.Model = model
-			}
-		}
-
-		// Board info
-		if v, err := dev.GetProp(ctx, "ro.product.board"); err == nil {
-			md.Board = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.board.platform"); err == nil {
-			md.Platform = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.hardware"); err == nil {
-			md.Hardware = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.product.cpu.abi"); err == nil {
-			md.CpuAbi = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.build.display.id"); err == nil {
-			md.BuildID = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.product.manufacturer"); err == nil {
-			md.Manufacturer = v
-		}
-		if v, err := dev.GetProp(ctx, "ro.build.version.sdk"); err == nil {
-			if sdk, err := strconv.Atoi(v); err == nil {
-				md.SdkVersion = int32(sdk)
-			}
-		}
-
-		// Find tracing directory
-		md.TracingDir = findTracingDir(ctx, dev)
-
-		// Initialize tracing if found
-		if md.TracingDir != "" {
-			initTracing(ctx, dev, md.TracingDir)
-		}
-
-		slog.Info("device discovered", "device_id", id, "serial", entry.serial, "usb", entry.usbID, "model", md.Model, "board", md.Board, "platform", md.Platform, "android", md.AndroidVersion)
-		m.devices[id] = md
+		newEntries = append(newEntries, entry)
 	}
+	m.mu.Unlock()
+
+	if len(newEntries) == 0 {
+		return
+	}
+
+	// === Phase 2: 락 밖에서 신규 디바이스 메타 수집 (디바이스 간 병렬) ===
+	type result struct {
+		id string
+		md *ManagedDevice
+	}
+	results := make([]result, len(newEntries))
+	var wg sync.WaitGroup
+	for i, entry := range newEntries {
+		wg.Add(1)
+		go func(i int, entry adbDeviceEntry) {
+			defer wg.Done()
+			results[i] = result{id: entry.deviceID(), md: probeDevice(ctx, entry)}
+		}(i, entry)
+	}
+	wg.Wait()
+
+	// === Phase 3: 락 잡고 map 갱신 ===
+	m.mu.Lock()
+	for _, r := range results {
+		if r.md == nil {
+			continue
+		}
+		// 락을 푼 사이 중복 등록되었거나 사라졌을 수 있음 — 재확인
+		if _, ok := m.devices[r.id]; ok {
+			continue
+		}
+		m.devices[r.id] = r.md
+	}
+	m.mu.Unlock()
+
+	for _, r := range results {
+		if r.md == nil {
+			continue
+		}
+		slog.Info("device discovered", "device_id", r.id, "serial", r.md.Serial, "usb", r.md.UsbID,
+			"model", r.md.Model, "board", r.md.Board, "platform", r.md.Platform, "android", r.md.AndroidVersion)
+	}
+}
+
+// probeDevice — 락 밖에서 신규 디바이스 메타정보를 수집한다.
+// 디바이스당 약 16번의 adb shell 호출이 직렬로 일어나므로 호출자는 디바이스 간 병렬화 권장.
+func probeDevice(ctx context.Context, entry adbDeviceEntry) *ManagedDevice {
+	dev := NewDevice(entry.serial)
+	md := &ManagedDevice{
+		Device:   dev,
+		DeviceID: entry.deviceID(),
+		Serial:   entry.serial,
+		UsbID:    entry.usbID,
+		Product:  entry.product,
+		Model:    entry.model,
+		State:    pb.DeviceState_DEVICE_STATE_ONLINE,
+	}
+
+	if ver, err := dev.GetProp(ctx, "ro.build.version.release"); err == nil {
+		md.AndroidVersion = ver
+	}
+	if md.Model == "" {
+		if model, err := dev.GetProp(ctx, "ro.product.model"); err == nil {
+			md.Model = model
+		}
+	}
+	if v, err := dev.GetProp(ctx, "ro.product.board"); err == nil {
+		md.Board = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.board.platform"); err == nil {
+		md.Platform = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.hardware"); err == nil {
+		md.Hardware = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.product.cpu.abi"); err == nil {
+		md.CpuAbi = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.build.display.id"); err == nil {
+		md.BuildID = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.product.manufacturer"); err == nil {
+		md.Manufacturer = v
+	}
+	if v, err := dev.GetProp(ctx, "ro.build.version.sdk"); err == nil {
+		if sdk, err := strconv.Atoi(v); err == nil {
+			md.SdkVersion = int32(sdk)
+		}
+	}
+
+	md.TracingDir = findTracingDir(ctx, dev)
+	if md.TracingDir != "" {
+		initTracing(ctx, dev, md.TracingDir)
+	}
+	return md
 }
 
 // StartRefreshLoop periodically refreshes the device list.
