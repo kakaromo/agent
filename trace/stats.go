@@ -3,6 +3,7 @@ package trace
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
@@ -151,7 +152,7 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	for _, cs := range stats.CmdStats {
 		cmd := strings.ToUpper(cs.Cmd)
 		switch {
-		// UFS opcodes (size * 4096)
+		// UFS data-transfer opcodes (size * 4096)
 		case cmd == "0X28" || cmd == "0X88": // READ_10, READ_16
 			cs.TotalSizeBytes *= 4096
 			stats.ReadTotalBytes += cs.TotalSizeBytes
@@ -161,6 +162,18 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 		case cmd == "0X42": // UNMAP (discard)
 			cs.TotalSizeBytes *= 4096
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
+		// UFS/SCSI control-plane opcodes — 데이터 전송 없거나 작아서 read/write/discard
+		// 합산 대상 아님. 단위 변환도 하지 않는다 (size 가 의미적으로 LBA 가 아님).
+		// 0x35 SYNC_CACHE_10, 0x91 SYNC_CACHE_16  — flush
+		// 0x1B START_STOP_UNIT
+		// 0x00 TEST_UNIT_READY, 0x12 INQUIRY
+		// 0x25 READ_CAPACITY_10, 0x9E SERVICE_ACTION_IN_16 (READ_CAPACITY_16)
+		// 0xA0 REPORT_LUNS, 0x1A MODE_SENSE_6, 0x5A MODE_SENSE_10
+		case cmd == "0X35" || cmd == "0X91" ||
+			cmd == "0X1B" || cmd == "0X00" || cmd == "0X12" ||
+			cmd == "0X25" || cmd == "0X9E" ||
+			cmd == "0XA0" || cmd == "0X1A" || cmd == "0X5A":
+			// 합산 안 함, 단위 변환 안 함.
 		// Block io_type (size * 512)
 		case strings.HasPrefix(cmd, "R"):
 			cs.TotalSizeBytes *= 512
@@ -172,7 +185,10 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 			cs.TotalSizeBytes *= 512
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
 		default:
-			// Unknown cmd, assume UFS unit
+			// 분류 못한 cmd — UFS 단위 추정만 하고 합산은 보류.
+			// 새 opcode 가 자주 보이면 위 switch 에 추가해야 한다.
+			slog.Warn("unknown trace cmd opcode (not classified into read/write/discard)",
+				"cmd", cs.Cmd, "count", cs.Count, "raw_size_total", cs.TotalSizeBytes)
 			cs.TotalSizeBytes *= 4096
 		}
 	}
