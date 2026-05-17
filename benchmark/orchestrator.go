@@ -119,9 +119,21 @@ func NewOrchestrator(manager *adb.Manager, toolsDir string) *Orchestrator {
 }
 
 // getDeviceLock returns a per-device mutex for sequential execution.
+//
+// 호출될 때 adb manager 에 더이상 존재하지 않는 디바이스의 락은 map 에서 제거한다
+// (Mutex 자체는 in-flight job 이 들고 있을 수 있어 GC 에 맡김). 이렇게 하지 않으면
+// 디바이스 ID 가 바뀔 때마다 entry 가 누적되어 long-lived agent 에서 무한 증가한다.
 func (o *Orchestrator) getDeviceLock(deviceID string) *sync.Mutex {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	for id := range o.deviceLocks {
+		if id == deviceID {
+			continue
+		}
+		if _, err := o.manager.GetDevice(id); err != nil {
+			delete(o.deviceLocks, id)
+		}
+	}
 	if _, ok := o.deviceLocks[deviceID]; !ok {
 		o.deviceLocks[deviceID] = &sync.Mutex{}
 	}
