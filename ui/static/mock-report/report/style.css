@@ -1,0 +1,27 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a1a; line-height: 1.6; }
+.report-container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+header { margin-bottom: 2rem; }
+header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.meta { display: flex; gap: 1.5rem; font-size: 0.8rem; color: #666; flex-wrap: wrap; }
+h2 { font-size: 1.1rem; margin-bottom: 0.75rem; padding-bottom: 0.3rem; border-bottom: 2px solid #e5e7eb; }
+section { margin-bottom: 2rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; text-align: left; }
+thead th { background: #f3f4f6; font-weight: 600; }
+tbody tr:hover { background: #f9fafb; }
+.pass { color: #16a34a; font-weight: 600; text-align: center; }
+.fail { color: #dc2626; font-weight: 600; text-align: center; }
+a { color: #2563eb; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.info-table td:first-child { font-weight: 500; color: #666; width: 150px; }
+.info-table td { border: 1px solid #e5e7eb; }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; font-size: 0.75rem; color: #999; text-align: center; }
+.detail-container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+.back-link { display: inline-block; margin-bottom: 1rem; color: #2563eb; font-size: 0.85rem; }
+.register-table td { font-family: monospace; font-size: 0.8rem; }
+.register-table td:first-child { font-weight: 600; width: 120px; }
+.stack-trace { background: #1e1e1e; color: #d4d4d4; padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.8rem; overflow-x: auto; white-space: pre; line-height: 1.5; }
+.status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
+.status-badge.pass { background: #dcfce7; color: #16a34a; }
+.status-badge.fail { background: #fee2e2; color: #dc2626; }
