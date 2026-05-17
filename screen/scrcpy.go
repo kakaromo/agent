@@ -8,6 +8,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -82,9 +83,11 @@ func (m *Manager) StartSession(ctx context.Context, deviceID, serial string, max
 		bitrate = 4000000 // 4Mbps
 	}
 
-	// Kill any leftover scrcpy on device
+	// Kill any leftover scrcpy on device + remove host-side forwards 「only for this serial」.
+	// 과거엔 `forward --remove-all` 을 호출했는데 그건 호스트의 모든 디바이스 forward
+	// 를 제거해 동시 운영 중인 다른 scrcpy/trace gRPC 까지 끊었다. serial 매칭으로 좁힘.
 	exec.Command("adb", "-s", serial, "shell", "pkill -f scrcpy").Run()
-	exec.Command("adb", "-s", serial, "forward", "--remove-all").Run()
+	removeScrcpyForwards(serial)
 	time.Sleep(500 * time.Millisecond)
 
 	// Push scrcpy-server
@@ -234,6 +237,31 @@ func (m *Manager) StartSession(ctx context.Context, deviceID, serial string, max
 	slog.Info("scrcpy session started", "device", deviceID, "name", deviceName,
 		"resolution", fmt.Sprintf("%dx%d", width, height), "port", localPort)
 	return session, nil
+}
+
+// removeScrcpyForwards — adb forward --list 를 읽어 serial 의 scrcpy 관련 forward 만 제거한다.
+// `--remove-all` 처럼 다른 디바이스/용도 forward 를 건드리지 않는다.
+//
+// `adb forward --list` 출력 라인 예: "<serial> tcp:12345 localabstract:scrcpy"
+func removeScrcpyForwards(serial string) {
+	out, err := exec.Command("adb", "forward", "--list").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[0] != serial {
+			continue
+		}
+		// scrcpy 가 쓰는 localabstract 소켓만 제거. trace gRPC 등 다른 forward 는 그대로.
+		if !strings.Contains(fields[2], "scrcpy") {
+			continue
+		}
+		exec.Command("adb", "-s", serial, "forward", "--remove", fields[1]).Run()
+	}
 }
 
 // StopSession stops a scrcpy session.
