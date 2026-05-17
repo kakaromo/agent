@@ -1,25 +1,146 @@
 # CLAUDE.md
 
+상세 문서는 **[docs/](docs/README.md)** 참고. 이 파일은 빠른 참조용 요약.
+
 ## Project Overview
 
 Go 기반 Android 디바이스 에이전트. ADB를 통해 디바이스에 연결하여 벤치마크 실행, 커널 트레이스 수집, 디바이스 모니터링을 gRPC 서비스로 제공합니다.
 
+두 가지 모드:
+- **사무실 모드** (default): 0.0.0.0 바인딩, gRPC-only 헤드리스. portal 등 원격 클라이언트가 연결
+- **Standalone 모드** (`--standalone`): 127.0.0.1 바인딩, portal UI 임베드, SQLite 영속화. 출장 시 노트북 단독 사용
+
+각 모드의 자세한 내용은 [docs/01-overview.md](docs/01-overview.md), [docs/04-standalone-mode.md](docs/04-standalone-mode.md).
+
 ## Build & Run
 
 ```bash
-go build -o agent .        # 빌드
-./run.sh                   # 빌드 + 실행 (config/devices.toml 사용)
-./agent -config config/devices.toml  # 직접 실행
+./build-ui.sh              # Svelte UI 빌드 (ui/build → //go:embed 대상)
+go build -o agent .        # Go 빌드 (UI 임베드 포함)
+./run.sh                   # UI + Go 빌드 + 실행 (config/devices.toml)
+./agent -config config/devices.toml             # 사무실 (기존 gRPC, 0.0.0.0)
+./agent --standalone -config config/devices.toml # 출장 (UI, 127.0.0.1)
 ```
 
 Proto 컴파일: `protoc --go_out=. --go-grpc_out=. proto/agent.proto`
+
+### Standalone 모드 (출장용 원바이너리)
+
+`--standalone` 플래그 또는 `[standalone] enabled=true` 시 활성. 출장 시 노트북 단독으로
+portal 의 풀 UX 를 그대로 재현한다. 사무실 모드(standalone=false)는 기존 gRPC-only 동작 유지.
+
+**활성 효과:**
+- **127.0.0.1 바인딩** — 외부 LAN 접근 차단 (인증 없음 전제)
+- **Svelte SPA 서빙** — `//go:embed all:ui/build` 로 바이너리에 임베드 (`/` SPA, `/_app/...` 자산, 미존재 경로는 `index.html` fallback)
+- **`AGENT_PARSER=go` 자동 setenv** — `tools/trace` 외부 바이너리 미사용 → Windows 후속 빌드 시 trace.exe 불필요
+- **SQLite 영속화** — `$HOME/.agent-standalone/agent.db` (config `[standalone] db_path` 로 override). 7 테이블 (agent_servers, job_executions, benchmark_presets, iotest_presets, scenario_templates, app_macros, scheduled_jobs)
+- **로컬 archive 폴더** — `$HOME/.agent-standalone/archive` (MinIO 미사용)
+- **Cron 러너** — robfig/cron v3. enabled ScheduledJob 자동 fire, 결과 JobExecution 영구 저장
+- 부팅 시 stale running 잡 자동 `failed` 정리 (메모리 휘발 호환)
+- 잡 종료 시 metrics summary 가 `job_executions.result_summary` 에 영구 저장됨 → agent 재시작 후에도 Result 페이지에서 IOPS/latency 등 조회 가능
+
+**기존 gRPC 는 그대로 유지** (cmux 같은 포트). 사무실 원격 클라이언트와 동일 바이너리에서 공존.
+
+#### UI
+
+`ui/` 디렉토리는 `portal/frontend` 의 agent UI 를 통째로 복사 + 인증 스텁화 한 SvelteKit 앱이다.
+- `routes/agent` — 메인 페이지 (3 패널 + 7 모드 탭: Benchmark / Scenario / Trace / IOTest / Macro / Schedule / Results)
+- `routes/agent/scenario-canvas/*` — @xyflow/svelte 기반 시각적 DAG 빌더
+- `lib/components/data-table`, `ui/*` — shadcn-svelte primitives (bits-ui 기반)
+- `lib/stores/auth.svelte.ts` — **stub**. 항상 ADMIN 인증 상태로 응답 (시그니처는 portal 동일)
+- `lib/api/client.ts` — 404 + `{state:"failed"}` 응답은 정상 데이터로 처리 (만료된 잡 호환)
+- 사용 사이즈 프리셋: `compact` (`resize-ui.sh compact` 적용 완료, body text-xs)
+- 의존성: deck.gl (GPU scatter), jmuxer (H.264 디코드), echarts, @xyflow/svelte, bits-ui, paneforge 등 portal 와 동일
+
+portal 의 `/trace` 페이지는 **MinIO archive 파싱 흐름이라 standalone 에선 의미 없어 제거**.
+Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각화한다.
+
+#### REST/SSE/WS endpoints (portal `/api/agent/*` 호환)
+
+응답 shape 와 path 모두 portal AgentController/ScheduledJobController/JobExecutionController 와 1:1 일치.
+모든 endpoint 는 `serverId` 쿼리 파라미터를 받지만 standalone 에선 무시 (self).
+
+**Device & Server (8)**
+- `GET    /api/agent/devices` — ListDevices
+- `POST   /api/agent/devices/{serial}/connect|disconnect`
+- `GET    /api/agent/servers` — DB CRUD (localhost 자기 자신 자동 seed)
+- `POST   /api/agent/servers`, `PUT/DELETE /api/agent/servers/{id}`
+- `POST   /api/agent/servers/test`, `/api/agent/servers/{id}/test|reconnect`, `GET /servers/{id}/status` (TCP reachable)
+
+**Benchmark (5)**
+- `POST   /api/agent/benchmark/run` — RunBenchmark + JobExecution 저장 hook
+- `GET    /api/agent/benchmark/status?jobId=` — terminal 도달 시 DB state + result_summary 동기화
+- `GET    /api/agent/benchmark/result?jobId=&deviceId=` — 만료 잡은 404 + `{state:"failed", results:[]}`
+- `DELETE /api/agent/jobs/{jobId}`, `POST /api/agent/jobs/{jobId}/cancel`
+- `SSE    /api/agent/benchmark/progress?jobId=` — 명명 이벤트: `progress`, `complete`, `error`. portal frontend addEventListener 호환
+
+**Scenario (1)**
+- `POST   /api/agent/scenario/run` (Phase 7 UI 측 호출은 frontend 가, 백엔드 dispatch 는 schedule runner 에서 placeholder — RunScenario 매핑은 grpc.go 에 이미 존재)
+
+**Trace (5)**
+- `POST   /api/agent/trace/start`
+- `POST   /api/agent/trace/{jobId}/stop|reparse`
+- `POST   /api/agent/trace/result` body `{jobIds, filter, latencyRangesMs}` — portal `toTraceStatsMap` 와 동일 shape
+- `POST   /api/agent/trace/raw` body `{jobIds, filter}`
+
+**Monitoring SSE**
+- `GET    /api/agent/monitoring/stream?deviceIds=A&deviceIds=B&interval=1` — 명명 이벤트 `metrics`
+
+**Macro (12)**
+- DB CRUD: `GET/POST /api/agent/app-macros`, `GET/PUT/DELETE /api/agent/app-macros/{id}`, `POST /api/agent/app-macros/{id}/duplicate`
+- gRPC 위임: `GET /api/agent/macro/installed-apps?deviceId=`, `POST /api/agent/macro/start-recording|stop-recording|replay|screenshot|ocr`
+
+**Preset / Template (13)**
+- BenchmarkPreset CRUD 4, IOTestPreset CRUD 4, ScenarioTemplate CRUD 5 (duplicate 포함)
+
+**Schedule (7)**
+- `GET    /api/agent/schedules`, `GET /api/agent/schedules/{id}`
+- `POST/PUT/DELETE /api/agent/schedules`, `POST /api/agent/schedules/{id}/trigger|enable`
+- robfig/cron v3 — CRUD 변경 시 자동 Reload. fire 결과 JobExecution `scheduled_job_id` 로 추적
+
+**Execution history (5)**
+- `GET    /api/agent/executions?serverId=&type=&state=&page=&size=` — Spring Page<T> 호환 `{content, totalElements, totalPages, page, size}`
+- `GET    /api/agent/executions/{id}|by-job-id/{jobId}`
+- `DELETE /api/agent/executions/{id}`
+- `GET    /api/agent/executions/stats?serverId=`
+
+**Archive (2)**
+- `POST   /api/agent/upload/trace` body `{jobIds, remotePath}` — 로컬 `archive_base/{remotePath}/{jobId}/` 로 parquet + trace.log 복사
+- `POST   /api/agent/upload/benchmark` body `{jobId, remotePath}` — `{deviceId}_result.json` 로컬 저장
+
+**Screen WebSocket**
+- `WS     /api/agent/screen/{deviceId}` — portal frontend `getScreenWebSocketUrl` 호환 (legacy `/ws/screen/{id}` 로 내부 라우팅)
+
+#### 직렬화 / enum
+
+- JSON: portal `LinkedHashMap` 동일 shape. `server/rest_convert.go` 가 proto → map 변환
+- enum 문자열 변환: portal `toJobStateString` / `toDeviceStateString` / `toBenchmarkToolString` 와 정확히 일치 (`completed`, `online`, `fio` 등 소문자)
+- summary 저장: `server/rest_summary.go` — benchmark 는 IOPS/BW/latency p99 등 핵심 metrics, trace 는 totalEvents/dtoc latency 등 발췌
+- REST 핸들러는 gRPC interceptor 를 우회하므로 향후 auth interceptor 도입 시 REST 측 별도 적용 필요
 
 ## Architecture
 
 ### Module Structure
 
-- **`main.go`** — gRPC 서버 시작, 매니저 초기화, graceful shutdown
+- **`main.go`** — gRPC 서버 시작, 매니저 초기화, graceful shutdown, `--standalone` 플래그, SQLite 초기화, cron 러너, stale 잡 부팅 정리
+- **`embed.go`** — `//go:embed all:ui/build` (standalone UI 임베드)
+- **`ui/`** — SvelteKit SPA (portal/frontend agent UI 풀 복사 + 인증 스텁화)
 - **`server/grpc.go`** — gRPC 서비스 구현 (DeviceAgent)
+- **`server/http.go`** — cmux HTTP 분기용 라우터. standalone 시 DB-backed CRUD 모듈 마운트
+- **`server/rest.go`** — Device/Benchmark/Trace REST. portal 호환 path + JobExecution hook
+- **`server/rest_convert.go`** — proto → map 변환, enum 문자열화, TraceFilter 빌더
+- **`server/rest_server.go`** — AgentServer CRUD + TCP reachable 테스트
+- **`server/rest_execution.go`** — JobExecution history (Spring Page<T> 호환)
+- **`server/rest_macro.go`** — AppMacro DB CRUD + gRPC 위임 (recording/replay/OCR/screenshot)
+- **`server/rest_preset.go`** — BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD
+- **`server/rest_schedule.go`** — ScheduledJob CRUD + trigger/enable
+- **`server/rest_archive.go`** — `/api/agent/upload/*` 로컬 디스크 archive (MinIO 미사용)
+- **`server/rest_hook.go`** — `JobExecutionRecorder` 인터페이스 + dbRecorder (OnStart/OnState/OnResult)
+- **`server/rest_summary.go`** — terminal 잡의 metrics summary 추출 → DB 영구 저장
+- **`server/sse.go`** — `/api/agent/benchmark/progress`, `/api/agent/monitoring/stream` (portal EventSource 호환)
+- **`server/ws.go`** — 보조 WebSocket (`/ws/jobs/{id}/progress`, `/ws/monitor`)
+- **`schedule/runner.go`** — robfig/cron v3 기반 cron 실행기
+- **`storage/sqlitedb/`** — modernc.org/sqlite (pure Go) 영속화. 7 entity CRUD
 - **`adb/`** — ADB 디바이스 관리 (검색, 연결, 셸 명령)
 - **`benchmark/`** — 벤치마크 오케스트레이터 (시나리오 실행, trace 연동)
 - **`monitor/`** — 디바이스 메트릭 수집 (스트리밍)
@@ -35,9 +156,11 @@ Proto 컴파일: `protoc --go_out=. --go-grpc_out=. proto/agent.proto`
 ### gRPC Services (port: config에서 설정, 기본 50051)
 
 - **Device**: `ListDevices`, `ConnectDevice`, `DisconnectDevice`
-- **Benchmark**: `RunBenchmark`, `RunScenario`, `GetJobStatus`, `SubscribeJobProgress`, `GetBenchmarkResult`, `DeleteJob`
-- **Trace**: `StartTrace`, `StopTrace`, `GetTraceResult`, `GetTraceRawData`
+- **Benchmark**: `RunBenchmark`, `RunScenario`, `GetJobStatus`, `SubscribeJobProgress`, `GetBenchmarkResult`, `DeleteJob`, `CancelJob`
+- **Trace**: `StartTrace`, `StopTrace`, `ReparseTrace`, `GetTraceResult`, `GetTraceRawData`
 - **Monitor**: `MonitorDevices` (스트리밍)
+- **Macro**: `ListInstalledApps`, `StartRecording`, `StopRecording`, `ReplayMacro`, `TakeScreenshot`, `ScreenshotOcr`
+- **Upload**: `UploadTraceToMinio`, `UploadBenchmarkToMinio`, `UploadTraceArchive` (streaming)
 
 ## Trace 수집 흐름
 
