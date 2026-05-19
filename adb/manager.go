@@ -34,15 +34,73 @@ type ManagedDevice struct {
 	State          pb.DeviceState
 }
 
+// DeviceChange — Refresh 가 감지한 디바이스 상태 변화 (broadcast 용).
+// 어떤 종류든 한 번에 묶어 보내며, 수신자가 ListDevices 등으로 풀 목록을 재조회한다.
+type DeviceChange struct {
+	Discovered   []string // 새로 발견된 deviceId
+	Disconnected []string // OFFLINE 전이된 deviceId
+	Reconnected  []string // OFFLINE → ONLINE 전이된 deviceId
+}
+
+// HasAny — 변경이 하나라도 있으면 true. listener 가 매 Refresh 마다 깨우지 않고 변경 시만 react 하기 위함.
+func (c *DeviceChange) HasAny() bool {
+	if c == nil {
+		return false
+	}
+	return len(c.Discovered) > 0 || len(c.Disconnected) > 0 || len(c.Reconnected) > 0
+}
+
+// DeviceChangeListener — Refresh 가 끝난 후 호출되는 콜백.
+// 변경이 없으면 호출 안 한다. blocking 금지 (broadcast goroutine 이 다른 listener 를 지연시킴).
+type DeviceChangeListener func(change DeviceChange)
+
 // Manager manages ADB devices currently connected to this machine.
 type Manager struct {
 	mu      sync.RWMutex
 	devices map[string]*ManagedDevice // keyed by DeviceID
+
+	listenerMu sync.RWMutex
+	listeners  []DeviceChangeListener
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		devices: make(map[string]*ManagedDevice),
+	}
+}
+
+// AddDeviceChangeListener — 디바이스 변경 이벤트 구독 등록.
+// 같은 콜백을 여러 번 등록할 수 있으나 그만큼 호출됨에 주의.
+// 반환값은 해제용 함수 (defer 또는 graceful shutdown 시 호출).
+func (m *Manager) AddDeviceChangeListener(cb DeviceChangeListener) (cancel func()) {
+	m.listenerMu.Lock()
+	idx := len(m.listeners)
+	m.listeners = append(m.listeners, cb)
+	m.listenerMu.Unlock()
+	return func() {
+		m.listenerMu.Lock()
+		defer m.listenerMu.Unlock()
+		// idx 보호 — 다른 cancel 이 먼저 호출돼 위치가 바뀌었을 수 있음. 본인 callback 와 동일 포인터인지 확인.
+		if idx < len(m.listeners) {
+			// nil 처리 (compact 는 안 함 — 다른 idx 가 흔들림)
+			m.listeners[idx] = nil
+		}
+	}
+}
+
+// broadcastChange — Refresh 가 직접 호출. listener nil 은 skip.
+func (m *Manager) broadcastChange(change DeviceChange) {
+	if !change.HasAny() {
+		return
+	}
+	m.listenerMu.RLock()
+	snapshot := make([]DeviceChangeListener, len(m.listeners))
+	copy(snapshot, m.listeners)
+	m.listenerMu.RUnlock()
+	for _, cb := range snapshot {
+		if cb != nil {
+			cb(change)
+		}
 	}
 }
 
@@ -93,12 +151,14 @@ func (m *Manager) Refresh(ctx context.Context) {
 	}
 
 	var newEntries []adbDeviceEntry
+	change := DeviceChange{}
 	m.mu.Lock()
 	// Mark missing devices as offline
 	for id, md := range m.devices {
 		if !currentIDs[id] && md.State != pb.DeviceState_DEVICE_STATE_OFFLINE {
 			slog.Info("device disconnected", "device_id", id, "serial", md.Serial)
 			md.State = pb.DeviceState_DEVICE_STATE_OFFLINE
+			change.Disconnected = append(change.Disconnected, id)
 		}
 	}
 	// 기존 디바이스는 reconnect 처리, 신규는 phase 2 후보로 모음
@@ -109,6 +169,7 @@ func (m *Manager) Refresh(ctx context.Context) {
 			if md.State == pb.DeviceState_DEVICE_STATE_OFFLINE {
 				slog.Info("device reconnected", "device_id", id, "serial", entry.serial)
 				md.State = pb.DeviceState_DEVICE_STATE_ONLINE
+				change.Reconnected = append(change.Reconnected, id)
 			}
 			continue
 		}
@@ -117,6 +178,8 @@ func (m *Manager) Refresh(ctx context.Context) {
 	m.mu.Unlock()
 
 	if len(newEntries) == 0 {
+		// 신규 없어도 disconnect/reconnect 있으면 broadcast
+		m.broadcastChange(change)
 		return
 	}
 
@@ -147,6 +210,7 @@ func (m *Manager) Refresh(ctx context.Context) {
 			continue
 		}
 		m.devices[r.id] = r.md
+		change.Discovered = append(change.Discovered, r.id)
 	}
 	m.mu.Unlock()
 
@@ -157,6 +221,8 @@ func (m *Manager) Refresh(ctx context.Context) {
 		slog.Info("device discovered", "device_id", r.id, "serial", r.md.Serial, "usb", r.md.UsbID,
 			"model", r.md.Model, "board", r.md.Board, "platform", r.md.Platform, "android", r.md.AndroidVersion)
 	}
+
+	m.broadcastChange(change)
 }
 
 // probeDevice — 락 밖에서 신규 디바이스 메타정보를 수집한다.

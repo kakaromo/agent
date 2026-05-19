@@ -406,12 +406,27 @@
 
 	loadServers();
 
-	// Auto-load devices when server changes
+	// Auto-load devices when server changes + SSE 로 USB 연결/끊김 즉시 반영.
+	// SSE 가 연결되면 server 가 'devices' 이벤트로 풀 목록을 push → polling 불필요.
 	$effect(() => {
 		if (selectedServerId != null) {
 			localStorage.setItem('agent:lastServerId', String(selectedServerId));
 			loadDevices();
 			selectedDeviceIds = new Set();
+
+			// SSE subscription — adb.Manager.AddDeviceChangeListener 와 연동
+			const sid = selectedServerId;
+			const url = `/api/agent/devices/stream?serverId=${sid}`;
+			const es = new EventSource(url);
+			es.addEventListener('devices', (e: MessageEvent) => {
+				if (selectedServerId !== sid) return; // 그 사이 서버 바뀌었으면 무시
+				try {
+					const data = JSON.parse(e.data);
+					devices = data.devices ?? [];
+				} catch { /* ignore */ }
+			});
+			// onerror 는 자동 재연결되므로 명시적 처리 안 함.
+			return () => es.close();
 		}
 	});
 

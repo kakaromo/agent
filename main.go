@@ -97,7 +97,13 @@ func main() {
 	mgr := adb.NewManager()
 	slog.Info("scanning connected devices...")
 	mgr.Refresh(ctx)
-	mgr.StartRefreshLoop(ctx, 30*time.Second)
+	// standalone 은 USB 핫스왑이 잦으므로 3초 refresh (SSE push 가 그 위에서 react).
+	// 사무실 모드는 portal Spring 의 동기 polling 패턴이라 30초 유지.
+	refreshInterval := 30 * time.Second
+	if cfg.Standalone.Enabled {
+		refreshInterval = 3 * time.Second
+	}
+	mgr.StartRefreshLoop(ctx, refreshInterval)
 
 	orch := benchmark.NewOrchestrator(mgr, cfg.Server.ToolsDir)
 	coll := monitor.NewCollector(mgr)

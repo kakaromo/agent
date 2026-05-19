@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"agent/adb"
 	pb "agent/pb"
 )
 
@@ -37,6 +38,12 @@ func registerSSERoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 	// GET /api/agent/monitoring/stream?serverId=&deviceIds=...&deviceIds=...&interval=5
 	mux.HandleFunc("/api/agent/monitoring/stream", func(w http.ResponseWriter, r *http.Request) {
 		handleMonitoringSSE(w, r, agent)
+	})
+
+	// GET /api/agent/devices/stream?serverId= — adb.Manager.AddDeviceChangeListener
+	// 디바이스 USB 연결/끊김 즉시 push. portal frontend 의 polling 대체.
+	mux.HandleFunc("/api/agent/devices/stream", func(w http.ResponseWriter, r *http.Request) {
+		handleDevicesSSE(w, r, agent)
 	})
 }
 
@@ -305,4 +312,86 @@ func inferJobTypeFromAgent(agent *DeviceAgentServer, jobID string) string {
 		return "trace"
 	}
 	return "benchmark" // 보수적 default
+}
+
+// handleDevicesSSE — adb.Manager 의 device change listener 를 SSE 로 흘려준다.
+//
+// 흐름:
+//  1. 연결 직후 현재 디바이스 목록 한 번 push (event: devices) — 첫 화면 깜빡임 방지
+//  2. Manager 에 listener 등록 — 변경 시 마다 buffered channel 에 신호
+//  3. main loop: ctx.Done / 변경 신호 / 30초 keepalive 셋 중 깨어남
+//
+// 변경 payload 는 portal 호환 위해 ListDevices 와 동일 shape ({"devices":[...]}) 그대로 push.
+// 미세한 incremental diff 보다 풀 목록 push 가 frontend reducer 단순화에 유리.
+func handleDevicesSSE(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	setSSEHeaders(w)
+	flusher.Flush()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	var writeMu sync.Mutex
+	emit := func(event string) bool {
+		// 풀 목록 매번 새로 조회 — agent.ListDevices 는 락만 잡고 끝, 빠름.
+		resp, err := agent.ListDevices(ctx, &pb.ListDevicesRequest{})
+		if err != nil {
+			return false
+		}
+		devices := make([]map[string]any, 0, len(resp.GetDevices()))
+		for _, d := range resp.GetDevices() {
+			devices = append(devices, deviceToMap(d))
+		}
+		payload, mErr := json.Marshal(map[string]any{"devices": devices})
+		if mErr != nil {
+			return false
+		}
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	// 1. 초기 push
+	if !emit("devices") {
+		return
+	}
+
+	// 2. listener 등록
+	notifyCh := make(chan struct{}, 4)
+	cancelListener := agent.manager.AddDeviceChangeListener(func(_ adb.DeviceChange) {
+		select {
+		case notifyCh <- struct{}{}:
+		default:
+			// 채널 가득 — 어차피 다음 사이클에서 풀 목록 가져갈 거니 drop 해도 무방
+		}
+	})
+	defer cancelListener()
+
+	// 3. main loop
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-notifyCh:
+			if !emit("devices") {
+				return
+			}
+		case <-keepalive.C:
+			writeMu.Lock()
+			fmt.Fprintf(w, ": keepalive %d\n\n", time.Now().Unix())
+			flusher.Flush()
+			writeMu.Unlock()
+		}
+	}
 }
