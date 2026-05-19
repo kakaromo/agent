@@ -111,7 +111,6 @@ func hydrateMacroSteps(ctx context.Context, db *sqlitedb.DB, raw []byte, req *pb
 		}
 		macro, err := db.FindAppMacro(ctx, *rawStep.MacroID)
 		if err != nil {
-			// not found 등은 caller 에 에러 전달
 			return err
 		}
 

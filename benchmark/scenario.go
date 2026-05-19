@@ -320,11 +320,15 @@ func (o *Orchestrator) executeStep(ctx context.Context, job *Job, md *adb.Manage
 		for k, v := range step.Params {
 			resolvedParams[k] = resolveLoopVariable(v, es.loopIndex, es.loopTotal, es.repeatIndex, es.repeatTotal)
 		}
-		// 원본 step을 변경하지 않고 복사본 사용
+		// 원본 step을 변경하지 않고 복사본 사용.
+		// type=app_macro / condition step 은 Macro / Condition 필드가 핵심이므로 함께 복사해야 한다
+		// (예전엔 Type/Tool/Params 만 복사해서 macro 가 nil 이 되어 'missing macro config' 에러 발생).
 		stepCopy := &pb.ScenarioStep{
-			Type:   step.Type,
-			Tool:   step.Tool,
-			Params: resolvedParams,
+			Type:      step.Type,
+			Tool:      step.Tool,
+			Params:    resolvedParams,
+			Condition: step.Condition,
+			Macro:     step.Macro,
 		}
 		step = stepCopy
 		es.step = step
