@@ -43,6 +43,11 @@ func registerScenarioRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sq
 			req.BusyPolicy = "reject"
 		}
 
+		// frontend 가 보내는 tool 값은 짧은 이름 ("FIO") 인 반면 proto enum 정식 이름은
+		// "BENCHMARK_TOOL_FIO" 라 protojson 이 매칭 못해 Tool 이 UNSPECIFIED(0) 로 unmarshal 됨.
+		// raw body 에서 직접 step.tool 을 읽어 우리 parseBenchmarkTool 헬퍼로 정규화.
+		normalizeStepTools(raw, req)
+
 		// macroId → DB events 채우기 (db 있을 때만 = standalone).
 		// portal frontend 의 AgentScenarioBuilder 가 step 에 macroId 만 담는 경우가 흔함.
 		if db != nil {
@@ -68,6 +73,39 @@ func registerScenarioRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sq
 
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": resp.GetJobId()})
 	})
+}
+
+// normalizeStepTools — body 의 steps[i].tool 이 "FIO" 같은 짧은 이름이면 proto enum 으로 변환.
+// protojson 은 정식 이름("BENCHMARK_TOOL_FIO")만 인식하므로 미스매치 시 Tool=UNSPECIFIED 가 되어
+// orchestrator 가 "unknown benchmark tool" 로 실패.
+//
+// hydrateMacroSteps 와 같은 패턴 — raw body 를 다시 한 번 부분 파싱해서 step.tool 을 맞춰준다.
+func normalizeStepTools(raw []byte, req *pb.RunScenarioRequest) {
+	if len(req.GetSteps()) == 0 {
+		return
+	}
+	var bodyParsed struct {
+		Steps []struct {
+			Tool string `json:"tool"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &bodyParsed); err != nil {
+		return
+	}
+	for i, step := range req.GetSteps() {
+		if i >= len(bodyParsed.Steps) {
+			continue
+		}
+		toolStr := bodyParsed.Steps[i].Tool
+		if toolStr == "" {
+			continue
+		}
+		// 이미 protojson 이 enum 매칭에 성공한 경우 (정식 BENCHMARK_TOOL_FIO 보낸 경우) 그대로 둠
+		if step.GetTool() != pb.BenchmarkTool_BENCHMARK_TOOL_UNSPECIFIED {
+			continue
+		}
+		req.Steps[i].Tool = parseBenchmarkTool(toolStr)
+	}
 }
 
 // hydrateMacroSteps — proto RunScenarioRequest 의 type=app_macro step 중 macro 가
