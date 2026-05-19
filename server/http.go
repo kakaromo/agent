@@ -58,8 +58,11 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 	// REST 어댑터
 	registerRESTRoutes(mux, opts.Agent)
 
-	// SSE 어댑터 — /api/agent/benchmark/progress, /api/agent/monitoring/stream
+	// SSE 어댑터 — /api/agent/benchmark/progress, /api/agent/monitoring/stream, /api/agent/devices/stream
 	registerSSERoutes(mux, opts.Agent)
+
+	// Scenario REST — DB 가 있으면 macroId hydrate 가능 (standalone), 없으면 nil 전달
+	registerScenarioRoutes(mux, opts.Agent, opts.DB)
 
 	// DB 기반 portal-style CRUD (server, execution, preset, scenario template, macro, schedule).
 	// DB nil(non-standalone) 일 땐 건너뛴다.

@@ -445,6 +445,12 @@ func readJSONBody(r *http.Request) (map[string]any, error) {
 	return m, nil
 }
 
+// readRawBody — body 를 []byte 로 그대로 받는다. protojson 로 직접 unmarshal 하거나
+// 풀 raw 보존이 필요한 경우 (scenario 의 macroId hydrate 등) 사용.
+func readRawBody(r *http.Request) ([]byte, error) {
+	return io.ReadAll(r.Body)
+}
+
 func stringSlice(v any) []string {
 	arr, ok := v.([]any)
 	if !ok {
