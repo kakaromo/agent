@@ -660,3 +660,22 @@ export function createMonitoringSource(serverId: number, deviceIds: string[], in
 	params.set('interval', String(interval));
 	return new EventSource(`/api/agent/monitoring/stream?${params.toString()}`);
 }
+
+// ── Filesystem (standalone 전용) ──
+// 로컬 파일 탐색기로 archive / trace 폴더 열기.
+//   target='archive'      → $HOME/.agent-standalone/archive/
+//   target='trace'        → $HOME/agent_trace/{jobId}/
+//   target='archive-job'  → $HOME/.agent-standalone/archive/.../{jobId}/  (검색)
+export function openLocalFolder(target: 'archive' | 'trace' | 'archive-job', jobId?: string): Promise<{
+	success: boolean;
+	path: string;
+	message: string;
+}> {
+	return post('/agent/fs/open', { target, jobId });
+}
+
+// Device list SSE — adb.Manager 의 listener 가 push 하는 풀 device 목록.
+// 페이지가 connect 직후 + 변경 시 즉시 'event: devices' 수신.
+export function createDevicesSource(serverId: number): EventSource {
+	return new EventSource(`/api/agent/devices/stream?serverId=${serverId}`);
+}

@@ -24,6 +24,8 @@ type HTTPRouterOptions struct {
 	ScheduleRunner *schedule.Runner
 	// ArchiveBase — standalone 의 로컬 archive 복사 경로. 빈 문자열이면 archive endpoints 비활성.
 	ArchiveBase string
+	// TraceBase — trace 잡 출력 디렉토리 (cfg.Server.TraceDir). fs/open 의 target=trace 가 사용.
+	TraceBase string
 }
 
 // NewHTTPRouter 는 cmux 의 HTTP 분기에 마운트할 단일 핸들러를 만든다.
@@ -77,6 +79,11 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 	// Archive 업로드 (로컬 디스크 복사). archiveBase 가 비어있으면 등록 안 함.
 	if opts.ArchiveBase != "" {
 		registerArchiveRoutes(mux, opts.Agent, opts.ArchiveBase)
+	}
+
+	// 로컬 파일 탐색기로 폴더 열기 (standalone 전용). archive 또는 trace 폴더.
+	if opts.ArchiveBase != "" || opts.TraceBase != "" {
+		registerFSRoutes(mux, opts.ArchiveBase, opts.TraceBase)
 	}
 
 	// SPA fallback

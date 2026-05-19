@@ -2,7 +2,7 @@
 	import * as Table from '$lib/components/ui/table/index.js';
 	import { toast } from 'svelte-sonner';
 	import { btnIcon } from '$lib/styles/common.js';
-	import { getJobStatus, deleteJob, fetchExecutions, deleteExecution, fetchExecutionStats, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, deleteJob, fetchExecutions, deleteExecution, fetchExecutionStats, openLocalFolder, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { JobRecord } from './types.js';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -16,6 +16,7 @@
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
 	interface Props {
@@ -114,6 +115,26 @@
 		toast.success('Job ID 복사됨');
 	}
 
+	async function openArchiveBase() {
+		try {
+			const res = await openLocalFolder('archive');
+			if (!res.success) toast.error(res.message || 'archive 폴더 열기 실패');
+		} catch {
+			toast.error('archive 폴더 열기 실패');
+		}
+	}
+
+	async function openJobFolder(j: JobExecutionRecord) {
+		// trace 잡 → trace 디렉토리, 그 외(benchmark/scenario) → archive 디렉토리 검색.
+		const target = j.type === 'trace' ? 'trace' : 'archive-job';
+		try {
+			const res = await openLocalFolder(target, j.jobId);
+			if (!res.success) toast.error(res.message || '폴더 열기 실패');
+		} catch {
+			toast.error('폴더 열기 실패');
+		}
+	}
+
 	function requestDelete(j: JobExecutionRecord) {
 		confirmDesc = `Job ${j.jobId.slice(0, 8)}… 을 삭제하시겠습니까?`;
 		confirmAction = async () => {
@@ -184,7 +205,16 @@
 
 <div class="space-y-3 p-1">
 	<div class="flex items-center justify-between">
-		<h2 class="text-sm font-semibold">Results</h2>
+		<div class="flex items-center gap-2">
+			<h2 class="text-sm font-semibold">Results</h2>
+			<button
+				onclick={openArchiveBase}
+				class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
+				title="Archive 폴더를 파일 탐색기로 열기"
+			>
+				<FolderOpenIcon class="size-3" /> Archive 폴더
+			</button>
+		</div>
 		{#if stats}
 			<div class="flex items-center gap-3 text-[10px] text-muted-foreground">
 				<span>총 {stats.total}건</span>
@@ -322,6 +352,13 @@
 									title="상세 보기"
 								>
 									<ExternalLinkIcon class="size-3 text-muted-foreground" />
+								</button>
+								<button
+									onclick={(e) => { e.stopPropagation(); openJobFolder(j); }}
+									class="p-0.5 rounded hover:bg-muted"
+									title={j.type === 'trace' ? 'Trace 출력 폴더 열기' : 'Archive 폴더 열기'}
+								>
+									<FolderOpenIcon class="size-3 text-muted-foreground" />
 								</button>
 								<button
 									onclick={(e) => { e.stopPropagation(); requestDelete(j); }}

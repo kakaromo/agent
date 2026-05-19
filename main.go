@@ -192,7 +192,9 @@ func main() {
 			}
 		}
 		routerOpts.ArchiveBase = archiveBase
+		routerOpts.TraceBase = cfg.Server.TraceDir
 		slog.Info("archive base", "path", archiveBase)
+		slog.Info("trace base", "path", cfg.Server.TraceDir)
 	}
 	httpServer := &http.Server{Handler: server.NewHTTPRouter(routerOpts)}
 
