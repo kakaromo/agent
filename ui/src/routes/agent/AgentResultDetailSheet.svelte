@@ -5,14 +5,13 @@
 	import DataTableShell from '$lib/components/DataTableShell.svelte';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getJobStatus, getBenchmarkResult, uploadTrace, uploadBenchmark, fetchExecutionByJobId, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import type { ColumnDef } from '@tanstack/table-core';
 
 	import ScanSearchIcon from '@lucide/svelte/icons/scan-search';
-	import UploadIcon from '@lucide/svelte/icons/upload';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import ExecutionMiniCanvas from './scenario-canvas/ExecutionMiniCanvas.svelte';
@@ -96,34 +95,9 @@
 	// Trace multi-selection
 	let selectedTraceIds = $state<Set<string>>(new Set());
 
-	// MinIO Upload
-	let uploading = $state(false);
+	// MinIO 업로드 UI 제거 — standalone 에서는 MinIO 미사용 (archive 는 로컬 디스크).
 	let showTraceList = $state(false);
 	let showScenarioCanvas = $state(true); // 기본 펼침
-	let uploadPath = $state('');
-	let showUpload = $state(false);
-
-	async function handleUploadTrace() {
-		if (serverId == null || traceJobIds.length === 0 || !uploadPath.trim()) return;
-		uploading = true;
-		try {
-			const res = await uploadTrace(serverId, { jobIds: traceJobIds, remotePath: uploadPath.trim() });
-			toast[res.success ? 'success' : 'error'](res.message);
-			if (res.uploadedFiles.length > 0) toast.success(`${res.uploadedFiles.length}개 파일 업로드됨`);
-		} catch { toast.error('Trace 업로드 실패'); }
-		finally { uploading = false; }
-	}
-
-	async function handleUploadBenchmark() {
-		if (serverId == null || !jobId || !uploadPath.trim()) return;
-		uploading = true;
-		try {
-			const res = await uploadBenchmark(serverId, { jobId, remotePath: uploadPath.trim() });
-			toast[res.success ? 'success' : 'error'](res.message);
-			if (res.uploadedFiles.length > 0) toast.success(`${res.uploadedFiles.length}개 파일 업로드됨`);
-		} catch { toast.error('Benchmark 업로드 실패'); }
-		finally { uploading = false; }
-	}
 
 	function toggleTraceSelection(id: string) {
 		const next = new Set(selectedTraceIds);
@@ -730,12 +704,6 @@
 						<ScanSearchIcon class="size-3" /> Trace 분석 ({selectedTraceIds.size > 0 ? selectedTraceIds.size : traceJobIds.length})
 					</button>
 				{/if}
-				<button
-					onclick={() => showUpload = !showUpload}
-					class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
-				>
-					<UploadIcon class="size-3" /> MinIO
-				</button>
 				<button onclick={loadDetail} disabled={loading} class="p-1 rounded hover:bg-muted">
 					<RefreshCwIcon class="size-3.5 {loading ? 'animate-spin' : ''}" />
 				</button>
@@ -749,26 +717,6 @@
 		</Sheet.Header>
 
 		<div class="flex-1 overflow-y-auto space-y-4 px-1">
-			<!-- MinIO Upload Panel -->
-			{#if showUpload}
-				<div class="border rounded-md p-2 space-y-2 bg-muted/30">
-					<div class="flex items-center gap-2">
-						<input bind:value={uploadPath} class="flex-1 border rounded px-2 py-1 text-[10px] bg-background font-mono" placeholder="MinIO 경로 (예: 2024_test/results)" />
-					</div>
-					<div class="flex gap-1">
-						<button onclick={handleUploadBenchmark} disabled={uploading || !uploadPath.trim()} class="inline-flex items-center gap-1 rounded bg-blue-600 text-white px-2 py-0.5 text-[9px] hover:bg-blue-700 disabled:opacity-50">
-							{#if uploading}<LoaderIcon class="size-2.5 animate-spin" />{/if} Benchmark 업로드
-						</button>
-						{#if traceJobIds.length > 0}
-							<button onclick={handleUploadTrace} disabled={uploading || !uploadPath.trim()} class="inline-flex items-center gap-1 rounded bg-blue-600 text-white px-2 py-0.5 text-[9px] hover:bg-blue-700 disabled:opacity-50">
-								{#if uploading}<LoaderIcon class="size-2.5 animate-spin" />{/if} Trace 업로드 ({traceJobIds.length})
-							</button>
-						{/if}
-						<button onclick={() => showUpload = false} class="rounded border px-2 py-0.5 text-[9px] hover:bg-muted">닫기</button>
-					</div>
-				</div>
-			{/if}
-
 			<!-- 시나리오 캔버스 추적 (접기/펼치기) -->
 			{#if executionConfig?.steps && executionConfig.steps.length > 0}
 				<div class="border rounded-md overflow-hidden">

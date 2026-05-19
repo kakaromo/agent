@@ -8,7 +8,6 @@
 	import { onDestroy } from 'svelte';
 	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
-	import AgentTraceArchivePanel from './AgentTraceArchivePanel.svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import FilterIcon from '@lucide/svelte/icons/filter';
@@ -526,33 +525,9 @@
 				</div>
 			{/if}
 
-			<!-- Archive Panel — 단일 jobId 일 때만 (멀티 jobId 합쳐 보기에선 archive 단위 모호) -->
-			{#if serverId && jobIds.length === 1 && archiveExec}
-				<AgentTraceArchivePanel
-					serverId={serverId}
-					jobId={jobIds[0]}
-					traceParseState={archiveExec.traceParseState ?? null}
-					traceRawKey={archiveExec.traceRawKey ?? null}
-					traceParsedAt={archiveExec.traceParsedAt ?? null}
-					onUpdated={loadArchiveState}
-				/>
-				{#if archiveMode === 'archived'}
-					<div class="text-[10px] text-muted-foreground px-1">
-						<span class="font-medium text-emerald-600">[Archived]</span>
-						이 결과는 정확 파서로 재파싱된 영속 데이터입니다. agent 종료와 무관하게 항상 조회 가능합니다.
-					</div>
-				{:else if archiveMode === 'unparsed'}
-					<div class="text-[10px] text-muted-foreground px-1">
-						<span class="font-medium text-amber-600">[Raw archived]</span>
-						trace.log 만 영속화됨 — 정확한 통계를 보려면 위 Re-parse 를 누르세요.
-					</div>
-				{:else if archiveMode === 'parsing'}
-					<div class="text-[10px] text-muted-foreground px-1">
-						<span class="font-medium text-sky-600">[Processing]</span>
-						{archiveExec.traceParseState} 진행 중. 완료까지 화면을 닫아도 됩니다.
-					</div>
-				{/if}
-			{/if}
+			<!-- Archive Panel 제거: standalone 에서는 MinIO archive 흐름 미사용
+			     (trace 결과는 로컬 parquet 으로 즉시 조회) -->
+
 			<!-- Filter bar (collapsible) -->
 			<div class="border rounded-md bg-muted/30 overflow-hidden">
 				<button
