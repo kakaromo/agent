@@ -1,6 +1,6 @@
-# Binary
-agent
-agent.exe
+# Binary (루트 바이너리만 — ui/src/routes/agent/ 가 매칭되지 않도록 / prefix)
+/agent
+/agent.exe
 /iotest
 /goparse
 dist/
