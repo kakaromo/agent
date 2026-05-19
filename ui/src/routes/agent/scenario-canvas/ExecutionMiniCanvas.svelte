@@ -95,9 +95,22 @@
 				if (idx < parsedStepIndex) {
 					execStatus = 'completed';
 				} else if (idx === parsedStepIndex) {
-					execStatus = activeJob!.state === 'failed' ? 'failed' : 'running';
+					// 잡 전체가 종료 상태면 마지막으로 진행 중이던 step 도 종료로 마킹
+					// (그렇지 않으면 trace_stop 같은 마지막 step 이 'running' 으로 영원히 남음)
+					if (activeJob!.state === 'completed' || activeJob!.state === 'partially_failed') {
+						execStatus = 'completed';
+					} else if (activeJob!.state === 'failed') {
+						execStatus = 'failed';
+					} else if (activeJob!.state === 'cancelled') {
+						execStatus = 'cancelled';
+					} else {
+						execStatus = 'running';
+					}
 					execLoopCurrent = loopCurrent;
 					execLoopTotal = loopTotal;
+				} else if (activeJob!.state === 'completed') {
+					// 마지막 progress 이후 step 들도 잡이 끝났으면 completed
+					execStatus = 'completed';
 				}
 			} else if (activeJob!.state === 'completed') {
 				execStatus = 'completed';
