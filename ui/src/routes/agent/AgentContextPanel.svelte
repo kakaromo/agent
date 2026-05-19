@@ -16,6 +16,7 @@
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import UnplugIcon from '@lucide/svelte/icons/unplug';
 	import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
+	import TerminalIcon from '@lucide/svelte/icons/terminal';
 
 	interface Props {
 		enabledServers: AgentServer[];
@@ -29,6 +30,7 @@
 		onOpenServerSheet: () => void;
 		onOpenMonitoring: (deviceId: string) => void;
 		onOpenScreen: (deviceId: string) => void;
+		onOpenTerminal: (deviceId: string) => void;
 		activeJobCount: number;
 		storageMetricsMap: Map<string, DeviceMetricsData>;
 	}
@@ -45,6 +47,7 @@
 		onOpenServerSheet,
 		onOpenMonitoring,
 		onOpenScreen,
+		onOpenTerminal,
 		activeJobCount,
 		storageMetricsMap
 	}: Props = $props();
@@ -229,6 +232,13 @@
 							title="화면 보기"
 						>
 							<SmartphoneIcon class="size-3 text-muted-foreground" />
+						</button>
+						<button
+							onclick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenTerminal(d.deviceId); }}
+							class="p-0.5 rounded hover:bg-muted shrink-0"
+							title="Terminal (adb shell)"
+						>
+							<TerminalIcon class="size-3 text-muted-foreground" />
 						</button>
 						<button
 							onclick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenMonitoring(d.deviceId); }}

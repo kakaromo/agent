@@ -25,6 +25,7 @@
 	import AgentTraceForm from './AgentTraceForm.svelte';
 	import AgentTraceResultSheet from './AgentTraceResultSheet.svelte';
 	import AgentScreenSheet from './AgentScreenSheet.svelte';
+	import TerminalDialog from '$lib/components/remote/TerminalDialog.svelte';
 	import AgentScheduleView from './AgentScheduleView.svelte';
 	import AgentMacroRecorder from './AgentMacroRecorder.svelte';
 	import IOTestForm from './iotest/IOTestForm.svelte';
@@ -558,6 +559,24 @@
 		screenSheetOpen = true;
 	}
 
+	// Terminal (adb shell PTY) — TerminalDialog 가 다중 탭을 지원해서 그냥 push.
+	let terminalOpen = $state(false);
+	let terminalTabs = $state<Array<{ id: string; vmName: string; slotName: string; protocol: 'adb'; deviceId: string }>>([]);
+	function openTerminal(deviceId: string) {
+		// 같은 디바이스 탭이 이미 있으면 dialog 만 다시 열고 끝
+		const exists = terminalTabs.some(t => t.deviceId === deviceId);
+		if (!exists) {
+			terminalTabs = [...terminalTabs, {
+				id: `term-${deviceId}-${Date.now()}`,
+				vmName: deviceId,
+				slotName: deviceId,
+				protocol: 'adb',
+				deviceId,
+			}];
+		}
+		terminalOpen = true;
+	}
+
 	function openMonitoring(deviceId: string) {
 		if (monitoringDeviceId !== deviceId || !monitoringActive) {
 			// Different device or not running → start fresh
@@ -611,6 +630,7 @@
 				onOpenServerSheet={() => serverSheetOpen = true}
 				onOpenMonitoring={openMonitoring}
 				onOpenScreen={openScreen}
+				onOpenTerminal={openTerminal}
 				activeJobCount={activeJobs.filter(j => j.state === 'running').length}
 				{storageMetricsMap}
 			/>
@@ -716,4 +736,10 @@
 	bind:open={screenSheetOpen}
 	serverId={selectedServerId}
 	deviceId={screenDeviceId}
+/>
+
+<TerminalDialog
+	bind:open={terminalOpen}
+	terminals={terminalTabs}
+	onClose={() => { terminalTabs = []; }}
 />

@@ -7,15 +7,17 @@
 
 	interface Props {
 		vm: string;
-		protocol: 'ssh';
+		protocol: 'ssh' | 'adb';
 		sessionId?: string;
 		host?: string;
+		// adb 모드 전용: agent 가 라우팅에 사용 (URL path 의 마지막 segment)
+		deviceId?: string;
 		onConnect?: () => void;
 		onDisconnect?: () => void;
 		onError?: (message: string) => void;
 	}
 
-	let { vm, protocol, sessionId, host, onConnect, onDisconnect, onError }: Props = $props();
+	let { vm, protocol, sessionId, host, deviceId, onConnect, onDisconnect, onError }: Props = $props();
 
 	let containerElement = $state<HTMLElement | null>(null);
 	let connected = $state(false);
@@ -67,8 +69,15 @@
 
 			// WebSocket connection
 			const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-			const target = host ? `host=${encodeURIComponent(host)}` : `vm=${encodeURIComponent(vm)}`;
-			const url = `${wsProtocol}//${window.location.host}/api/terminal/ssh?${target}&cols=${cols}&rows=${rows}`;
+			let url: string;
+			if (protocol === 'adb') {
+				// agent 의 ADB PTY shell. portal frontend / standalone 모두 동일 path.
+				const id = encodeURIComponent(deviceId ?? vm);
+				url = `${wsProtocol}//${window.location.host}/api/agent/shell/${id}?cols=${cols}&rows=${rows}`;
+			} else {
+				const target = host ? `host=${encodeURIComponent(host)}` : `vm=${encodeURIComponent(vm)}`;
+				url = `${wsProtocol}//${window.location.host}/api/terminal/ssh?${target}&cols=${cols}&rows=${rows}`;
+			}
 
 			ws = new WebSocket(url);
 
