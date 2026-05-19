@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v6.33.4
-// source: proto/agent.proto
+// source: agent.proto
 
 package pb
 
@@ -45,6 +45,7 @@ const (
 	DeviceAgent_TakeScreenshot_FullMethodName         = "/agent.DeviceAgent/TakeScreenshot"
 	DeviceAgent_ScreenshotOcr_FullMethodName          = "/agent.DeviceAgent/ScreenshotOcr"
 	DeviceAgent_ReparseTrace_FullMethodName           = "/agent.DeviceAgent/ReparseTrace"
+	DeviceAgent_Shell_FullMethodName                  = "/agent.DeviceAgent/Shell"
 )
 
 // DeviceAgentClient is the client API for DeviceAgent service.
@@ -87,6 +88,10 @@ type DeviceAgentClient interface {
 	ScreenshotOcr(ctx context.Context, in *ScreenshotOcrRequest, opts ...grpc.CallOption) (*ScreenshotOcrResponse, error)
 	// Trace Reparse
 	ReparseTrace(ctx context.Context, in *ReparseTraceRequest, opts ...grpc.CallOption) (*ReparseTraceResponse, error)
+	// Interactive shell (PTY) — bidi-streaming.
+	// 첫 메시지는 반드시 ShellClientMsg.start (device_id, cols, rows) 이어야 한다.
+	// 이후 input / resize 메시지로 양방향 통신. 종료 시 server 가 ShellServerMsg.exit 전송.
+	Shell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellClientMsg, ShellServerMsg], error)
 }
 
 type deviceAgentClient struct {
@@ -384,6 +389,19 @@ func (c *deviceAgentClient) ReparseTrace(ctx context.Context, in *ReparseTraceRe
 	return out, nil
 }
 
+func (c *deviceAgentClient) Shell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellClientMsg, ShellServerMsg], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DeviceAgent_ServiceDesc.Streams[3], DeviceAgent_Shell_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ShellClientMsg, ShellServerMsg]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DeviceAgent_ShellClient = grpc.BidiStreamingClient[ShellClientMsg, ShellServerMsg]
+
 // DeviceAgentServer is the server API for DeviceAgent service.
 // All implementations must embed UnimplementedDeviceAgentServer
 // for forward compatibility.
@@ -424,6 +442,10 @@ type DeviceAgentServer interface {
 	ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error)
 	// Trace Reparse
 	ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error)
+	// Interactive shell (PTY) — bidi-streaming.
+	// 첫 메시지는 반드시 ShellClientMsg.start (device_id, cols, rows) 이어야 한다.
+	// 이후 input / resize 메시지로 양방향 통신. 종료 시 server 가 ShellServerMsg.exit 전송.
+	Shell(grpc.BidiStreamingServer[ShellClientMsg, ShellServerMsg]) error
 	mustEmbedUnimplementedDeviceAgentServer()
 }
 
@@ -511,6 +533,9 @@ func (UnimplementedDeviceAgentServer) ScreenshotOcr(context.Context, *Screenshot
 }
 func (UnimplementedDeviceAgentServer) ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReparseTrace not implemented")
+}
+func (UnimplementedDeviceAgentServer) Shell(grpc.BidiStreamingServer[ShellClientMsg, ShellServerMsg]) error {
+	return status.Error(codes.Unimplemented, "method Shell not implemented")
 }
 func (UnimplementedDeviceAgentServer) mustEmbedUnimplementedDeviceAgentServer() {}
 func (UnimplementedDeviceAgentServer) testEmbeddedByValue()                     {}
@@ -980,6 +1005,13 @@ func _DeviceAgent_ReparseTrace_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_Shell_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DeviceAgentServer).Shell(&grpc.GenericServerStream[ShellClientMsg, ShellServerMsg]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DeviceAgent_ShellServer = grpc.BidiStreamingServer[ShellClientMsg, ShellServerMsg]
+
 // DeviceAgent_ServiceDesc is the grpc.ServiceDesc for DeviceAgent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1096,6 +1128,12 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _DeviceAgent_MonitorDevices_Handler,
 			ServerStreams: true,
 		},
+		{
+			StreamName:    "Shell",
+			Handler:       _DeviceAgent_Shell_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 	},
-	Metadata: "proto/agent.proto",
+	Metadata: "agent.proto",
 }

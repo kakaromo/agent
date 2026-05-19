@@ -48,6 +48,11 @@ service DeviceAgent {
 
   // Trace Reparse
   rpc ReparseTrace(ReparseTraceRequest) returns (ReparseTraceResponse);
+
+  // Interactive shell (PTY) — bidi-streaming.
+  // 첫 메시지는 반드시 ShellClientMsg.start (device_id, cols, rows) 이어야 한다.
+  // 이후 input / resize 메시지로 양방향 통신. 종료 시 server 가 ShellServerMsg.exit 전송.
+  rpc Shell(stream ShellClientMsg) returns (stream ShellServerMsg);
 }
 
 // ==================== Device ====================
@@ -676,4 +681,53 @@ message ReparseTraceRequest {
 message ReparseTraceResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ==================== Shell (PTY) ====================
+
+// 세션 시작 — 첫 메시지로 한 번만 전송한다.
+message ShellStart {
+  string device_id = 1;
+  uint32 cols = 2;
+  uint32 rows = 3;
+  string term = 4; // 예: "xterm-256color" (선택, 비어있으면 server default)
+}
+
+// 사용자 키 입력 (raw bytes — xterm.js term.onData 가 보내는 UTF-8 sequence)
+message ShellInput {
+  bytes data = 1;
+}
+
+// 창 크기 변경 — server 가 pty 에 inline stty 명령 송신
+message ShellResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+// 클라이언트 → 서버
+message ShellClientMsg {
+  oneof payload {
+    ShellStart  start  = 1;
+    ShellInput  input  = 2;
+    ShellResize resize = 3;
+  }
+}
+
+// pty stdout/stderr 출력
+message ShellOutput {
+  bytes data = 1;
+}
+
+// 세션 종료 (process exit code)
+message ShellExit {
+  int32  code  = 1;
+  string error = 2; // 비정상 종료 시 메시지 (선택)
+}
+
+// 서버 → 클라이언트
+message ShellServerMsg {
+  oneof payload {
+    ShellOutput output = 1;
+    ShellExit   exit   = 2;
+  }
 }

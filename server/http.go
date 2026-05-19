@@ -46,6 +46,16 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 
 	// /ws/screen/* — 기존 scrcpy 스트리밍 (legacy path)
 	mux.Handle("/ws/screen/", opts.ScreenHandler)
+
+	// /ws/shell/* — adb PTY shell WebSocket (xterm.js 호환)
+	shellH := newShellWSHandler(opts.Manager)
+	mux.Handle("/ws/shell/", shellH)
+	// portal frontend / 우리 ui 모두 /api/agent/shell/{id} path 사용 → /ws/shell/ 로 정규화
+	mux.Handle("/api/agent/shell/", http.StripPrefix("/api/agent/shell", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/ws/shell" + r.URL.Path
+		shellH.ServeHTTP(w, r2)
+	})))
 	// /api/agent/screen/* — portal frontend 호환 (getScreenWebSocketUrl).
 	// screenHandler 가 path 에서 trim 하는 prefix 차이를 흡수하기 위해 StripPrefix 로 /ws/screen/ 모양으로 정규화.
 	mux.Handle("/api/agent/screen/", http.StripPrefix("/api/agent/screen", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
