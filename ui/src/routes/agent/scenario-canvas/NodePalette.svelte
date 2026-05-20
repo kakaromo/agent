@@ -10,6 +10,8 @@
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import PackageMinusIcon from '@lucide/svelte/icons/package-minus';
 
 	const stepTypes = [
 		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
@@ -19,7 +21,9 @@
 		{ type: 'sleep', label: 'Sleep', icon: ClockIcon, desc: '대기' },
 		{ type: 'trace_start', label: 'Trace Start', icon: ScanSearchIcon, desc: 'ftrace 시작' },
 		{ type: 'trace_stop', label: 'Trace Stop', icon: SquareIcon, desc: 'ftrace 중지' },
-		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' }
+		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
+		{ type: 'install_apk', label: 'Install APK', icon: DownloadIcon, desc: 'APK 설치' },
+		{ type: 'uninstall_apk', label: 'Uninstall APK', icon: PackageMinusIcon, desc: '앱 제거' }
 	];
 
 	function onDragStart(event: DragEvent, type: string) {

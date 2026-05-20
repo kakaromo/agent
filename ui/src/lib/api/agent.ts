@@ -647,6 +647,30 @@ export function screenshotOcr(serverId: number, data: {
 	return post(`/agent/macro/ocr?serverId=${serverId}`, data);
 }
 
+// ── APK Management ──
+
+export interface BundledApk {
+	filename: string;
+	sizeBytes: number;
+	modifiedAt: string;
+}
+
+export function listBundledApks(): Promise<BundledApk[]> {
+	return get(`/agent/apks`);
+}
+
+export function installApk(data: {
+	deviceId: string; apkFilename: string; grantPermissions?: boolean;
+}): Promise<{ success: boolean; message: string; packageName: string }> {
+	return post(`/agent/apks/install`, data);
+}
+
+export function uninstallApk(data: {
+	deviceId: string; packageName: string; keepData?: boolean;
+}): Promise<{ success: boolean; message: string }> {
+	return post(`/agent/apks/uninstall`, data);
+}
+
 // ── SSE helpers ──
 
 export function createJobProgressSource(serverId: number, jobId: string): EventSource {

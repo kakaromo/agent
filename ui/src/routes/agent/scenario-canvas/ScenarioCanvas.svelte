@@ -869,6 +869,8 @@
 	allSteps={nodes.filter(n => n.type === 'step').map(n => (n.data as StepNodeData).stepForm)}
 	onSave={handleStepSave}
 	onCancel={handleStepCancel}
+	{serverId}
+	deviceId={[...selectedDevices][0] ?? null}
 />
 
 <!-- Condition Edit Dialog -->

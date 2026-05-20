@@ -98,6 +98,13 @@ type MacroController interface {
 	ReplayMacro(ctx context.Context, req *pb.ReplayMacroRequest) (*pb.ReplayMacroResponse, error)
 }
 
+// ApkController abstracts apkmgr so scenario steps can install/uninstall APKs without
+// importing apkmgr directly (avoid cycles).
+type ApkController interface {
+	Install(ctx context.Context, req *pb.InstallApkRequest) (*pb.InstallApkResponse, error)
+	Uninstall(ctx context.Context, req *pb.UninstallApkRequest) (*pb.UninstallApkResponse, error)
+}
+
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
 	mu          sync.RWMutex
@@ -106,6 +113,7 @@ type Orchestrator struct {
 	toolsDir    string
 	traceMgr    TraceController
 	macroMgr    MacroController
+	apkMgr      ApkController
 	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
 }
 
@@ -168,6 +176,11 @@ func (o *Orchestrator) SetTraceController(tc TraceController) {
 // SetMacroController sets the macro controller for app_macro steps.
 func (o *Orchestrator) SetMacroController(mc MacroController) {
 	o.macroMgr = mc
+}
+
+// SetApkController sets the APK controller for install_apk/uninstall_apk steps.
+func (o *Orchestrator) SetApkController(ac ApkController) {
+	o.apkMgr = ac
 }
 
 // RunBenchmark starts a new benchmark job and returns immediately with a job ID.

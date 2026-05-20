@@ -151,6 +151,51 @@ func (d *Device) GetProp(ctx context.Context, prop string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// InstallApk installs a local .apk onto the device using `adb install`.
+// flags: -r(reinstall), -g(grant runtime permissions). 반환은 adb stdout (성공/실패 메시지).
+// adb install 은 내부적으로 push + pm install 을 수행한다.
+func (d *Device) InstallApk(ctx context.Context, localPath string, reinstall, grantPerms bool) (string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+	}
+	args := []string{"-s", d.Serial, "install"}
+	if reinstall {
+		args = append(args, "-r")
+	}
+	if grantPerms {
+		args = append(args, "-g")
+	}
+	args = append(args, localPath)
+	out, err := d.run(ctx, args...)
+	// adb install 은 실패 시 stdout 에 "Failure [...]" 출력 후 exit 0 인 경우가 있다.
+	if err == nil && strings.Contains(out, "Failure") {
+		return out, fmt.Errorf("install failed: %s", strings.TrimSpace(out))
+	}
+	return out, err
+}
+
+// UninstallApk uninstalls a package from the device.
+// keepData=true 이면 -k 로 사용자 데이터 + 캐시 보존.
+func (d *Device) UninstallApk(ctx context.Context, packageName string, keepData bool) (string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+	}
+	args := []string{"-s", d.Serial, "uninstall"}
+	if keepData {
+		args = append(args, "-k")
+	}
+	args = append(args, packageName)
+	out, err := d.run(ctx, args...)
+	if err == nil && strings.Contains(out, "Failure") {
+		return out, fmt.Errorf("uninstall failed: %s", strings.TrimSpace(out))
+	}
+	return out, err
+}
+
 func (d *Device) run(ctx context.Context, args ...string) (string, error) {
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc

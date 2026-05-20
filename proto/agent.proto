@@ -46,6 +46,11 @@ service DeviceAgent {
   rpc TakeScreenshot(TakeScreenshotRequest) returns (TakeScreenshotResponse);
   rpc ScreenshotOcr(ScreenshotOcrRequest) returns (ScreenshotOcrResponse);
 
+  // APK management (번들 폴더 list, install, uninstall)
+  rpc ListBundledApks(ListBundledApksRequest) returns (ListBundledApksResponse);
+  rpc InstallApk(InstallApkRequest) returns (InstallApkResponse);
+  rpc UninstallApk(UninstallApkRequest) returns (UninstallApkResponse);
+
   // Trace Reparse
   rpc ReparseTrace(ReparseTraceRequest) returns (ReparseTraceResponse);
 
@@ -222,9 +227,9 @@ message CancelJobResponse {
 // ==================== Scenario ====================
 
 message ScenarioStep {
-  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop", "condition", "app_macro"
+  string type = 1;                    // "benchmark", "shell", "cleanup", "sleep", "trace_start", "trace_stop", "condition", "app_macro", "install_apk", "uninstall_apk"
   BenchmarkTool tool = 2;            // benchmark일 때 사용
-  map<string, string> params = 3;
+  map<string, string> params = 3;    // install_apk: {apk_filename:"foo.apk"}, uninstall_apk: {package_name:"com.x"}
   ConditionalBranch condition = 4;   // type="condition"일 때만 사용
   AppMacroConfig macro = 5;          // type="app_macro"일 때 사용
 }
@@ -610,6 +615,44 @@ message ListInstalledAppsResponse {
 message InstalledApp {
   string package_name = 1;       // com.antutu.ABenchMark
   string app_name = 2;           // AnTuTu Benchmark
+}
+
+// ==================== APK Management ====================
+
+message ListBundledApksRequest {}
+
+message ListBundledApksResponse {
+  repeated BundledApk apks = 1;
+}
+
+message BundledApk {
+  string filename = 1;           // tools/apks/<filename>
+  int64 size_bytes = 2;
+  string modified_at = 3;        // RFC3339
+}
+
+message InstallApkRequest {
+  string device_id = 1;
+  string apk_filename = 2;       // tools/apks/ 내부 파일명 (디렉토리 traversal 금지)
+  bool reinstall = 3;            // pm install -r (기본 true 권장)
+  bool grant_runtime_permissions = 4; // pm install -g
+}
+
+message InstallApkResponse {
+  bool success = 1;
+  string message = 2;            // adb stdout/stderr
+  string package_name = 3;       // 추출 가능하면 채움 (best-effort)
+}
+
+message UninstallApkRequest {
+  string device_id = 1;
+  string package_name = 2;
+  bool keep_data = 3;            // pm uninstall -k
+}
+
+message UninstallApkResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message StartRecordingRequest {

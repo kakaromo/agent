@@ -76,6 +76,9 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 	// Scenario REST — DB 가 있으면 macroId hydrate 가능 (standalone), 없으면 nil 전달
 	registerScenarioRoutes(mux, opts.Agent, opts.DB)
 
+	// APK 관리 (list/install/uninstall) — DB 의존성 없음, 사무실/standalone 모두 활성화
+	registerApkRoutes(mux, opts.Agent)
+
 	// DB 기반 portal-style CRUD (server, execution, preset, scenario template, macro, schedule).
 	// DB nil(non-standalone) 일 땐 건너뛴다.
 	if opts.DB != nil {

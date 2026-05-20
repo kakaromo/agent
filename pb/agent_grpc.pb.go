@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v6.33.4
-// source: agent.proto
+// source: proto/agent.proto
 
 package pb
 
@@ -44,6 +44,9 @@ const (
 	DeviceAgent_ReplayMacro_FullMethodName            = "/agent.DeviceAgent/ReplayMacro"
 	DeviceAgent_TakeScreenshot_FullMethodName         = "/agent.DeviceAgent/TakeScreenshot"
 	DeviceAgent_ScreenshotOcr_FullMethodName          = "/agent.DeviceAgent/ScreenshotOcr"
+	DeviceAgent_ListBundledApks_FullMethodName        = "/agent.DeviceAgent/ListBundledApks"
+	DeviceAgent_InstallApk_FullMethodName             = "/agent.DeviceAgent/InstallApk"
+	DeviceAgent_UninstallApk_FullMethodName           = "/agent.DeviceAgent/UninstallApk"
 	DeviceAgent_ReparseTrace_FullMethodName           = "/agent.DeviceAgent/ReparseTrace"
 	DeviceAgent_Shell_FullMethodName                  = "/agent.DeviceAgent/Shell"
 )
@@ -86,6 +89,10 @@ type DeviceAgentClient interface {
 	ReplayMacro(ctx context.Context, in *ReplayMacroRequest, opts ...grpc.CallOption) (*ReplayMacroResponse, error)
 	TakeScreenshot(ctx context.Context, in *TakeScreenshotRequest, opts ...grpc.CallOption) (*TakeScreenshotResponse, error)
 	ScreenshotOcr(ctx context.Context, in *ScreenshotOcrRequest, opts ...grpc.CallOption) (*ScreenshotOcrResponse, error)
+	// APK management (번들 폴더 list, install, uninstall)
+	ListBundledApks(ctx context.Context, in *ListBundledApksRequest, opts ...grpc.CallOption) (*ListBundledApksResponse, error)
+	InstallApk(ctx context.Context, in *InstallApkRequest, opts ...grpc.CallOption) (*InstallApkResponse, error)
+	UninstallApk(ctx context.Context, in *UninstallApkRequest, opts ...grpc.CallOption) (*UninstallApkResponse, error)
 	// Trace Reparse
 	ReparseTrace(ctx context.Context, in *ReparseTraceRequest, opts ...grpc.CallOption) (*ReparseTraceResponse, error)
 	// Interactive shell (PTY) — bidi-streaming.
@@ -379,6 +386,36 @@ func (c *deviceAgentClient) ScreenshotOcr(ctx context.Context, in *ScreenshotOcr
 	return out, nil
 }
 
+func (c *deviceAgentClient) ListBundledApks(ctx context.Context, in *ListBundledApksRequest, opts ...grpc.CallOption) (*ListBundledApksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListBundledApksResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_ListBundledApks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) InstallApk(ctx context.Context, in *InstallApkRequest, opts ...grpc.CallOption) (*InstallApkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InstallApkResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_InstallApk_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) UninstallApk(ctx context.Context, in *UninstallApkRequest, opts ...grpc.CallOption) (*UninstallApkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UninstallApkResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_UninstallApk_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deviceAgentClient) ReparseTrace(ctx context.Context, in *ReparseTraceRequest, opts ...grpc.CallOption) (*ReparseTraceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReparseTraceResponse)
@@ -440,6 +477,10 @@ type DeviceAgentServer interface {
 	ReplayMacro(context.Context, *ReplayMacroRequest) (*ReplayMacroResponse, error)
 	TakeScreenshot(context.Context, *TakeScreenshotRequest) (*TakeScreenshotResponse, error)
 	ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error)
+	// APK management (번들 폴더 list, install, uninstall)
+	ListBundledApks(context.Context, *ListBundledApksRequest) (*ListBundledApksResponse, error)
+	InstallApk(context.Context, *InstallApkRequest) (*InstallApkResponse, error)
+	UninstallApk(context.Context, *UninstallApkRequest) (*UninstallApkResponse, error)
 	// Trace Reparse
 	ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error)
 	// Interactive shell (PTY) — bidi-streaming.
@@ -530,6 +571,15 @@ func (UnimplementedDeviceAgentServer) TakeScreenshot(context.Context, *TakeScree
 }
 func (UnimplementedDeviceAgentServer) ScreenshotOcr(context.Context, *ScreenshotOcrRequest) (*ScreenshotOcrResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ScreenshotOcr not implemented")
+}
+func (UnimplementedDeviceAgentServer) ListBundledApks(context.Context, *ListBundledApksRequest) (*ListBundledApksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBundledApks not implemented")
+}
+func (UnimplementedDeviceAgentServer) InstallApk(context.Context, *InstallApkRequest) (*InstallApkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InstallApk not implemented")
+}
+func (UnimplementedDeviceAgentServer) UninstallApk(context.Context, *UninstallApkRequest) (*UninstallApkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UninstallApk not implemented")
 }
 func (UnimplementedDeviceAgentServer) ReparseTrace(context.Context, *ReparseTraceRequest) (*ReparseTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReparseTrace not implemented")
@@ -987,6 +1037,60 @@ func _DeviceAgent_ScreenshotOcr_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAgent_ListBundledApks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBundledApksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).ListBundledApks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_ListBundledApks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).ListBundledApks(ctx, req.(*ListBundledApksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_InstallApk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InstallApkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).InstallApk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_InstallApk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).InstallApk(ctx, req.(*InstallApkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_UninstallApk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UninstallApkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).UninstallApk(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_UninstallApk_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).UninstallApk(ctx, req.(*UninstallApkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAgent_ReparseTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReparseTraceRequest)
 	if err := dec(in); err != nil {
@@ -1108,6 +1212,18 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DeviceAgent_ScreenshotOcr_Handler,
 		},
 		{
+			MethodName: "ListBundledApks",
+			Handler:    _DeviceAgent_ListBundledApks_Handler,
+		},
+		{
+			MethodName: "InstallApk",
+			Handler:    _DeviceAgent_InstallApk_Handler,
+		},
+		{
+			MethodName: "UninstallApk",
+			Handler:    _DeviceAgent_UninstallApk_Handler,
+		},
+		{
 			MethodName: "ReparseTrace",
 			Handler:    _DeviceAgent_ReparseTrace_Handler,
 		},
@@ -1135,5 +1251,5 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "agent.proto",
+	Metadata: "proto/agent.proto",
 }

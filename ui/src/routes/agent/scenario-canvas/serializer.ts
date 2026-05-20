@@ -226,14 +226,20 @@ export function protoToCanvas(
 			const formParams: Record<string, string> = {};
 			const basicOpts = getBasicOptions(tool);
 			const basicKeys = new Set(basicOpts.map(o => o.key));
+			// install_apk / uninstall_apk 는 모든 params 를 formParams 에 그대로 채워야 dialog
+			// select 가 round-trip 되며, extraText 로 떨어지면 안 된다.
+			const isApkStep = s.type === 'install_apk' || s.type === 'uninstall_apk';
 			for (const [k, v] of Object.entries(params)) {
 				if (knownKeys.has(k)) continue;
-				if (basicKeys.has(k)) { formParams[k] = v; }
+				if (isApkStep) { formParams[k] = v; }
+				else if (basicKeys.has(k)) { formParams[k] = v; }
 				else { extraLines.push(`${k}=${v}`); }
 			}
-			// 기본값 채우기
-			for (const opt of basicOpts) {
-				if (!(opt.key in formParams)) formParams[opt.key] = opt.defaultValue;
+			// 기본값 채우기 (apk step 은 default 가 없음 — 사용자가 채워야 함)
+			if (!isApkStep) {
+				for (const opt of basicOpts) {
+					if (!(opt.key in formParams)) formParams[opt.key] = opt.defaultValue;
+				}
 			}
 
 			const form: StepForm = {

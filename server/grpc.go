@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"agent/adb"
+	"agent/apkmgr"
 	"agent/benchmark"
 	"agent/macro"
 	"agent/monitor"
@@ -28,9 +29,10 @@ type DeviceAgentServer struct {
 	traceMgr     *trace.Manager
 	minioClient  *storage.MinioClient
 	macroMgr     *macro.Manager
+	apkMgr       *apkmgr.Manager
 }
 
-func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient, macroMgr *macro.Manager) *DeviceAgentServer {
+func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient, macroMgr *macro.Manager, apkMgr *apkmgr.Manager) *DeviceAgentServer {
 	return &DeviceAgentServer{
 		manager:      manager,
 		orchestrator: orchestrator,
@@ -38,8 +40,13 @@ func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestr
 		traceMgr:     traceMgr,
 		minioClient:  minioClient,
 		macroMgr:     macroMgr,
+		apkMgr:       apkMgr,
 	}
 }
+
+// ApkManager exposes the APK manager for callers that need to dispatch install/uninstall
+// from outside the gRPC layer (예: scenario orchestrator).
+func (s *DeviceAgentServer) ApkManager() *apkmgr.Manager { return s.apkMgr }
 
 // ==================== Device Management ====================
 
@@ -647,4 +654,27 @@ func (s *DeviceAgentServer) ReparseTrace(ctx context.Context, req *pb.ReparseTra
 		return &pb.ReparseTraceResponse{Success: false, Message: err.Error()}, nil
 	}
 	return &pb.ReparseTraceResponse{Success: true, Message: "reparse started"}, nil
+}
+
+// ==================== APK Management ====================
+
+func (s *DeviceAgentServer) ListBundledApks(ctx context.Context, req *pb.ListBundledApksRequest) (*pb.ListBundledApksResponse, error) {
+	if s.apkMgr == nil {
+		return nil, fmt.Errorf("apk manager not configured")
+	}
+	return s.apkMgr.List(ctx, req)
+}
+
+func (s *DeviceAgentServer) InstallApk(ctx context.Context, req *pb.InstallApkRequest) (*pb.InstallApkResponse, error) {
+	if s.apkMgr == nil {
+		return &pb.InstallApkResponse{Success: false, Message: "apk manager not configured"}, fmt.Errorf("apk manager not configured")
+	}
+	return s.apkMgr.Install(ctx, req)
+}
+
+func (s *DeviceAgentServer) UninstallApk(ctx context.Context, req *pb.UninstallApkRequest) (*pb.UninstallApkResponse, error) {
+	if s.apkMgr == nil {
+		return &pb.UninstallApkResponse{Success: false, Message: "apk manager not configured"}, fmt.Errorf("apk manager not configured")
+	}
+	return s.apkMgr.Uninstall(ctx, req)
 }

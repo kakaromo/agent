@@ -556,6 +556,51 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			outParts = append(outParts, fmt.Sprintf("OCR|%s=%s", k, v))
 		}
 		return strings.Join(outParts, "\n"), metrics, nil
+	case "install_apk":
+		if o.apkMgr == nil {
+			return "", nil, fmt.Errorf("apk manager not configured")
+		}
+		filename := step.Params["apk_filename"]
+		if filename == "" {
+			return "", nil, fmt.Errorf("install_apk step missing 'apk_filename' param")
+		}
+		resp, err := o.apkMgr.Install(ctx, &pb.InstallApkRequest{
+			DeviceId:                deviceID,
+			ApkFilename:             filename,
+			Reinstall:               true,
+			GrantRuntimePermissions: step.Params["grant_permissions"] == "true",
+		})
+		if err != nil {
+			msg := ""
+			if resp != nil {
+				msg = resp.Message
+			}
+			return msg, nil, fmt.Errorf("install_apk %s: %w", filename, err)
+		}
+		out := fmt.Sprintf("INSTALL_APK|filename=%s|package=%s\n%s", filename, resp.PackageName, resp.Message)
+		return out, nil, nil
+	case "uninstall_apk":
+		if o.apkMgr == nil {
+			return "", nil, fmt.Errorf("apk manager not configured")
+		}
+		pkg := step.Params["package_name"]
+		if pkg == "" {
+			return "", nil, fmt.Errorf("uninstall_apk step missing 'package_name' param")
+		}
+		resp, err := o.apkMgr.Uninstall(ctx, &pb.UninstallApkRequest{
+			DeviceId:    deviceID,
+			PackageName: pkg,
+			KeepData:    step.Params["keep_data"] == "true",
+		})
+		if err != nil {
+			msg := ""
+			if resp != nil {
+				msg = resp.Message
+			}
+			return msg, nil, fmt.Errorf("uninstall_apk %s: %w", pkg, err)
+		}
+		out := fmt.Sprintf("UNINSTALL_APK|package=%s\n%s", pkg, resp.Message)
+		return out, nil, nil
 	case "condition":
 		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
 		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)
@@ -672,6 +717,10 @@ func formatStepMessage(es expandedStep, totalSteps int) string {
 		stepDesc += ": iotest"
 	case "sleep":
 		stepDesc += fmt.Sprintf(": sleep %ss", es.step.Params["seconds"])
+	case "install_apk":
+		stepDesc += fmt.Sprintf(": install_apk(%s)", es.step.Params["apk_filename"])
+	case "uninstall_apk":
+		stepDesc += fmt.Sprintf(": uninstall_apk(%s)", es.step.Params["package_name"])
 	}
 
 	parts = append(parts, stepDesc)

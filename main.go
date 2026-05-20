@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"agent/adb"
+	"agent/apkmgr"
 	"agent/benchmark"
 	"agent/config"
 	"agent/macro"
@@ -131,6 +132,10 @@ func main() {
 	orch.SetMacroController(macroMgr)
 	screenHandler.SetRecorder(macroMgr)
 
+	// APK management (list/install/uninstall — uses <toolsDir>/apks)
+	apkMgr := apkmgr.NewManager(mgr, cfg.Server.ToolsDir)
+	orch.SetApkController(apkMgr)
+
 	bindAddr := fmt.Sprintf(":%d", cfg.Server.Port)
 	if cfg.Standalone.Enabled {
 		// 외부 노출 차단 — 같은 네트워크의 다른 장비에서 접근 불가.
@@ -161,7 +166,7 @@ func main() {
 			PermitWithoutStream: true,
 		}),
 	)
-	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr, minioClient, macroMgr)
+	agentServer := server.NewDeviceAgentServer(mgr, orch, coll, traceMgr, minioClient, macroMgr, apkMgr)
 	pb.RegisterDeviceAgentServer(grpcServer, agentServer)
 	reflection.Register(grpcServer)
 

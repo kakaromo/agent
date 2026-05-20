@@ -3,7 +3,10 @@
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { getBasicOptions, getAdvancedOptions, getDefaultParams, type OptionDef } from './benchmarkOptions.js';
-	import { fetchAppMacros, type AppMacro } from '$lib/api/agent.js';
+	import {
+		fetchAppMacros, listBundledApks, listInstalledApps,
+		type AppMacro, type BundledApk, type InstalledApp
+	} from '$lib/api/agent.js';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import IOTestEditor from './iotest/IOTestEditor.svelte';
 	import type { IOTestConfig } from './iotest/types.js';
@@ -12,6 +15,11 @@
 	$effect(() => {
 		fetchAppMacros().then(m => availableMacros = m).catch(() => {});
 	});
+
+	// 번들된 APK / 디바이스 설치 앱 — install_apk / uninstall_apk step 의 select 옵션.
+	// dialog 가 열릴 때마다 lazy fetch.
+	let bundledApks = $state<BundledApk[]>([]);
+	let installedApps = $state<InstalledApp[]>([]);
 
 	export interface StepForm {
 		type: string;
@@ -38,9 +46,13 @@
 		allSteps: StepForm[];
 		onSave: (step: StepForm) => void;
 		onCancel: () => void;
+		// install_apk / uninstall_apk step 에서 디바이스의 설치된 앱 목록을 가져오기 위해
+		// serverId / deviceId 가 필요. 없으면 select 대신 free-text 입력만 제공.
+		serverId?: number | null;
+		deviceId?: string | null;
 	}
 
-	let { open = $bindable(), step, stepIndex, allSteps, onSave, onCancel }: Props = $props();
+	let { open = $bindable(), step, stepIndex, allSteps, onSave, onCancel, serverId = null, deviceId = null }: Props = $props();
 
 	// Local working copy
 	let local = $state<StepForm | null>(null);
@@ -52,6 +64,17 @@
 				formParams: { ...step.formParams },
 				cleanupSteps: new Set(step.cleanupSteps)
 			};
+		}
+	});
+
+	// install_apk / uninstall_apk 가 보이는 동안만 lazy fetch (open & 해당 type 일 때).
+	$effect(() => {
+		if (!open || !local) return;
+		if (local.type === 'install_apk' && bundledApks.length === 0) {
+			listBundledApks().then(v => bundledApks = v).catch(() => {});
+		}
+		if (local.type === 'uninstall_apk' && installedApps.length === 0 && serverId != null && deviceId) {
+			listInstalledApps(serverId, deviceId).then(v => installedApps = v).catch(() => {});
 		}
 	});
 
@@ -140,6 +163,8 @@
 							<option value="trace_start">Trace Start</option>
 							<option value="trace_stop">Trace Stop</option>
 							<option value="app_macro">App Macro</option>
+							<option value="install_apk">Install APK</option>
+							<option value="uninstall_apk">Uninstall APK</option>
 						</select>
 					</div>
 					{#if local.type === 'benchmark'}
@@ -328,6 +353,75 @@
 							<option value="clear">앱 데이터 초기화 후 실행 (pm clear)</option>
 							<option value="none">초기화 없이 실행</option>
 						</select>
+					</div>
+
+				{:else if local.type === 'install_apk'}
+					<div class="space-y-2">
+						<label class="{sectionLabel}">APK 파일</label>
+						{#if bundledApks.length > 0}
+							<select
+								value={local.formParams.apk_filename ?? ''}
+								onchange={(e) => { if (local) local.formParams = { ...local.formParams, apk_filename: (e.target as HTMLSelectElement).value }; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+							>
+								<option value="">APK 선택...</option>
+								{#each bundledApks as apk (apk.filename)}
+									<option value={apk.filename}>{apk.filename}</option>
+								{/each}
+							</select>
+							<p class="{captionMuted}">에이전트 호스트의 <code>tools/apks/</code> 폴더에서 발견된 .apk 파일</p>
+						{:else}
+							<input
+								value={local.formParams.apk_filename ?? ''}
+								oninput={(e) => { if (local) local.formParams = { ...local.formParams, apk_filename: (e.target as HTMLInputElement).value }; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+								placeholder="myapp.apk"
+							/>
+							<p class="{captionMuted}">번들된 APK 가 없습니다. 호스트의 <code>tools/apks/</code> 폴더에 .apk 파일을 추가하거나 파일명을 직접 입력하세요.</p>
+						{/if}
+						<label class="flex items-center gap-1.5 text-[10px] cursor-pointer mt-2">
+							<input
+								type="checkbox"
+								checked={local.formParams.grant_permissions === 'true'}
+								onchange={(e) => { if (local) local.formParams = { ...local.formParams, grant_permissions: (e.target as HTMLInputElement).checked ? 'true' : 'false' }; }}
+								class="size-3"
+							/>
+							모든 런타임 권한 자동 부여 (<code>pm install -g</code>)
+						</label>
+					</div>
+
+				{:else if local.type === 'uninstall_apk'}
+					<div class="space-y-2">
+						<label class="{sectionLabel}">Package Name</label>
+						{#if installedApps.length > 0}
+							<select
+								value={local.formParams.package_name ?? ''}
+								onchange={(e) => { if (local) local.formParams = { ...local.formParams, package_name: (e.target as HTMLSelectElement).value }; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+							>
+								<option value="">앱 선택...</option>
+								{#each installedApps as app (app.packageName)}
+									<option value={app.packageName}>{app.appName || app.packageName} ({app.packageName})</option>
+								{/each}
+							</select>
+						{:else}
+							<input
+								value={local.formParams.package_name ?? ''}
+								oninput={(e) => { if (local) local.formParams = { ...local.formParams, package_name: (e.target as HTMLInputElement).value }; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+								placeholder="com.example.app"
+							/>
+							<p class="{captionMuted}">{deviceId ? '설치된 앱을 가져오지 못했습니다. 패키지명을 직접 입력하세요.' : '디바이스를 선택하면 설치된 앱 목록을 보여줍니다. 지금은 패키지명을 직접 입력하세요.'}</p>
+						{/if}
+						<label class="flex items-center gap-1.5 text-[10px] cursor-pointer mt-2">
+							<input
+								type="checkbox"
+								checked={local.formParams.keep_data === 'true'}
+								onchange={(e) => { if (local) local.formParams = { ...local.formParams, keep_data: (e.target as HTMLInputElement).checked ? 'true' : 'false' }; }}
+								class="size-3"
+							/>
+							사용자 데이터/캐시 유지 (<code>pm uninstall -k</code>)
+						</label>
 					</div>
 
 				{:else}

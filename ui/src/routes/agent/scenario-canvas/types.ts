@@ -70,7 +70,9 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	sleep: { bg: 'bg-yellow-100', text: 'text-yellow-700' },
 	trace_start: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	trace_stop: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
-	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' }
+	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
+	install_apk: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+	uninstall_apk: { bg: 'bg-rose-100', text: 'text-rose-700' }
 };
 
 export function stepSummary(form: StepForm): string {
@@ -83,6 +85,8 @@ export function stepSummary(form: StepForm): string {
 		case 'trace_start': return `${form.formParams.trace_type ?? 'ufs'} trace`;
 		case 'trace_stop': return 'stop';
 		case 'app_macro': return form.macroName ?? `Macro #${form.macroId ?? '?'}`;
+		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
+		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
 		default: return form.type;
 	}
 }

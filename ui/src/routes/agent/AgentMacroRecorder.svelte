@@ -4,6 +4,7 @@
 		listInstalledApps, replayMacro, getScreenWebSocketUrl,
 		type AppMacro, type MacroEvent, type InstalledApp
 	} from '$lib/api/agent.js';
+	import AgentAppManager from './AgentAppManager.svelte';
 	import { toast } from 'svelte-sonner';
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
 	import JMuxer from 'jmuxer';
@@ -40,6 +41,10 @@
 	// ── Wizard steps ──
 	type WizardStep = 'list' | 'app' | 'record' | 'events' | 'save';
 	let wizardStep = $state<WizardStep>('list');
+
+	// list 화면의 sub-tab — 매크로 목록 / APK 설치·제거
+	type ListTab = 'macros' | 'apps';
+	let listTab = $state<ListTab>('macros');
 
 	// ── Macro list ──
 	let macros = $state<AppMacro[]>([]);
@@ -379,14 +384,32 @@
 <div class="h-full flex flex-col overflow-hidden">
 
 {#if wizardStep === 'list'}
-	<!-- ════ 매크로 목록 ════ -->
+	<!-- ════ 매크로 목록 + APK 관리 sub-tab ════ -->
 	<div class="flex items-center justify-between px-4 py-3 border-b">
-		<h2 class="text-sm font-semibold">App Macro</h2>
-		<button onclick={startNewMacro} disabled={!firstSelectedDevice}
-			class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors">
-			<PlusIcon class="size-3.5" /> 새 매크로
-		</button>
+		<div class="flex items-center gap-3">
+			<h2 class="text-sm font-semibold">App Macro</h2>
+			<div class="flex items-center gap-1 rounded-md bg-muted/40 p-0.5">
+				<button onclick={() => listTab = 'macros'}
+					class="px-2 py-0.5 text-[11px] rounded {listTab === 'macros' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}">
+					매크로
+				</button>
+				<button onclick={() => listTab = 'apps'}
+					class="px-2 py-0.5 text-[11px] rounded {listTab === 'apps' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}">
+					앱 설치/제거
+				</button>
+			</div>
+		</div>
+		{#if listTab === 'macros'}
+			<button onclick={startNewMacro} disabled={!firstSelectedDevice}
+				class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors">
+				<PlusIcon class="size-3.5" /> 새 매크로
+			</button>
+		{/if}
 	</div>
+
+	{#if listTab === 'apps'}
+		<AgentAppManager {serverId} {selectedDevices} />
+	{:else}
 
 	{#if !firstSelectedDevice}
 		<div class="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3">
@@ -431,6 +454,7 @@
 				</div>
 			{/each}
 		</div>
+	{/if}
 	{/if}
 
 {:else}
