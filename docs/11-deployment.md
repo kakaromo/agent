@@ -54,10 +54,11 @@ agent-portable/
 ├── config/
 │   └── devices.toml              # [standalone] enabled=true 권장
 ├── tools/                         # Android push 도구
-│   ├── fio                        # Android arm64 ELF
+│   ├── fio                        # Android arm64 ELF — `[tools] fio = "..."` 로 파일명 override 가능
 │   ├── iozone
 │   ├── tiotest
 │   ├── iotest                     # Go 자체 빌드
+│   ├── apks/                      # 디바이스에 설치할 .apk (optional, README 참고)
 │   └── scrcpy-server              # JAR
 └── platform-tools/                # (옵션) ADB 동봉
     ├── adb
@@ -81,6 +82,12 @@ enabled = true                          # 출장용 기본 ON
 
 [minio]
 # 모두 빈 값 또는 주석 — standalone 에선 미사용
+
+# 도구 파일명이 다른 경우 (예: tools/fio-3.36) override
+# [tools]
+# fio = "fio-3.36"
+# iozone = "iozone-3.506"
+# tiotest = "tiotest-0.4.3"
 ```
 
 `db_path` / `archive_base` 를 상대 경로로 두면 USB 안에서 모든 게 self-contained. 다른 노트북에 꽂아도 같은 DB 사용.

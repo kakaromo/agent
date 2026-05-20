@@ -62,7 +62,7 @@ Android 디바이스를 USB로 노트북에 연결한 뒤, ADB를 통해 디바�
 - Android 디바이스 (USB 연결, USB 디버깅 ON)
 
 **push 되는 외부 바이너리** (`tools/` 디렉토리):
-- `fio`, `iozone`, `tiotest` — Android arm64 ELF
+- `fio`, `iozone`, `tiotest` — Android arm64 ELF. 파일명이 다르면 `[tools]` 섹션으로 override (예: `fio = "fio-3.36"`)
 - `iotest` — `cmd/iotest` 에서 Go 빌드 (Android arm64)
 - `scrcpy-server` — 스크린 스트리밍용 JAR
 - `trace` — **사무실 모드 전용** Rust 트레이스 파서. standalone 에서는 Go 파서가 강제되어 사용 안 함

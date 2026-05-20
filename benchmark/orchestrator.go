@@ -111,6 +111,7 @@ type Orchestrator struct {
 	jobs        map[string]*Job
 	manager     *adb.Manager
 	toolsDir    string
+	toolNames   map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
 	traceMgr    TraceController
 	macroMgr    MacroController
 	apkMgr      ApkController
@@ -181,6 +182,27 @@ func (o *Orchestrator) SetMacroController(mc MacroController) {
 // SetApkController sets the APK controller for install_apk/uninstall_apk steps.
 func (o *Orchestrator) SetApkController(ac ApkController) {
 	o.apkMgr = ac
+}
+
+// SetToolName overrides the file name used for a given benchmark tool when pushing
+// to the device. Empty value → 기본명을 사용. 호출자(main)는 config 로딩 직후 한 번
+// 호출. push 가 시작되기 전이라 lock 필요 없음.
+func (o *Orchestrator) SetToolName(tool pb.BenchmarkTool, name string) {
+	if name == "" {
+		return
+	}
+	if o.toolNames == nil {
+		o.toolNames = make(map[pb.BenchmarkTool]string)
+	}
+	o.toolNames[tool] = name
+}
+
+// resolveToolName 은 override 가 있으면 그걸, 없으면 기본명을 돌려준다.
+func (o *Orchestrator) resolveToolName(tool pb.BenchmarkTool) string {
+	if n, ok := o.toolNames[tool]; ok && n != "" {
+		return n
+	}
+	return defaultToolNameFor(tool)
 }
 
 // RunBenchmark starts a new benchmark job and returns immediately with a job ID.
@@ -338,7 +360,7 @@ func (o *Orchestrator) runOnDevice(ctx context.Context, job *Job, deviceID strin
 	startedAt := time.Now().UnixMilli()
 
 	// Push tool
-	toolName := toolNameFor(job.Tool)
+	toolName := o.resolveToolName(job.Tool)
 	if toolName == "" {
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, "unknown tool", 0)
 		return
@@ -569,7 +591,9 @@ func (o *Orchestrator) GetBenchmarkResults(jobID, deviceID string) ([]*pb.Benchm
 
 // ==================== Helpers ====================
 
-func toolNameFor(tool pb.BenchmarkTool) string {
+// defaultToolNameFor 은 config override 가 없을 때 쓰는 기본 파일명.
+// orchestrator.resolveToolName 을 거쳐 호출하세요 — 직접 호출하지 말 것.
+func defaultToolNameFor(tool pb.BenchmarkTool) string {
 	switch tool {
 	case pb.BenchmarkTool_BENCHMARK_TOOL_FIO:
 		return "fio"

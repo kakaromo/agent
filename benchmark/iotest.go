@@ -37,7 +37,7 @@ type iotestThreadState struct {
 type onIOTestProgress func(line string)
 
 func (o *Orchestrator) executeIOTestStep(ctx context.Context, md *adb.ManagedDevice, step *pb.ScenarioStep, onProgress onIOTestProgress) (string, map[string]float64, error) {
-	toolName := "iotest"
+	toolName := o.resolveToolName(pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST)
 	localPath := filepath.Join(o.toolsDir, toolName)
 	remotePath := remoteToolDir + "/" + toolName
 

@@ -115,6 +115,11 @@ func main() {
 	mgr.StartRefreshLoop(ctx, refreshInterval)
 
 	orch := benchmark.NewOrchestrator(mgr, cfg.Server.ToolsDir)
+	// [tools] 매핑 — tools_dir 안의 실제 파일명 override (예: fio = "fio-3.36").
+	orch.SetToolName(pb.BenchmarkTool_BENCHMARK_TOOL_FIO, cfg.Tools.Fio)
+	orch.SetToolName(pb.BenchmarkTool_BENCHMARK_TOOL_IOZONE, cfg.Tools.Iozone)
+	orch.SetToolName(pb.BenchmarkTool_BENCHMARK_TOOL_TIOTEST, cfg.Tools.Tiotest)
+	orch.SetToolName(pb.BenchmarkTool_BENCHMARK_TOOL_IOTEST, cfg.Tools.Iotest)
 	coll := monitor.NewCollector(mgr)
 	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir)
 	orch.SetTraceController(traceMgr)

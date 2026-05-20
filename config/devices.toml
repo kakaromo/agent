@@ -25,3 +25,13 @@ access_key = "admin"
 secret_key = "tka123tjd!"
 bucket = "agent"
 use_ssl = false
+
+# tools_dir 안의 실제 바이너리 파일명 override.
+# 예: fio 3.36 을 받아서 `tools/fio-3.36` 으로 저장했다면 fio = "fio-3.36"
+# 비우면 도구 기본명을 사용한다 (fio, iozone, tiotest, iotest).
+# bare 파일명만 허용 (`/`, `\` 거부).
+# [tools]
+# fio = "fio-3.36"
+# iozone = "iozone-3.506"
+# tiotest = "tiotest-0.4.3"
+# iotest = "iotest"

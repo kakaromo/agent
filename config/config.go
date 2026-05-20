@@ -12,6 +12,22 @@ type Config struct {
 	Server     ServerConfig     `toml:"server"`
 	Minio      MinioConfig      `toml:"minio"`
 	Standalone StandaloneConfig `toml:"standalone"`
+	Tools      ToolsConfig      `toml:"tools"`
+}
+
+// ToolsConfig — `tools_dir` 안의 실제 바이너리 파일명 매핑.
+//
+// 사용 사례: fio 3.36 을 받아서 `tools/fio-3.36` 으로 저장했다면 toml 에
+// `[tools] fio = "fio-3.36"` 를 적으면 된다. 디바이스에는 같은 이름으로 push 된다
+// (즉 remote 도 `/data/local/tmp/fio-3.36`). 비워두면 도구 기본명을 사용.
+//
+// 모든 필드는 bare 파일명 (`/`, `\`, `..` 거부) 만 허용. 절대경로/상대경로 트래버설은
+// 매니저에서 검증.
+type ToolsConfig struct {
+	Fio     string `toml:"fio"`     // 기본 "fio"
+	Iozone  string `toml:"iozone"`  // 기본 "iozone"
+	Tiotest string `toml:"tiotest"` // 기본 "tiotest"
+	Iotest  string `toml:"iotest"`  // 기본 "iotest"
 }
 
 // StandaloneConfig — 출장 시 노트북 단독 사용 모드.
@@ -71,5 +87,45 @@ func Load(path string) (*Config, error) {
 	if cfg.Minio.Bucket == "" {
 		cfg.Minio.Bucket = "agent"
 	}
+	if cfg.Tools.Fio == "" {
+		cfg.Tools.Fio = "fio"
+	}
+	if cfg.Tools.Iozone == "" {
+		cfg.Tools.Iozone = "iozone"
+	}
+	if cfg.Tools.Tiotest == "" {
+		cfg.Tools.Tiotest = "tiotest"
+	}
+	if cfg.Tools.Iotest == "" {
+		cfg.Tools.Iotest = "iotest"
+	}
+	for _, p := range []struct {
+		key, val string
+	}{
+		{"tools.fio", cfg.Tools.Fio},
+		{"tools.iozone", cfg.Tools.Iozone},
+		{"tools.tiotest", cfg.Tools.Tiotest},
+		{"tools.iotest", cfg.Tools.Iotest},
+	} {
+		if err := validateToolFilename(p.val); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.key, err)
+		}
+	}
 	return &cfg, nil
+}
+
+// validateToolFilename 은 path traversal 을 방지한다. tools/ 안의 bare 파일명만 허용.
+func validateToolFilename(name string) error {
+	if name == "" {
+		return nil
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("invalid tool name %q", name)
+	}
+	for _, c := range name {
+		if c == '/' || c == '\\' {
+			return fmt.Errorf("tool name %q must be a bare filename (no path separators)", name)
+		}
+	}
+	return nil
 }

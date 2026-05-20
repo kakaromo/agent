@@ -612,7 +612,7 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 
 func (o *Orchestrator) executeBenchmarkStep(ctx context.Context, md *adb.ManagedDevice, step *pb.ScenarioStep, es expandedStep, execIndex int, stepFiles map[int]string) (string, map[string]float64, error) {
 	tool := step.Tool
-	toolName := toolNameFor(tool)
+	toolName := o.resolveToolName(tool)
 	if toolName == "" {
 		return "", nil, fmt.Errorf("unknown benchmark tool")
 	}
@@ -698,7 +698,8 @@ func formatStepMessage(es expandedStep, totalSteps int) string {
 	stepDesc := fmt.Sprintf("step %d", es.stepIndex)
 	switch es.step.Type {
 	case "benchmark":
-		toolName := toolNameFor(es.step.Tool)
+		// progress 메시지는 default 이름으로 — 파일명 override 가 있어도 UI 표시는 'fio' 등 표준명이 자연스럽다.
+		toolName := defaultToolNameFor(es.step.Tool)
 		rw := es.step.Params["rw"]
 		if rw != "" {
 			stepDesc += fmt.Sprintf(": %s %s", toolName, rw)
