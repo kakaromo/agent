@@ -42,11 +42,14 @@ if (-not $SkipBuild) {
         Write-Host '자세한 안내: docs\11-deployment.md'
         throw 'MinGW gcc 가 필요합니다.'
     }
-    $env:CGO_ENABLED = '1'; $env:CC = $cc
-    Write-Host "  CGO 활성 ($cc)"
+    $env:CGO_ENABLED = '1'
+    $env:CC = $cc
+    $env:CXX = $cc -replace 'gcc(\.exe)?$', 'g++$1'
+    $env:CGO_LDFLAGS = '-static -static-libgcc -static-libstdc++ -lpthread -lstdc++'
+    Write-Host "  CGO 활성 (CC=$cc CXX=$env:CXX)"
     & go build -o $Binary .
     if ($LASTEXITCODE -ne 0) { throw "go build 실패 (exit $LASTEXITCODE)" }
-    Remove-Item Env:\CGO_ENABLED, Env:\CC -ErrorAction SilentlyContinue
+    Remove-Item Env:\CGO_ENABLED, Env:\CC, Env:\CXX, Env:\CGO_LDFLAGS -ErrorAction SilentlyContinue
 }
 
 if (-not (Test-Path $Binary)) {

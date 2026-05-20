@@ -61,6 +61,61 @@ gcc --version
 
 설치 후 `.\build.ps1` 또는 `.\run.ps1` 가 자동으로 MinGW gcc 를 감지해 CGO 빌드.
 
+#### 방화벽 환경 — pacman 사용 불가일 때 수동 설치
+
+사내 방화벽으로 `pacman` 의 패키지 다운로드가 막힌 경우, MSYS2 패키지는 단순한 zstd
+tarball (`.pkg.tar.zst`) 이라 사외에서 받아서 옮길 수 있다.
+
+1. **사외 환경**에서 MSYS2 인스톨러와 필요한 패키지를 다운로드 (mirror: `https://repo.msys2.org/mingw/ucrt64/`):
+
+   - `msys2-x86_64-<date>.exe` — MSYS2 본체 인스톨러
+   - UCRT64 toolchain 패키지들 (최신 버전, 정확한 파일명은 mirror 의 인덱스 참조):
+     - `mingw-w64-ucrt-x86_64-gcc-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-gcc-libs-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-binutils-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-crt-git-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-headers-git-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-libwinpthread-git-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-winpthreads-git-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-gmp-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-mpfr-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-mpc-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-isl-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-zlib-*.pkg.tar.zst`
+     - `mingw-w64-ucrt-x86_64-zstd-*.pkg.tar.zst`
+
+2. **사내 PC** 로 USB/공유 폴더 등으로 옮긴다.
+
+3. **MSYS2 본체 설치** — 인스톨러 실행, 기본 경로 `C:\msys64`. 본체 설치 자체는 네트워크 불필요.
+
+4. **시작 메뉴 → "MSYS2 UCRT64"** 셸을 열고 로컬 파일로 설치 (네트워크 사용 안 함):
+
+   ```bash
+   # 받은 .pkg.tar.zst 들을 한 폴더에 모아둔 뒤
+   pacman -U /c/path/to/pkgs/*.pkg.tar.zst
+   # pacman 이 의존성 순서를 알아서 해결한다.
+   ```
+
+5. **검증**:
+
+   ```bash
+   which gcc                                # /ucrt64/bin/gcc
+   gcc --version                            # 14.x.x ...
+   gcc -v 2>&1 | grep "Thread model"        # posix
+   gcc -print-file-name=libstdc++.a         # /ucrt64/.../libstdc++.a 존재 확인
+   ```
+
+6. **Windows 시스템 PATH 에 `C:\msys64\ucrt64\bin` 추가** 후 새 PowerShell 에서:
+
+   ```powershell
+   gcc --version
+   .\build.ps1                              # → dist\agent-windows-amd64.exe
+   ```
+
+##### 더 무거운 옵션: pacman repo 통째 미러
+
+오프라인 풀 미러를 원하면 사외에서 `https://repo.msys2.org/mingw/ucrt64/` 와 `msys/x86_64/` 를 wget 으로 받아 사내 mirror 로 쓴다. `/etc/pacman.d/mirrorlist.ucrt64` 의 Server 를 로컬 경로로 바꿔주면 `pacman -Syu` 가 그대로 동작. 다운로드 양이 ~2GB 이라 단순 toolchain 만 필요하면 위 수동 설치가 가볍다.
+
 #### Linux/macOS 호스트에서 Windows cross-build
 
 ```bash

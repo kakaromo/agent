@@ -80,11 +80,15 @@ function Invoke-GoBuild {
     if ($CompilerOrNull) {
         $env:CGO_ENABLED = '1'
         $env:CC = $CompilerOrNull
+        # MSYS2 UCRT64 의 `gcc` → `g++`, mingw-w64 cross 의 `x86_64-w64-mingw32-gcc` → `x86_64-w64-mingw32-g++`
+        $env:CXX = $CompilerOrNull -replace 'gcc(\.exe)?$', 'g++$1'
+        # DuckDB 는 C++/pthread 의존 — 정적 링크 강제
+        $env:CGO_LDFLAGS = '-static -static-libgcc -static-libstdc++ -lpthread -lstdc++'
     } else {
         $env:CGO_ENABLED = '0'
-        Remove-Item Env:\CC -ErrorAction SilentlyContinue
+        Remove-Item Env:\CC, Env:\CXX, Env:\CGO_LDFLAGS -ErrorAction SilentlyContinue
     }
-    Write-Host "  → $Output  (GOOS=$GOOS GOARCH=$GOARCH CGO=$($env:CGO_ENABLED))"
+    Write-Host "  → $Output  (GOOS=$GOOS GOARCH=$GOARCH CGO=$($env:CGO_ENABLED) CC=$env:CC)"
     & go build -o $Output .
     if ($LASTEXITCODE -ne 0) { throw "go build 실패 ($Output, exit $LASTEXITCODE)" }
 }
