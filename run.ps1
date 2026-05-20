@@ -28,19 +28,22 @@ if (-not $SkipBuild) {
     & "$ScriptDir\build-ui.ps1"
 
     Write-Host '=== Building agent ==='
-    # CGO 가 있으면 켜고, 없으면 OFF — build.ps1 와 같은 정책을 inline 으로
+    # go-duckdb 는 cgo 필수 — MinGW gcc 가 없으면 명확히 안내 후 종료
     $cc = $null
     foreach ($candidate in @('x86_64-w64-mingw32-gcc', 'gcc')) {
         if (Get-Command $candidate -ErrorAction SilentlyContinue) { $cc = $candidate; break }
     }
-    if ($cc) {
-        $env:CGO_ENABLED = '1'; $env:CC = $cc
-        Write-Host "  CGO 활성 ($cc)"
-    } else {
-        $env:CGO_ENABLED = '0'
-        Remove-Item Env:\CC -ErrorAction SilentlyContinue
-        Write-Warning '  MinGW 미발견 — CGO OFF (trace 통계 동작 안 함)'
+    if (-not $cc) {
+        Write-Host ''
+        Write-Host 'ERROR: MinGW gcc 가 PATH 에 없습니다.' -ForegroundColor Red
+        Write-Host '설치: winget install MSYS2.MSYS2'
+        Write-Host '      pacman -S --needed mingw-w64-ucrt-x86_64-gcc (MSYS2 UCRT64 셸)'
+        Write-Host '      PATH 추가: C:\msys64\ucrt64\bin'
+        Write-Host '자세한 안내: docs\11-deployment.md'
+        throw 'MinGW gcc 가 필요합니다.'
     }
+    $env:CGO_ENABLED = '1'; $env:CC = $cc
+    Write-Host "  CGO 활성 ($cc)"
     & go build -o $Binary .
     if ($LASTEXITCODE -ne 0) { throw "go build 실패 (exit $LASTEXITCODE)" }
     Remove-Item Env:\CGO_ENABLED, Env:\CC -ErrorAction SilentlyContinue

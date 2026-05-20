@@ -2,18 +2,22 @@
 # 기본은 Windows AMD64 만 빌드. 다른 OS/arch 까지 cross-build 하려면 -All 옵션.
 #
 # 사용:
-#   .\build.ps1                  # UI + agent.exe (Windows AMD64) — CGO 자동 판단
+#   .\build.ps1                  # UI + agent.exe (Windows AMD64)
 #   .\build.ps1 -SkipUI          # UI 빌드 생략 (이미 ui/build 가 최신일 때)
-#   .\build.ps1 -NoCGO           # CGO 강제 OFF — DuckDB 비활성 (trace 통계 동작 안 함)
 #   .\build.ps1 -All             # dist/ 에 macOS/Linux/Windows 전부
 #
-# CGO 빌드:
-#   - MinGW gcc (x86_64-w64-mingw32-gcc, 또는 msys2 의 gcc) 가 PATH 에 있으면 자동 사용
-#   - 없으면 자동으로 CGO_ENABLED=0 으로 fallback (DuckDB 미포함 경고 출력)
+# 필수: MinGW gcc (CGO 빌드용)
+#   go-duckdb 가 cgo 의존이라 MinGW gcc 없이는 컴파일 불가
+#   (CGO_ENABLED=0 으로 빌드 시도 시 `undefined: Conn` 류 컴파일 에러 발생).
+#
+#   설치:
+#     winget install MSYS2.MSYS2
+#     MSYS2 UCRT64 셸에서:  pacman -S --needed mingw-w64-ucrt-x86_64-gcc
+#     PATH 추가:            C:\msys64\ucrt64\bin
+#     검증:                 gcc --version
 
 param(
     [switch]$SkipUI,
-    [switch]$NoCGO,
     [switch]$All
 )
 
@@ -37,8 +41,8 @@ if (-not $SkipUI) {
 
 Write-Host "=== Building agent v$Version ==="
 
-# CGO 사용 가능 여부 판단
-function Test-CGOCompiler {
+# MinGW gcc 필수 — go-duckdb 가 cgo 의존이라 없으면 컴파일 불가
+function Find-CGOCompiler {
     foreach ($cc in @('x86_64-w64-mingw32-gcc', 'gcc')) {
         $found = Get-Command $cc -ErrorAction SilentlyContinue
         if ($found) { return $cc }
@@ -46,7 +50,23 @@ function Test-CGOCompiler {
     return $null
 }
 
-$cc = if ($NoCGO) { $null } else { Test-CGOCompiler }
+$cc = Find-CGOCompiler
+if (-not $cc) {
+    Write-Host ''
+    Write-Host 'ERROR: MinGW gcc 가 PATH 에 없습니다.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'go-duckdb (trace 통계 의존) 는 cgo 빌드라 MinGW gcc 가 필요합니다.'
+    Write-Host '아래 절차로 설치하세요:'
+    Write-Host ''
+    Write-Host '  1) MSYS2 설치:    winget install MSYS2.MSYS2'
+    Write-Host '  2) MSYS2 UCRT64 셸 열고:'
+    Write-Host '     pacman -S --needed mingw-w64-ucrt-x86_64-gcc'
+    Write-Host '  3) Windows PATH 에 추가:    C:\msys64\ucrt64\bin'
+    Write-Host '  4) 새 PowerShell 열고 검증:  gcc --version'
+    Write-Host ''
+    Write-Host '자세한 안내: docs\11-deployment.md'
+    throw 'MinGW gcc 가 필요합니다.'
+}
 
 function Invoke-GoBuild {
     param(
@@ -77,18 +97,10 @@ if ($All) {
     Invoke-GoBuild -GOOS 'linux'   -GOARCH 'arm64' -Output "$DistDir\agent-linux-arm64"    -CompilerOrNull $null
 }
 
-# Windows AMD64 — 항상
+# Windows AMD64 — 항상 cgo (MinGW gcc 발견 확인은 위에서 끝남)
+Write-Host "  (CGO compiler: $cc — DuckDB 포함)"
 $winOut = "$DistDir\agent-windows-amd64.exe"
-if ($cc) {
-    Write-Host "  (CGO compiler 발견: $cc — DuckDB 포함)"
-    Invoke-GoBuild -GOOS 'windows' -GOARCH 'amd64' -Output $winOut -CompilerOrNull $cc
-} else {
-    if (-not $NoCGO) {
-        Write-Warning '  MinGW gcc 미발견 — CGO_ENABLED=0 으로 빌드 (DuckDB 비활성, trace 통계 동작 안 함)'
-        Write-Warning '  CGO 빌드를 원하면 https://www.msys2.org 에서 MinGW gcc 설치 후 PATH 등록'
-    }
-    Invoke-GoBuild -GOOS 'windows' -GOARCH 'amd64' -Output $winOut -CompilerOrNull $null
-}
+Invoke-GoBuild -GOOS 'windows' -GOARCH 'amd64' -Output $winOut -CompilerOrNull $cc
 
 # ── iotest (Android arm64) ── CGO OFF, host MinGW 영향 없음
 Write-Host ''

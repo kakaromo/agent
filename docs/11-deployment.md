@@ -29,20 +29,46 @@ GOOS=windows GOARCH=amd64 go build -o dist/agent-windows-amd64.exe  # CGO 분기
 
 UI 빌드는 build.sh 시작 부분에서 한 번만 (`./build-ui.sh`).
 
-### CGO 분기
+### CGO 분기 — Windows 는 cgo 필수
 
-Windows 빌드는 DuckDB 의존 때문에 CGO 필요. mingw 가 설치되어 있으면 CGO_ENABLED=1, 없으면 CGO_ENABLED=0 으로 fallback (DuckDB 기능 제한적):
+Windows 빌드는 DuckDB 의존 때문에 **반드시 CGO**. `go-duckdb` v1.8.5 는 cgo 없이는 컴파일 자체가 실패한다 (`undefined: Conn` — `connection.go` 가 cgo 가드 안에 있는데 `transaction.go` 가 그 타입을 참조).
+
+CGO 빌드 — MinGW gcc 필요:
 
 ```bash
-if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-    CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 go build ...
-else
-    echo "MinGW not found, building without CGO (DuckDB disabled)..."
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ...
-fi
+CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 go build ...
 ```
 
-**참고**: standalone 모드는 DuckDB 가 통계 계산에 필수 (trace `GetTraceResult`). Windows 에서 CGO 없이 빌드하면 trace 통계 조회 시 에러 가능. mingw 설치 권장.
+build.sh (Linux/macOS 호스트) 는 MinGW 미발견 시 CGO_ENABLED=0 으로 시도하지만 **이건 동작하지 않는다**. 위 이유로 컴파일 에러. 실제 동작하는 Windows 바이너리를 만들려면 MinGW 가 필수.
+
+#### Windows 호스트에서 MinGW 설치
+
+```powershell
+# 1) MSYS2 설치
+winget install MSYS2.MSYS2
+
+# 2) MSYS2 UCRT64 셸 열고 gcc 설치
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc
+
+# 3) Windows 시스템 PATH 에 추가
+#    제어판 → 환경 변수 → Path 에 다음 한 줄 추가:
+#    C:\msys64\ucrt64\bin
+
+# 4) 새 PowerShell 열고 확인
+gcc --version
+# → gcc (Rev1, Built by MSYS2 project) 14.x.x ... 출력되면 OK
+```
+
+설치 후 `.\build.ps1` 또는 `.\run.ps1` 가 자동으로 MinGW gcc 를 감지해 CGO 빌드.
+
+#### Linux/macOS 호스트에서 Windows cross-build
+
+```bash
+# macOS:    brew install mingw-w64
+# Ubuntu:   apt install gcc-mingw-w64-x86-64
+CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 \
+  go build -o agent-windows-amd64.exe .
+```
 
 ### Windows 에서 직접 빌드 (PowerShell / CMD)
 
