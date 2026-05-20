@@ -19,7 +19,7 @@ enabled = true
 부팅 로그에 다음 한 줄이 보이면 standalone 모드:
 
 ```
-INFO standalone mode enabled — localhost bind, UI served, Go trace parser forced
+INFO standalone mode enabled — UI served, Go trace parser forced (bind 기본 127.0.0.1, --bind 로 override)
 ```
 
 ## 활성 시 자동으로 일어나는 일
@@ -86,16 +86,35 @@ scheduleRunner.Start(ctx)
 
 `scheduled_jobs` 테이블의 `enabled=1` row 들을 robfig/cron v3 에 등록. CRUD 변경 시 Reload 호출되어 자동 재구성.
 
-### 6. 127.0.0.1 바인딩
+### 6. 127.0.0.1 바인딩 (기본) — LAN 공유는 `--bind` 로 override
 
 ```go
-if cfg.Standalone.Enabled {
-    bindAddr = fmt.Sprintf("127.0.0.1:%d", cfg.Server.Port)
+bindHost := cfg.Server.Bind   // toml [server] bind 또는 --bind 플래그
+if bindHost == "" {
+    bindHost = "127.0.0.1"    // standalone 기본
+    if !cfg.Standalone.Enabled {
+        bindHost = "0.0.0.0"  // 사무실 기본
+    }
 }
-lis, err := net.Listen("tcp", bindAddr)
 ```
 
-외부 LAN 접근 차단. 인증이 없으므로 보안 경계는 OS 의 loopback.
+**기본 동작 (안전):** standalone 은 127.0.0.1 만 듣는다. 인증이 없으므로 보안 경계는 OS 의 loopback.
+
+**LAN 공유 (출장지에서 동료 노트북도 접속):**
+
+```bash
+# 모든 인터페이스로 노출
+./agent --standalone --bind 0.0.0.0 -config config/devices.toml
+
+# 특정 IP 만 노출 (멀티 NIC 환경)
+./agent --standalone --bind 192.168.1.10
+
+# 또는 config 에 영속:
+# [server]
+# bind = "0.0.0.0"
+```
+
+⚠️ 외부 바인딩은 **신뢰된 사내망에서만 사용**. UI 의 auth store 가 스텁이라 같은 네트워크의 누구나 디바이스에 `adb shell`, `pm install/uninstall`, 벤치마크 실행이 가능하다. 외부 노출 시 부팅 로그에 명시적 경고가 찍힌다 (`standalone 모드에서 외부 바인딩 사용 ...`).
 
 ### 7. UI 서빙 활성
 
@@ -137,7 +156,7 @@ $HOME/agent_trace/                  # 활성 trace 잡 (cfg.Server.TraceDir)
 
 | 항목 | 사무실 | Standalone |
 |---|---|---|
-| bind | 0.0.0.0 | 127.0.0.1 |
+| bind 기본 | 0.0.0.0 | 127.0.0.1 (override: `--bind` / `[server] bind`) |
 | SQLite | × | ✓ |
 | cron runner | × | ✓ |
 | UI 서빙 | × | ✓ |
@@ -242,11 +261,11 @@ SIGINT 또는 SIGTERM 수신
 
 ## 보안 노트
 
-- **인증 없음**. 127.0.0.1 바인딩이 유일한 경계
+- **인증 없음**. 기본 127.0.0.1 바인딩이 유일한 경계
 - 다른 사용자가 같은 머신에 SSH 접속 가능하다면 그 사용자도 agent 에 접근 가능 (localhost loopback)
 - 신뢰할 수 없는 사용자가 있는 머신에서는 standalone 비추천
 - CSRF 보호 없음 (XSRF 헤더는 client.ts 가 보내지만 Go 핸들러는 무시)
-- 외부 노출 (`0.0.0.0`) 하려면 별도 인증 레이어 추가 필요 — 그 시점엔 standalone 가 아닌 사무실 모드로 가는 게 맞음
+- `--bind 0.0.0.0` / `--bind <IP>` 로 LAN 공유 가능하지만 **신뢰된 사내망 한정**. 같은 네트워크의 누구나 디바이스에 접근 가능 — 외부 인증이 필요한 환경이면 사무실 모드 + portal/proxy 앞단에 두는 게 맞음
 
 ## 검증 체크리스트
 

@@ -35,8 +35,9 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config/devices.toml", "path to config file")
-	standaloneFlag := flag.Bool("standalone", false, "run in standalone mode (localhost bind + UI + Go trace parser)")
+	standaloneFlag := flag.Bool("standalone", false, "run in standalone mode (UI + Go trace parser + SQLite, 기본 127.0.0.1 바인딩)")
 	dbPathFlag := flag.String("db-path", "", "SQLite DB path (standalone only, default: $HOME/.agent-standalone/agent.db)")
+	bindFlag := flag.String("bind", "", "bind address (예: 0.0.0.0, 192.168.1.10). 비우면 모드별 기본값(사무실=0.0.0.0, standalone=127.0.0.1)")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -51,10 +52,13 @@ func main() {
 	if *dbPathFlag != "" {
 		cfg.Standalone.DBPath = *dbPathFlag
 	}
+	if *bindFlag != "" {
+		cfg.Server.Bind = *bindFlag
+	}
 	if cfg.Standalone.Enabled {
 		// trace/tracer.go:345 의 AGENT_PARSER 분기로 외부 tools/trace 바이너리 우회.
 		os.Setenv("AGENT_PARSER", "go")
-		slog.Info("standalone mode enabled — localhost bind, UI served, Go trace parser forced")
+		slog.Info("standalone mode enabled — UI served, Go trace parser forced (bind 기본 127.0.0.1, --bind 로 override)")
 	}
 	slog.Info("config loaded", "port", cfg.Server.Port, "standalone", cfg.Standalone.Enabled)
 
@@ -136,10 +140,22 @@ func main() {
 	apkMgr := apkmgr.NewManager(mgr, cfg.Server.ToolsDir)
 	orch.SetApkController(apkMgr)
 
-	bindAddr := fmt.Sprintf(":%d", cfg.Server.Port)
-	if cfg.Standalone.Enabled {
-		// 외부 노출 차단 — 같은 네트워크의 다른 장비에서 접근 불가.
-		bindAddr = fmt.Sprintf("127.0.0.1:%d", cfg.Server.Port)
+	// bind host 결정 순서:
+	//   1) --bind 플래그 또는 [server] bind 값이 있으면 그대로 사용
+	//   2) standalone 기본: 127.0.0.1 (외부 노출 차단)
+	//   3) 사무실 기본:    0.0.0.0  (모든 인터페이스)
+	bindHost := cfg.Server.Bind
+	if bindHost == "" {
+		if cfg.Standalone.Enabled {
+			bindHost = "127.0.0.1"
+		} else {
+			bindHost = "0.0.0.0"
+		}
+	}
+	bindAddr := fmt.Sprintf("%s:%d", bindHost, cfg.Server.Port)
+	if cfg.Standalone.Enabled && bindHost != "127.0.0.1" {
+		// 인증 스텁 환경에서 LAN 노출은 사용자 책임 — 명시적 경고.
+		slog.Warn("standalone 모드에서 외부 바인딩 사용 — 인증이 없으므로 신뢰된 네트워크에서만 사용할 것", "bind", bindHost)
 	}
 	lis, err := net.Listen("tcp", bindAddr)
 	if err != nil {

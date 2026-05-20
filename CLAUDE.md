@@ -8,7 +8,7 @@ Go 기반 Android 디바이스 에이전트. ADB를 통해 디바이스에 연�
 
 두 가지 모드:
 - **사무실 모드** (default): 0.0.0.0 바인딩, gRPC-only 헤드리스. portal 등 원격 클라이언트가 연결
-- **Standalone 모드** (`--standalone`): 127.0.0.1 바인딩, portal UI 임베드, SQLite 영속화. 출장 시 노트북 단독 사용
+- **Standalone 모드** (`--standalone`): 127.0.0.1 바인딩(기본), portal UI 임베드, SQLite 영속화. 출장 시 노트북 단독 사용. LAN 공유는 `--bind 0.0.0.0` 또는 `[server] bind = "..."` (신뢰망 한정)
 
 각 모드의 자세한 내용은 [docs/01-overview.md](docs/01-overview.md), [docs/04-standalone-mode.md](docs/04-standalone-mode.md).
 
@@ -30,7 +30,7 @@ Proto 컴파일: `protoc --go_out=. --go-grpc_out=. proto/agent.proto`
 portal 의 풀 UX 를 그대로 재현한다. 사무실 모드(standalone=false)는 기존 gRPC-only 동작 유지.
 
 **활성 효과:**
-- **127.0.0.1 바인딩** — 외부 LAN 접근 차단 (인증 없음 전제)
+- **127.0.0.1 바인딩 (기본)** — 외부 LAN 접근 차단 (인증 없음 전제). `--bind 0.0.0.0` 또는 `--bind <IP>` 로 override 가능, 사용 시 부팅 로그에 명시적 경고
 - **Svelte SPA 서빙** — `//go:embed all:ui/build` 로 바이너리에 임베드 (`/` SPA, `/_app/...` 자산, 미존재 경로는 `index.html` fallback)
 - **`AGENT_PARSER=go` 자동 setenv** — `tools/trace` 외부 바이너리 미사용 → Windows 후속 빌드 시 trace.exe 불필요
 - **SQLite 영속화** — `$HOME/.agent-standalone/agent.db` (config `[standalone] db_path` 로 override). 7 테이블 (agent_servers, job_executions, benchmark_presets, iotest_presets, scenario_templates, app_macros, scheduled_jobs)

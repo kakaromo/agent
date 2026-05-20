@@ -27,7 +27,13 @@ type StandaloneConfig struct {
 }
 
 type ServerConfig struct {
-	Port     int    `toml:"port"`
+	Port int `toml:"port"`
+	// Bind 는 listen 호스트. 비우면 모드별 기본값 적용:
+	//   - 사무실 모드: "0.0.0.0" (모든 인터페이스)
+	//   - standalone:  "127.0.0.1" (로컬만)
+	// LAN 공유 필요 시 "0.0.0.0" 또는 특정 IP("192.168.1.10") 지정.
+	// 인증 스텁 환경(standalone)에서 LAN 공유는 신뢰된 사내망에서만 사용할 것.
+	Bind     string `toml:"bind"`
 	ToolsDir string `toml:"tools_dir"`
 	TraceDir string `toml:"trace_dir"`
 	// TraceGrpcPort 는 deprecated — 실시간 파싱 경로(50053 gRPC) 제거 후 사용되지 않는다.
