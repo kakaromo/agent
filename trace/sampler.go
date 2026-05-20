@@ -6,7 +6,7 @@ import (
 
 	pb "agent/pb"
 
-	_ "github.com/marcboeker/go-duckdb"
+	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
 const maxEvents = 500000
