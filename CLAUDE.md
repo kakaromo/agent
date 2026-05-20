@@ -34,7 +34,7 @@ portal 의 풀 UX 를 그대로 재현한다. 사무실 모드(standalone=false)
 - **Svelte SPA 서빙** — `//go:embed all:ui/build` 로 바이너리에 임베드 (`/` SPA, `/_app/...` 자산, 미존재 경로는 `index.html` fallback)
 - **`AGENT_PARSER=go` 자동 setenv** — `tools/trace` 외부 바이너리 미사용 → Windows 후속 빌드 시 trace.exe 불필요
 - **SQLite 영속화** — `$HOME/.agent-standalone/agent.db` (config `[standalone] db_path` 로 override). 7 테이블 (agent_servers, job_executions, benchmark_presets, iotest_presets, scenario_templates, app_macros, scheduled_jobs)
-- **로컬 archive 폴더** — `$HOME/.agent-standalone/archive` (MinIO 미사용)
+- **로컬 archive 폴더** — `$HOME/.agent-standalone/archive` (MinIO 미사용). `[standalone] archive_base` 또는 `--archive-base` 로 override
 - **Cron 러너** — robfig/cron v3. enabled ScheduledJob 자동 fire, 결과 JobExecution 영구 저장
 - 부팅 시 stale running 잡 자동 `failed` 정리 (메모리 휘발 호환)
 - 잡 종료 시 metrics summary 가 `job_executions.result_summary` 에 영구 저장됨 → agent 재시작 후에도 Result 페이지에서 IOPS/latency 등 조회 가능

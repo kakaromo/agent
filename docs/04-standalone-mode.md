@@ -127,9 +127,25 @@ routerOpts.EnableUI = true
 
 ### 8. Archive base 경로 결정
 
-- 기본: `$HOME/.agent-standalone/archive`
-- override: `[standalone] archive_base = "..."`
-- MinIO 미사용 → `/api/agent/upload/*` 가 이 경로로 로컬 복사
+벤치마크 결과 JSON 과 trace parquet 사본이 저장되는 폴더. 결정 우선순위:
+
+1. `--archive-base /path/to/archive` CLI 플래그 (가장 우선)
+2. `[standalone] archive_base = "/path/..."` toml
+3. 기본값: `$HOME/.agent-standalone/archive`
+
+저장 레이아웃:
+```
+<archive_base>/
+└── <remotePath>/        # /api/agent/upload/* 의 remotePath 인자 그대로
+    └── <jobId>/
+        ├── {deviceId}_result.json   # benchmark archive
+        ├── result_ufs.parquet       # trace archive
+        └── trace.log
+```
+
+MinIO 미사용 → `/api/agent/upload/*` 가 이 경로로 로컬 복사. UI 의 "결과 archive 업로드" 버튼이 이걸 호출.
+
+사무실 모드는 archive 엔드포인트 자체가 마운트되지 않는다 (MinIO 가 별도 책임).
 
 ## 디렉토리 구조 (런타임)
 

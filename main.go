@@ -38,6 +38,7 @@ func main() {
 	standaloneFlag := flag.Bool("standalone", false, "run in standalone mode (UI + Go trace parser + SQLite, 기본 127.0.0.1 바인딩)")
 	dbPathFlag := flag.String("db-path", "", "SQLite DB path (standalone only, default: $HOME/.agent-standalone/agent.db)")
 	bindFlag := flag.String("bind", "", "bind address (예: 0.0.0.0, 192.168.1.10). 비우면 모드별 기본값(사무실=0.0.0.0, standalone=127.0.0.1)")
+	archiveBaseFlag := flag.String("archive-base", "", "archive 폴더 (벤치마크 결과 JSON / trace parquet 사본). standalone only. 비우면 [standalone] archive_base 또는 $HOME/.agent-standalone/archive")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -54,6 +55,9 @@ func main() {
 	}
 	if *bindFlag != "" {
 		cfg.Server.Bind = *bindFlag
+	}
+	if *archiveBaseFlag != "" {
+		cfg.Standalone.ArchiveBase = *archiveBaseFlag
 	}
 	if cfg.Standalone.Enabled {
 		// trace/tracer.go:345 의 AGENT_PARSER 분기로 외부 tools/trace 바이너리 우회.
