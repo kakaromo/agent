@@ -42,6 +42,7 @@
 │   │  trace.Manager         — ftrace 수집 + parquet 파싱           │   │
 │   │  monitor.Collector     — CPU/MEM/Disk 1초 streaming           │   │
 │   │  macro.Manager         — 녹화/재생/OCR                        │   │
+│   │  apkmgr.Manager        — tools/apks/*.apk push/install        │   │
 │   │  screen.Manager        — scrcpy session                      │   │
 │   │  storage.MinioClient   — (사무실 모드 archive)                │   │
 │   └─────────────────────────────────────────────────────────────┘   │
@@ -164,6 +165,7 @@ os.Setenv("AGENT_PARSER", "go")
 | `rest_server.go` | AgentServer CRUD + TCP reachable test |
 | `rest_execution.go` | JobExecution history + stats |
 | `rest_macro.go` | AppMacro CRUD + gRPC 위임 (recording/replay/OCR/screenshot) |
+| `rest_apk.go` | APK 관리 (list + install + uninstall, gRPC 위임) |
 | `rest_preset.go` | BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD |
 | `rest_schedule.go` | ScheduledJob CRUD + trigger/enable |
 | `rest_archive.go` | `/api/agent/upload/*` 로컬 디스크 복사 |
@@ -192,6 +194,12 @@ os.Setenv("AGENT_PARSER", "go")
 | 파일 | 책임 |
 |---|---|
 | `runner.go` | robfig/cron v3 기반 cron 실행기, Reload/Trigger API |
+
+### `apkmgr/`
+
+| 파일 | 책임 |
+|---|---|
+| `manager.go` | `tools/apks/*.apk` 목록 + `adb install -r` push/install + `adb uninstall` |
 
 ### `trace/`
 

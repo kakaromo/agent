@@ -9,8 +9,9 @@ Android 디바이스를 USB로 노트북에 연결한 뒤, ADB를 통해 디바�
 1. **벤치마크 실행** — fio, iozone, tiotest, iotest 를 디바이스에 push 후 실행, 결과 metrics(IOPS, BW, latency 백분위 등) 수집
 2. **커널 트레이스 수집** — UFS / Block layer 의 ftrace 이벤트를 실시간 capture, parquet 으로 변환 후 DuckDB 로 통계 계산
 3. **디바이스 모니터링** — CPU, Memory, Disk I/O, 파일시스템 사용량을 1초 단위로 스트리밍
-4. **시나리오 실행** — multi-step 실행 (loop, condition, shell, cleanup, sleep, trace_start/stop, app_macro 등)
+4. **시나리오 실행** — multi-step 실행 (loop, condition, shell, cleanup, sleep, trace_start/stop, app_macro, install_apk/uninstall_apk 등)
 5. **앱 매크로** — 디바이스 UI 자동화 (tap/swipe/key, OCR 기반 추출, scrcpy 스크린 스트리밍)
+6. **APK 설치/제거** — `tools/apks/` 폴더에 둔 .apk 를 디바이스에 push/install, 또는 설치된 앱 uninstall (벤치마크 앱 사전 준비용)
 
 ## 두 가지 운영 모드
 
@@ -65,6 +66,7 @@ Android 디바이스를 USB로 노트북에 연결한 뒤, ADB를 통해 디바�
 - `iotest` — `cmd/iotest` 에서 Go 빌드 (Android arm64)
 - `scrcpy-server` — 스크린 스트리밍용 JAR
 - `trace` — **사무실 모드 전용** Rust 트레이스 파서. standalone 에서는 Go 파서가 강제되어 사용 안 함
+- `apks/*.apk` — 디바이스에 설치할 벤치마크 앱 (antutu 등). UI / 시나리오에서 자동 노출. 자세한 정책은 [`tools/apks/README.md`](../tools/apks/README.md)
 
 **옵션:**
 - MinIO (사무실 모드의 archive 업로드용. standalone 에서는 불필요)

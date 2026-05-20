@@ -90,6 +90,12 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - DB CRUD: `GET/POST /api/agent/app-macros`, `GET/PUT/DELETE /api/agent/app-macros/{id}`, `POST /api/agent/app-macros/{id}/duplicate`
 - gRPC 위임: `GET /api/agent/macro/installed-apps?deviceId=`, `POST /api/agent/macro/start-recording|stop-recording|replay|screenshot|ocr`
 
+**APK (3)**
+- `GET    /api/agent/apks` — 호스트 `tools/apks/*.apk` 목록 (filename, sizeBytes, modifiedAt)
+- `POST   /api/agent/apks/install` body `{deviceId, apkFilename, grantPermissions?}` — `adb install -r [-g]`
+- `POST   /api/agent/apks/uninstall` body `{deviceId, packageName, keepData?}` — `adb uninstall [-k]`
+- scenario step `install_apk` / `uninstall_apk` 로도 호출 가능
+
 **Preset / Template (13)**
 - BenchmarkPreset CRUD 4, IOTestPreset CRUD 4, ScenarioTemplate CRUD 5 (duplicate 포함)
 
@@ -132,6 +138,7 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - **`server/rest_server.go`** — AgentServer CRUD + TCP reachable 테스트
 - **`server/rest_execution.go`** — JobExecution history (Spring Page<T> 호환)
 - **`server/rest_macro.go`** — AppMacro DB CRUD + gRPC 위임 (recording/replay/OCR/screenshot)
+- **`server/rest_apk.go`** — APK 관리 REST (list + install + uninstall, gRPC 위임)
 - **`server/rest_preset.go`** — BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD
 - **`server/rest_schedule.go`** — ScheduledJob CRUD + trigger/enable
 - **`server/rest_archive.go`** — `/api/agent/upload/*` 로컬 디스크 archive (MinIO 미사용)
@@ -141,7 +148,8 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - **`server/ws.go`** — 보조 WebSocket (`/ws/jobs/{id}/progress`, `/ws/monitor`)
 - **`schedule/runner.go`** — robfig/cron v3 기반 cron 실행기
 - **`storage/sqlitedb/`** — modernc.org/sqlite (pure Go) 영속화. 7 entity CRUD
-- **`adb/`** — ADB 디바이스 관리 (검색, 연결, 셸 명령)
+- **`adb/`** — ADB 디바이스 관리 (검색, 연결, 셸 명령, install/uninstall)
+- **`apkmgr/`** — `tools/apks/*.apk` 목록 + 디바이스 push/install/uninstall (경로 traversal 가드)
 - **`benchmark/`** — 벤치마크 오케스트레이터 (시나리오 실행, trace 연동)
 - **`monitor/`** — 디바이스 메트릭 수집 (스트리밍)
 - **`trace/`** — 트레이스 관리
@@ -160,6 +168,7 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - **Trace**: `StartTrace`, `StopTrace`, `ReparseTrace`, `GetTraceResult`, `GetTraceRawData`
 - **Monitor**: `MonitorDevices` (스트리밍)
 - **Macro**: `ListInstalledApps`, `StartRecording`, `StopRecording`, `ReplayMacro`, `TakeScreenshot`, `ScreenshotOcr`
+- **APK**: `ListBundledApks`, `InstallApk`, `UninstallApk`
 - **Upload**: `UploadTraceToMinio`, `UploadBenchmarkToMinio`, `UploadTraceArchive` (streaming)
 
 ## Trace 수집 흐름

@@ -154,6 +154,18 @@ multi-step 실행. portal `AgentScenarioBuilder` 의 시각적 DAG → proto `Sc
 | `trace_stop` | 진행 중 trace 종료 |
 | `condition` | metric 값 또는 shell 결과로 분기 |
 | `app_macro` | AppMacro 재생 |
+| `install_apk` | `tools/apks/<apk_filename>` 를 디바이스에 설치 (`adb install -r`) |
+| `uninstall_apk` | `params.package_name` 의 앱을 디바이스에서 제거 (`adb uninstall`) |
+
+`install_apk` params:
+- `apk_filename` (필수): `tools/apks/` 안의 bare 파일명. traversal (`../`, `/`, `\`) 거부
+- `grant_permissions` (선택, `"true"`): `pm install -g` 로 런타임 권한 자동 부여
+
+`uninstall_apk` params:
+- `package_name` (필수): 디바이스에 설치된 패키지명
+- `keep_data` (선택, `"true"`): `pm uninstall -k` 로 사용자 데이터/캐시 보존
+
+APK 번들 폴더와 운영 정책은 [`tools/apks/README.md`](../tools/apks/README.md) 참고.
 
 ### Loop
 

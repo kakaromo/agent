@@ -429,7 +429,40 @@ data: {...}
 **ocr 요청**: `{"deviceId":"...","extractPattern":"regex","region":{"x":0,"y":0,"width":1080,"height":200}}`
 **ocr 응답**: `{"success":bool,"fullText":"...","extractedValue":"...","imageBase64":"..."}`
 
-## 9. Preset / Template (13 endpoint)
+## 9. APK 관리 (3 endpoint)
+
+호스트의 `tools/apks/` 폴더에 둔 `.apk` 파일을 디바이스에 설치/제거. DB 의존성 없이 사무실 / standalone 모두 활성화. 자세한 폴더 정책은 [`tools/apks/README.md`](../tools/apks/README.md).
+
+| 메서드 | 경로 | gRPC RPC |
+|---|---|---|
+| GET | `/api/agent/apks` | ListBundledApks — 폴더 스캔 |
+| POST | `/api/agent/apks/install` | InstallApk — `adb install -r` |
+| POST | `/api/agent/apks/uninstall` | UninstallApk — `adb uninstall` |
+
+**GET /api/agent/apks** 응답:
+```json
+[
+  {"filename":"com.antutu.ABenchMark.apk","sizeBytes":104857600,"modifiedAt":"2026-05-20T07:00:00Z"}
+]
+```
+
+**install 요청**: `{"deviceId":"...","apkFilename":"foo.apk","grantPermissions":false}`
+- `apkFilename` 은 `tools/apks/` 안의 bare 파일명. `/`, `\`, `..` 거부.
+- `grantPermissions=true` 면 `pm install -g` (런타임 권한 자동 부여).
+- 서버는 항상 `-r` (reinstall) 로 설치.
+
+**install 응답**: `{"success":bool,"message":"...","packageName":"..."}`
+- `message` 에 adb stdout/stderr 가 들어감 (`Failure [INSTALL_PARSE_FAILED_NO_CERTIFICATES]` 등).
+- `packageName` 은 파일명에서 best-effort 추출 (`com.foo.bar.apk` → `com.foo.bar`). 추출 실패 시 빈 문자열.
+
+**uninstall 요청**: `{"deviceId":"...","packageName":"com.example","keepData":false}`
+- `keepData=true` 면 `pm uninstall -k` (사용자 데이터/캐시 보존).
+
+**uninstall 응답**: `{"success":bool,"message":"..."}`
+
+scenario step 으로도 사용 가능 — [`08-benchmark-scenario.md`](08-benchmark-scenario.md#step-type) 참고.
+
+## 10. Preset / Template (13 endpoint)
 
 ### BenchmarkPreset (4)
 `GET / POST /api/agent/benchmark-presets`, `PUT / DELETE /api/agent/benchmark-presets/{id}`
@@ -469,7 +502,7 @@ data: {...}
 }
 ```
 
-## 10. Schedule (cron, 7 endpoint)
+## 11. Schedule (cron, 7 endpoint)
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
@@ -520,7 +553,7 @@ data: {...}
 
 trigger 응답: `{"success":true,"jobId":"new-uuid"}`
 
-## 11. Execution history (5 endpoint)
+## 12. Execution history (5 endpoint)
 
 ### `GET /api/agent/executions?serverId=&type=&state=&page=&size=`
 
@@ -593,7 +626,7 @@ jobId 로 조회.
 }
 ```
 
-## 12. Archive (2 endpoint, 로컬 디스크 fallback)
+## 13. Archive (2 endpoint, 로컬 디스크 fallback)
 
 ### `POST /api/agent/upload/trace?serverId=`
 trace jobIds 의 parquet + trace.log 를 archive_base 로 복사.
@@ -617,7 +650,7 @@ trace jobIds 의 parquet + trace.log 를 archive_base 로 복사.
 요청: `{"jobId":"...","remotePath":"my-run"}`
 응답: `{"success":true,"message":"...","uploadedFiles":["/.../{deviceId}_result.json"]}`
 
-## 13. Screen WebSocket
+## 14. Screen WebSocket
 
 ### `WS /api/agent/screen/{deviceId}?serverId=`
 
@@ -629,7 +662,7 @@ scrcpy H.264 video frame + control 메시지.
 
 **legacy path**: `WS /ws/screen/{deviceId}` 도 동일하게 동작 (호환).
 
-## 14. 보조 WebSocket (portal 미사용)
+## 15. 보조 WebSocket (portal 미사용)
 
 portal 은 SSE 만 쓰지만, 다른 클라이언트 호환용으로 유지.
 
@@ -678,13 +711,14 @@ if (res.status === 404) {
 | Scenario | 1 (run) |
 | Monitoring SSE | 1 |
 | Macro | 12 (CRUD 6 + gRPC 위임 6) |
+| APK | 3 (list + install + uninstall) |
 | Preset/Template | 13 (각 CRUD) |
 | Schedule | 7 |
 | Execution | 5 |
 | Archive | 2 |
 | Screen WS | 2 (legacy + portal 호환 path) |
 | 보조 WS | 2 |
-| **합계** | **67** |
+| **합계** | **70** |
 
 (portal AgentController 47 + 사이드 컨트롤러 + 보조 WS + 추가 magic path 들)
 
