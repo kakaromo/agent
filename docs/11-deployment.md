@@ -44,6 +44,33 @@ fi
 
 **참고**: standalone 모드는 DuckDB 가 통계 계산에 필수 (trace `GetTraceResult`). Windows 에서 CGO 없이 빌드하면 trace 통계 조회 시 에러 가능. mingw 설치 권장.
 
+### Windows 에서 직접 빌드 (PowerShell / CMD)
+
+`build.sh` / `run.sh` 는 bash 라 Windows 에선 동작 안 함. 동등한 PowerShell + .bat wrapper 제공:
+
+```powershell
+# UI + agent.exe — CGO 자동 판단 (MinGW gcc 가 PATH 에 있으면 사용, 없으면 OFF)
+.\build.ps1
+
+# 빌드 + 실행 (UI build 도 자동)
+.\run.ps1 -Standalone -Bind 0.0.0.0
+
+# 이미 빌드된 exe 만 실행
+.\run.ps1 -SkipBuild -Standalone
+
+# 다른 OS 까지 cross-build (CGO OFF — MinGW 는 Windows 전용)
+.\build.ps1 -All
+```
+
+CMD 또는 더블클릭은 `.bat` 사용 — 내부적으로 `-ExecutionPolicy Bypass` 로 ps1 호출:
+
+```cmd
+build.bat -SkipUI
+run.bat -Standalone -Bind 0.0.0.0
+```
+
+CGO 빌드를 원하면 [MSYS2](https://www.msys2.org) 설치 후 MinGW 64-bit gcc(`x86_64-w64-mingw32-gcc` 또는 `gcc`) 를 PATH 에 등록.
+
 ## 출장 패키지 구성
 
 USB / 외장 SSD 에 다음 디렉토리 통째로 복사:

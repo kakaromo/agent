@@ -22,6 +22,16 @@ go build -o agent .        # Go 빌드 (UI 임베드 포함)
 ./agent --standalone -config config/devices.toml # 출장 (UI, 127.0.0.1)
 ```
 
+Windows (PowerShell / CMD):
+
+```powershell
+.\build-ui.ps1                        # Svelte UI 빌드
+.\build.ps1                           # UI + agent.exe (CGO 자동: MinGW 발견 시 ON, 없으면 OFF)
+.\run.ps1 -Standalone                 # UI 빌드 + agent.exe + 실행 (--standalone)
+.\run.ps1 -Standalone -Bind 0.0.0.0   # standalone + LAN 공유
+# CMD: build.bat / run.bat 가 위 ps1 을 wrap (실행 정책 -Bypass 자동)
+```
+
 Proto 컴파일: `protoc --go_out=. --go-grpc_out=. proto/agent.proto`
 
 ### Standalone 모드 (출장용 원바이너리)
