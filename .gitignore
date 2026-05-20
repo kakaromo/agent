@@ -12,6 +12,9 @@ tools/tiotest
 tools/trace
 tools/iotest
 
+# APK 번들 — binary, 로컬에서만 사용 (README 만 추적)
+tools/apks/*.apk
+
 # Trace output
 /tmp/agent_trace/
 
