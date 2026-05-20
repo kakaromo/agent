@@ -65,10 +65,48 @@ gcc --version
 
 ```bash
 # macOS:    brew install mingw-w64
-# Ubuntu:   apt install gcc-mingw-w64-x86-64
-CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 \
+# Ubuntu:   sudo apt install mingw-w64
+#           sudo update-alternatives --config x86_64-w64-mingw32-gcc  ← posix 선택
+#           sudo update-alternatives --config x86_64-w64-mingw32-g++  ← posix 선택
+
+CGO_ENABLED=1 \
+  CC=x86_64-w64-mingw32-gcc \
+  CXX=x86_64-w64-mingw32-g++ \
+  CGO_LDFLAGS="-static -lpthread" \
+  GOOS=windows GOARCH=amd64 \
   go build -o agent-windows-amd64.exe .
+
+# 검증 — PE 바이너리인지 확인
+file agent-windows-amd64.exe
+# → PE32+ executable (console) x86-64, for MS Windows ... 가 정상
 ```
+
+##### Ubuntu 에서 "undefined reference to pthread_mutex_unlock"
+
+증상: 빌드 도중 링커가 pthread 심볼을 못 찾고 멈춤. 그 결과 exe 가 안 만들어지거나 손상된 파일.
+
+원인: Ubuntu 의 mingw-w64 기본 thread model 이 `win32` 인 경우가 흔함. DuckDB(C++/pthread) 가 동작하려면 `posix` 모델이어야 함.
+
+해결:
+
+```bash
+# 1) thread model 확인
+x86_64-w64-mingw32-gcc -v 2>&1 | grep "Thread model"
+# → Thread model: win32  ← 문제. posix 가 필요.
+
+# 2) posix 변형 선택 (gcc + g++ 둘 다)
+sudo update-alternatives --config x86_64-w64-mingw32-gcc
+sudo update-alternatives --config x86_64-w64-mingw32-g++
+
+# 3) 다시 확인
+x86_64-w64-mingw32-gcc -v 2>&1 | grep "Thread model"
+# → Thread model: posix
+
+# 4) 빌드 시 CGO_LDFLAGS 에 winpthread 명시 (build.sh 가 자동 처리)
+CGO_LDFLAGS="-static -lpthread" 
+```
+
+`build.sh` 가 thread model 을 자동 감지해 win32 면 경고 출력. 그래도 빌드는 시도하지만 링커 에러가 날 가능성이 높아 위 절차로 posix 로 바꾸세요.
 
 ### Windows 에서 직접 빌드 (PowerShell / CMD)
 

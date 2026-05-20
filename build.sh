@@ -30,12 +30,28 @@ echo "Building Linux ARM64..."
 GOOS=linux GOARCH=arm64 go build -o "${DIST_DIR}/agent-linux-arm64" .
 
 # Windows AMD64
+# go-duckdb 는 cgo 필수 (cgo 없으면 `undefined: Conn` 컴파일 에러).
+# MinGW gcc 가 없으면 그냥 skip — Windows exe 만 빠진다.
+# pthread_mutex_* undefined → MinGW 가 win32 스레드 모델이거나 winpthread 미링크.
+# update-alternatives 로 posix 모델 선택 + CGO_LDFLAGS 로 명시적 -lpthread 필요.
 echo "Building Windows AMD64..."
 if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-    CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 go build -o "${DIST_DIR}/agent-windows-amd64.exe" .
+    # MinGW threading model 확인 — posix 가 아니면 pthread 심볼 못 찾음
+    THREAD_MODEL=$(x86_64-w64-mingw32-gcc -v 2>&1 | grep -oE 'Thread model: [a-z0-9]+' | awk '{print $NF}' || echo unknown)
+    if [ "$THREAD_MODEL" != "posix" ]; then
+        echo "  WARN: MinGW thread model = '$THREAD_MODEL' (posix 권장)"
+        echo "        sudo update-alternatives --config x86_64-w64-mingw32-gcc 로 posix 선택"
+    fi
+    CGO_ENABLED=1 \
+        CC=x86_64-w64-mingw32-gcc \
+        CXX=x86_64-w64-mingw32-g++ \
+        CGO_LDFLAGS="-static -lpthread" \
+        GOOS=windows GOARCH=amd64 \
+        go build -o "${DIST_DIR}/agent-windows-amd64.exe" .
 else
-    echo "  MinGW not found, building without CGO (DuckDB disabled)..."
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o "${DIST_DIR}/agent-windows-amd64.exe" .
+    echo "  MinGW (x86_64-w64-mingw32-gcc) 미발견 — Windows exe 빌드 skip"
+    echo "  Ubuntu: sudo apt install mingw-w64 && sudo update-alternatives --config x86_64-w64-mingw32-gcc (posix 선택)"
+    echo "  macOS:  brew install mingw-w64"
 fi
 
 # ── iotest (Android arm64 전용) ──
