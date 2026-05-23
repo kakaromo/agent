@@ -136,14 +136,20 @@ routerOpts.EnableUI = true
 저장 레이아웃:
 ```
 <archive_base>/
-└── <remotePath>/        # /api/agent/upload/* 의 remotePath 인자 그대로
+├── auto/<yyyy-mm-dd>/<jobId>/       # benchmark 잡 종료 시 자동 저장
+│   └── {deviceId}_result.json
+└── <remotePath>/                    # /api/agent/upload/* 의 remotePath 인자 그대로 (수동 업로드)
     └── <jobId>/
         ├── {deviceId}_result.json   # benchmark archive
         ├── result_ufs.parquet       # trace archive
         └── trace.log
 ```
 
-MinIO 미사용 → `/api/agent/upload/*` 가 이 경로로 로컬 복사. UI 의 "결과 archive 업로드" 버튼이 이걸 호출.
+- **자동 (benchmark 한정)**: 잡이 terminal state (completed/failed) 에 도달하면 `dbRecorder.OnResult` 가
+  `GetBenchmarkResult` 응답을 `auto/{yyyy-mm-dd}/{jobId}/{deviceId}_result.json` 으로 즉시 기록한다.
+  사용자가 별도 버튼을 누르지 않아도 결과 풀 JSON 이 디스크에 보존됨 (DB `result_summary` 는 핵심 metric 만 축약 저장).
+- **수동**: `/api/agent/upload/*` 가 `<remotePath>/<jobId>/` 로 복사. trace 는 자동 archive 대상이 아니므로
+  parquet/trace.log 를 디스크에 두려면 명시 호출이 필요하다 (UI "결과 archive 업로드" 버튼).
 
 사무실 모드는 archive 엔드포인트 자체가 마운트되지 않는다 (MinIO 가 별도 책임).
 

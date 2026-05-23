@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	pb "agent/pb"
 	"agent/storage/sqlitedb"
 )
 
@@ -40,16 +45,18 @@ func currentRecorder() JobExecutionRecorder {
 }
 
 // installJobExecutionHook — DB 있을 때 호출. portal 의 jobExecutionService 역할 단방향 등록.
-func installJobExecutionHook(_ *DeviceAgentServer, db *sqlitedb.DB) {
+// archiveBase 가 비어있지 않으면 잡 종료 시 benchmark 결과 JSON 을 디스크에도 자동 저장한다.
+func installJobExecutionHook(_ *DeviceAgentServer, db *sqlitedb.DB, archiveBase string) {
 	if db == nil {
 		return
 	}
-	recorderRef.Store(JobExecutionRecorder(&dbRecorder{db: db}))
+	recorderRef.Store(JobExecutionRecorder(&dbRecorder{db: db, archiveBase: archiveBase}))
 }
 
 // dbRecorder — SQLite 백엔드 구현.
 type dbRecorder struct {
-	db *sqlitedb.DB
+	db          *sqlitedb.DB
+	archiveBase string // benchmark 자동 JSON archive 의 루트. 빈 문자열이면 파일 저장 skip.
 
 	// serverID 자동 매핑 — standalone 에서는 localhost 가 id=1 이지만 안전하게 한 번 조회 캐시.
 	once     sync.Once
@@ -111,11 +118,43 @@ func (r *dbRecorder) OnResult(ctx context.Context, agent *DeviceAgentServer, job
 		return
 	}
 	summary, err := buildResultSummary(ctx, agent, jobID, jobType)
-	if err != nil || summary == "" {
+	if err == nil && summary != "" {
+		if err := r.db.UpdateJobExecutionResultSummary(ctx, jobID, summary); err != nil {
+			slog.Debug("update job execution result_summary failed", "jobId", jobID, "error", err)
+		}
+	}
+	// archive_base 가 설정돼 있고 benchmark/scenario 라면 풀 결과 JSON 도 디스크에 자동 저장.
+	if r.archiveBase != "" && (jobType == "benchmark" || jobType == "scenario") {
+		r.autoArchiveBenchmark(ctx, agent, jobID)
+	}
+}
+
+// autoArchiveBenchmark — 잡 종료 시 GetBenchmarkResult 응답을
+// {archiveBase}/auto/{yyyy-mm-dd}/{jobId}/{deviceId}_result.json 으로 저장.
+// 수동 upload (`/api/agent/upload/benchmark`) 와 폴더 분리.
+func (r *dbRecorder) autoArchiveBenchmark(ctx context.Context, agent *DeviceAgentServer, jobID string) {
+	resp, err := agent.GetBenchmarkResult(ctx, &pb.GetBenchmarkResultRequest{JobId: jobID})
+	if err != nil || len(resp.GetResults()) == 0 {
 		return
 	}
-	if err := r.db.UpdateJobExecutionResultSummary(ctx, jobID, summary); err != nil {
-		slog.Debug("update job execution result_summary failed", "jobId", jobID, "error", err)
+	dstDir := filepath.Join(r.archiveBase, "auto", time.Now().Format("2006-01-02"), jobID)
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		slog.Warn("auto archive mkdir failed", "jobId", jobID, "error", err)
+		return
+	}
+	for _, br := range resp.GetResults() {
+		fileName := fmt.Sprintf("%s_result.json", sanitizeFileSegment(br.GetDeviceId()))
+		fullPath := filepath.Join(dstDir, fileName)
+		data, err := json.MarshalIndent(benchmarkResultToMap(br), "", "  ")
+		if err != nil {
+			slog.Warn("auto archive marshal failed", "jobId", jobID, "deviceId", br.GetDeviceId(), "error", err)
+			continue
+		}
+		if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+			slog.Warn("auto archive write failed", "jobId", jobID, "path", fullPath, "error", err)
+			continue
+		}
+		slog.Info("benchmark result auto-archived", "jobId", jobID, "deviceId", br.GetDeviceId(), "path", fullPath)
 	}
 }
 

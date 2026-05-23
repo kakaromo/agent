@@ -87,7 +87,7 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 		registerMacroRoutes(mux, opts.Agent, opts.DB)
 		registerPresetRoutes(mux, opts.DB)
 		registerScheduleRoutes(mux, opts.DB, opts.ScheduleRunner)
-		installJobExecutionHook(opts.Agent, opts.DB)
+		installJobExecutionHook(opts.Agent, opts.DB, opts.ArchiveBase)
 	}
 	// Archive 업로드 (로컬 디스크 복사). archiveBase 가 비어있으면 등록 안 함.
 	if opts.ArchiveBase != "" {
