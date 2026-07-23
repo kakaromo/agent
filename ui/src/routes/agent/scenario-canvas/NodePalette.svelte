@@ -12,6 +12,8 @@
 	import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PackageMinusIcon from '@lucide/svelte/icons/package-minus';
+	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import TypeIcon from '@lucide/svelte/icons/type';
 
 	const stepTypes = [
 		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
@@ -22,6 +24,8 @@
 		{ type: 'trace_start', label: 'Trace Start', icon: ScanSearchIcon, desc: 'ftrace 시작' },
 		{ type: 'trace_stop', label: 'Trace Stop', icon: SquareIcon, desc: 'ftrace 중지' },
 		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
+		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
+		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },
 		{ type: 'install_apk', label: 'Install APK', icon: DownloadIcon, desc: 'APK 설치' },
 		{ type: 'uninstall_apk', label: 'Uninstall APK', icon: PackageMinusIcon, desc: '앱 제거' }
 	];

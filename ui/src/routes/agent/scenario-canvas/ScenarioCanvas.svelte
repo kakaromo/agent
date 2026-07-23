@@ -277,8 +277,49 @@
 			extraText: type === 'sleep' ? 'seconds=5' : type === 'shell' ? 'cmd=' : '',
 			showAdvanced: false, useFileFromStep: null,
 			cleanupMode: 'all', cleanupSteps: new Set(), cleanupPath: '',
-			traceEnabled: false, traceType: 'ufs'
+			traceEnabled: false, traceType: 'ufs',
+			// 요소 기반 탭 / 텍스트 입력 기본값
+			elementResourceId: '', elementText: '', elementContentDesc: '',
+			elementX: null, elementY: null, inputText: ''
 		};
+	}
+
+	// 라이브 화면(AgentScreenSheet)에서 요소를 클릭하면 tap_element 블록을 캔버스에 추가한다.
+	// +page.svelte 가 canvas 인스턴스를 bind 해 호출한다.
+	export function addTapElementStep(sel: {
+		resourceId: string; text: string; contentDesc: string; x: number; y: number;
+	}) {
+		const form = createDefaultStep('tap_element');
+		form.elementResourceId = sel.resourceId;
+		form.elementText = sel.text;
+		form.elementContentDesc = sel.contentDesc;
+		form.elementX = sel.x;
+		form.elementY = sel.y;
+
+		const id = `step-${nodeIdCounter++}`;
+		// 마지막 step 아래에 세로로 쌓는다.
+		const stepNodesBefore = nodes.filter(n => n.type === 'step');
+		const lastY = stepNodesBefore.length > 0
+			? Math.max(...stepNodesBefore.map(n => n.position.y)) + 100
+			: 40;
+		const newNode: Node = {
+			id,
+			type: 'step',
+			position: { x: 60, y: lastY },
+			data: { stepForm: form, label: stepSummary(form), stepType: 'tap_element' } satisfies StepNodeData
+		} as any;
+		nodes = sortNodesParentFirst([...nodes, newNode]);
+
+		// 직전 step 에 자동 연결
+		const stepNodes = nodes.filter(n => n.type === 'step');
+		if (stepNodes.length >= 2) {
+			const prev = stepNodes[stepNodes.length - 2];
+			const hasOutgoing = edges.some(e => e.source === prev.id);
+			if (!hasOutgoing) {
+				edges = [...edges, { id: `e-${prev.id}-${id}`, source: prev.id, target: id }];
+			}
+		}
+		updateExecOrder();
 	}
 
 	function onDrop(event: DragEvent) {

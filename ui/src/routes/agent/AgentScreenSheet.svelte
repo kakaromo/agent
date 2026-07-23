@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
-	import { getScreenWebSocketUrl } from '$lib/api/agent.js';
+	import { getScreenWebSocketUrl, listUiElements, type UIElement } from '$lib/api/agent.js';
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import JMuxer from 'jmuxer';
@@ -9,14 +9,91 @@
 	import HomeIcon from '@lucide/svelte/icons/house';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import XIcon from '@lucide/svelte/icons/x';
+	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+
+	// tap_element 스텝을 만들 셀렉터. 부모(agent 페이지)가 캔버스에 블록으로 추가한다.
+	export interface SelectedElement {
+		resourceId: string;
+		text: string;
+		contentDesc: string;
+		x: number;  // 폴백 좌표 (요소 중심, 디바이스 픽셀)
+		y: number;
+	}
 
 	interface Props {
 		open: boolean;
 		serverId: number | null;
 		deviceId: string | null;
+		// 설정되면 "요소 선택 모드" 토글이 나타나고, 요소 클릭 시 호출된다.
+		onSelectElement?: (el: SelectedElement) => void;
 	}
 
-	let { open = $bindable(), serverId, deviceId }: Props = $props();
+	let { open = $bindable(), serverId, deviceId, onSelectElement }: Props = $props();
+
+	// ── 요소 선택 모드 (요소 기반 시나리오 빌더) ──
+	let elementMode = $state(false);
+	let uiElements = $state<UIElement[]>([]);
+	let elementsDeviceWidth = $state(0);
+	let elementsDeviceHeight = $state(0);
+	let loadingElements = $state(false);
+
+	async function loadUiElements() {
+		if (serverId == null || !deviceId) return;
+		loadingElements = true;
+		try {
+			const res = await listUiElements(serverId, deviceId, true);
+			uiElements = res.elements ?? [];
+			elementsDeviceWidth = res.deviceWidth || deviceWidth;
+			elementsDeviceHeight = res.deviceHeight || deviceHeight;
+			if (uiElements.length === 0) {
+				toast.info('클릭 가능한 요소를 찾지 못했습니다 (게임/DRM 화면일 수 있음)');
+			}
+		} catch (err) {
+			toast.error('요소 목록을 가져오지 못했습니다');
+			uiElements = [];
+		} finally {
+			loadingElements = false;
+		}
+	}
+
+	function toggleElementMode() {
+		elementMode = !elementMode;
+		if (elementMode) {
+			loadUiElements();
+		} else {
+			uiElements = [];
+		}
+	}
+
+	// 요소 bounds(디바이스 픽셀) → 화면 오버레이 박스 스타일 (getVideoRect 레터박스 보정 기반).
+	function elementBoxStyle(el: UIElement): string {
+		const vr = getVideoRect();
+		const dw = elementsDeviceWidth || deviceWidth;
+		const dh = elementsDeviceHeight || deviceHeight;
+		if (!vr || dw <= 0 || dh <= 0) return 'display:none';
+		const [x1, y1, x2, y2] = el.bounds;
+		const scaleX = vr.width / dw;
+		const scaleY = vr.height / dh;
+		// 오버레이 컨테이너는 video 와 동일한 박스에 겹쳐 있으므로 vr 기준 상대좌표.
+		const left = (x1 * scaleX);
+		const top = (y1 * scaleY);
+		const w = (x2 - x1) * scaleX;
+		const h = (y2 - y1) * scaleY;
+		return `left:${left}px; top:${top}px; width:${w}px; height:${h}px;`;
+	}
+
+	function pickElement(el: UIElement) {
+		onSelectElement?.({
+			resourceId: el.resourceId,
+			text: el.text,
+			contentDesc: el.contentDesc,
+			x: el.centerX,
+			y: el.centerY
+		});
+		const label = el.text || el.resourceId || el.contentDesc || 'element';
+		toast.success(`요소 추가: ${label}`);
+	}
 
 	let videoEl: HTMLVideoElement;
 	let ws: WebSocket | null = null;
@@ -316,26 +393,48 @@
 					<span class="ml-2 text-xs text-muted-foreground">연결 중... (2~3초 소요)</span>
 				</div>
 			{:else if connected}
-				<!-- Video element -->
+				<!-- Video element (요소 선택 모드일 때 오버레이 박스 겹침) -->
 				<div
-					class="flex-1 flex items-center justify-center w-full overflow-hidden"
+					class="relative flex-1 flex items-center justify-center w-full overflow-hidden"
 					style="max-height: calc(100vh - 10rem);"
 				>
 					<!-- svelte-ignore a11y_media_has_caption -->
 					<video
 						id="agent-screen-video"
 						bind:this={videoEl}
-						class="max-w-full max-h-full border rounded bg-black cursor-pointer"
+						class="max-w-full max-h-full border rounded bg-black {elementMode ? 'cursor-crosshair' : 'cursor-pointer'}"
 						style="aspect-ratio: {deviceWidth}/{deviceHeight};"
 						autoplay
 						muted
 						playsinline
-						onmousedown={handleMouseDown}
-						onmouseup={handleMouseUp}
-						onmousemove={handleMouseMove}
-						onwheel={handleWheel}
+						onmousedown={elementMode ? undefined : handleMouseDown}
+						onmouseup={elementMode ? undefined : handleMouseUp}
+						onmousemove={elementMode ? undefined : handleMouseMove}
+						onwheel={elementMode ? undefined : handleWheel}
 						oncontextmenu={(e) => e.preventDefault()}
 					></video>
+
+					{#if elementMode}
+						<!-- 요소 오버레이 레이어: 각 박스는 video 레터박스 rect 기준 절대배치 -->
+						{@const vr = getVideoRect()}
+						{#if vr}
+							{@const wrap = videoEl?.parentElement?.getBoundingClientRect()}
+							<div
+								class="absolute pointer-events-none"
+								style="left:{vr.left - (wrap?.left ?? 0)}px; top:{vr.top - (wrap?.top ?? 0)}px; width:{vr.width}px; height:{vr.height}px;"
+							>
+								{#each uiElements as el, i (i)}
+									<button
+										type="button"
+										class="absolute pointer-events-auto border-2 border-fuchsia-500/70 bg-fuchsia-400/10 hover:bg-fuchsia-400/30 rounded-sm transition-colors"
+										style={elementBoxStyle(el)}
+										title={el.text || el.resourceId || el.contentDesc}
+										onclick={() => pickElement(el)}
+									></button>
+								{/each}
+							</div>
+						{/if}
+					{/if}
 				</div>
 
 				<!-- Soft buttons + Stop -->
@@ -349,6 +448,26 @@
 					<button onclick={() => sendKey(187)} class="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs hover:bg-muted">
 						<LayoutGridIcon class="size-3.5" /> Recent
 					</button>
+					{#if onSelectElement}
+						<div class="w-px h-4 bg-border"></div>
+						<button
+							onclick={toggleElementMode}
+							class="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs transition-colors {elementMode ? 'bg-fuchsia-600 text-white border-fuchsia-600' : 'hover:bg-muted'}"
+							title="요소 선택 모드: 화면에서 요소를 클릭해 tap_element 블록을 추가"
+						>
+							<MousePointerClickIcon class="size-3.5" /> 요소 선택
+						</button>
+						{#if elementMode}
+							<button
+								onclick={loadUiElements}
+								disabled={loadingElements}
+								class="inline-flex items-center gap-1 rounded border px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+								title="요소 목록 새로고침"
+							>
+								<RefreshCwIcon class="size-3.5 {loadingElements ? 'animate-spin' : ''}" />
+							</button>
+						{/if}
+					{/if}
 					<div class="w-px h-4 bg-border"></div>
 					<button onclick={stopAndClose} class="inline-flex items-center gap-1 rounded border border-destructive/50 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10">
 						<XIcon class="size-3.5" /> 연결 끊기

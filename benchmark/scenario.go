@@ -601,6 +601,49 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		out := fmt.Sprintf("UNINSTALL_APK|package=%s\n%s", pkg, resp.Message)
 		return out, nil, nil
+	case "tap_element":
+		// 요소 기반 탭 — 단일 MacroEvent 를 replay 로 실행 (요소 재탐색 + 좌표 폴백은 replayer 담당)
+		if o.macroMgr == nil {
+			return "", nil, fmt.Errorf("macro manager not configured")
+		}
+		ev := &pb.MacroEvent{
+			Type:               "tap_element",
+			ElementResourceId:  step.Params["element_resource_id"],
+			ElementText:        step.Params["element_text"],
+			ElementContentDesc: step.Params["element_content_desc"],
+		}
+		if v, err := strconv.Atoi(step.Params["x"]); err == nil {
+			ev.X = int32(v)
+		}
+		if v, err := strconv.Atoi(step.Params["y"]); err == nil {
+			ev.Y = int32(v)
+		}
+		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
+			DeviceId: deviceID,
+			Events:   []*pb.MacroEvent{ev},
+		})
+		if err != nil {
+			return "", nil, fmt.Errorf("tap_element: %w", err)
+		}
+		metrics := make(map[string]float64)
+		for k, v := range resp.Metrics {
+			metrics[k] = v
+		}
+		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
+			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
+	case "text":
+		// input text — 단일 MacroEvent 로 실행
+		if o.macroMgr == nil {
+			return "", nil, fmt.Errorf("macro manager not configured")
+		}
+		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
+			DeviceId: deviceID,
+			Events:   []*pb.MacroEvent{{Type: "text", InputText: step.Params["input_text"]}},
+		})
+		if err != nil {
+			return "", nil, fmt.Errorf("text: %w", err)
+		}
+		return fmt.Sprintf("TEXT|input=%s|success=%t", step.Params["input_text"], resp.Success), nil, nil
 	case "condition":
 		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
 		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)

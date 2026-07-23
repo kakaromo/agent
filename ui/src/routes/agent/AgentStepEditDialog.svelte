@@ -37,6 +37,13 @@
 		macroName?: string;
 		macroClearMode?: 'none' | 'force_stop' | 'clear';
 		iotestConfig?: IOTestConfig;
+		// 요소 기반 탭(tap_element) 셀렉터 + 폴백 좌표. text 입력은 inputText.
+		elementResourceId?: string;
+		elementText?: string;
+		elementContentDesc?: string;
+		elementX?: number | null;
+		elementY?: number | null;
+		inputText?: string;
 	}
 
 	interface Props {
@@ -163,6 +170,8 @@
 							<option value="trace_start">Trace Start</option>
 							<option value="trace_stop">Trace Stop</option>
 							<option value="app_macro">App Macro</option>
+							<option value="tap_element">Tap Element</option>
+							<option value="text">Text Input</option>
 							<option value="install_apk">Install APK</option>
 							<option value="uninstall_apk">Uninstall APK</option>
 						</select>
@@ -422,6 +431,73 @@
 							/>
 							사용자 데이터/캐시 유지 (<code>pm uninstall -k</code>)
 						</label>
+					</div>
+
+				{:else if local.type === 'tap_element'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							재생 시 화면에서 요소를 다시 찾아 중심을 탭합니다. 우선순위: resource-id → text → content-desc.
+							못 찾으면 아래 폴백 좌표로 탭합니다. (라이브 화면에서 요소를 클릭하면 자동으로 채워집니다.)
+						</p>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">Resource ID</label>
+							<input
+								value={local.elementResourceId ?? ''}
+								oninput={(e) => { if (local) local.elementResourceId = (e.target as HTMLInputElement).value; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+								placeholder="com.example:id/button"
+							/>
+						</div>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">Text</label>
+							<input
+								value={local.elementText ?? ''}
+								oninput={(e) => { if (local) local.elementText = (e.target as HTMLInputElement).value; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+								placeholder="검색"
+							/>
+						</div>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">Content Description</label>
+							<input
+								value={local.elementContentDesc ?? ''}
+								oninput={(e) => { if (local) local.elementContentDesc = (e.target as HTMLInputElement).value; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+								placeholder="검색 버튼"
+							/>
+						</div>
+						<div class="flex gap-2">
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">폴백 X</label>
+								<input
+									type="number"
+									value={local.elementX ?? ''}
+									oninput={(e) => { if (local) { const v = (e.target as HTMLInputElement).value; local.elementX = v === '' ? null : Number(v); } }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">폴백 Y</label>
+								<input
+									type="number"
+									value={local.elementY ?? ''}
+									oninput={(e) => { if (local) { const v = (e.target as HTMLInputElement).value; local.elementY = v === '' ? null : Number(v); } }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+						</div>
+					</div>
+
+				{:else if local.type === 'text'}
+					<div class="space-y-1">
+						<label class="{sectionLabel}">Input Text</label>
+						<input
+							value={local.inputText ?? ''}
+							oninput={(e) => { if (local) local.inputText = (e.target as HTMLInputElement).value; }}
+							class="w-full border rounded px-2 py-1 text-xs bg-background"
+							placeholder="입력할 문자열 (input text)"
+						/>
+						<p class="{captionMuted}">공백은 자동으로 %s 로 변환됩니다. 특수문자는 이스케이프됩니다.</p>
 					</div>
 
 				{:else}

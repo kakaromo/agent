@@ -59,6 +59,8 @@
 	// Screen share sheet
 	let screenSheetOpen = $state(false);
 	let screenDeviceId = $state<string | null>(null);
+	// scenario 캔버스 인스턴스 — 요소 선택 모드에서 tap_element 블록 추가에 사용
+	let scenarioCanvasRef = $state<ScenarioCanvas | null>(null);
 	let macroScreenJobId = $state<string | null>(null); // macro 모드로 자동 열린 job 추적
 
 	// Trace result sheet
@@ -646,6 +648,7 @@
 					/>
 				{:else if centerMode === 'scenario'}
 					<ScenarioCanvas
+						bind:this={scenarioCanvasRef}
 						serverId={selectedServerId}
 						selectedDevices={selectedDeviceIds}
 						serverName={selectedServerId ? getServerName(selectedServerId) : ''}
@@ -736,6 +739,9 @@
 	bind:open={screenSheetOpen}
 	serverId={selectedServerId}
 	deviceId={screenDeviceId}
+	onSelectElement={centerMode === 'scenario'
+		? (el) => scenarioCanvasRef?.addTapElementStep(el)
+		: undefined}
 />
 
 <TerminalDialog

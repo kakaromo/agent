@@ -71,6 +71,8 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	trace_start: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	trace_stop: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
+	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
+	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
 	install_apk: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
 	uninstall_apk: { bg: 'bg-rose-100', text: 'text-rose-700' }
 };
@@ -85,6 +87,8 @@ export function stepSummary(form: StepForm): string {
 		case 'trace_start': return `${form.formParams.trace_type ?? 'ufs'} trace`;
 		case 'trace_stop': return 'stop';
 		case 'app_macro': return form.macroName ?? `Macro #${form.macroId ?? '?'}`;
+		case 'tap_element': return form.elementText || form.elementResourceId || form.elementContentDesc || 'element';
+		case 'text': return form.inputText ? `"${form.inputText.slice(0, 20)}"` : 'text';
 		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
 		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
 		default: return form.type;

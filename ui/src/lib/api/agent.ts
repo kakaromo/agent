@@ -557,7 +557,7 @@ export interface AppMacro {
 
 export interface MacroEvent {
 	t: number;
-	type: string; // "tap" | "swipe" | "key" | "wait" | "wait_until" | "screenshot" | "scroll_capture"
+	type: string; // "tap" | "tap_element" | "text" | "swipe" | "key" | "wait" | "wait_until" | "screenshot" | "scroll_capture"
 	x?: number;
 	y?: number;
 	x2?: number;
@@ -575,6 +575,24 @@ export interface MacroEvent {
 	scrollPause?: number;
 	ocrPattern?: string;
 	ocrRegion?: OcrRegion;
+	// 요소 기반 탭(tap_element) 셀렉터 + 폴백 좌표(x,y 재사용)
+	elementResourceId?: string;
+	elementText?: string;
+	elementContentDesc?: string;
+	// text 이벤트: input text 로 입력할 문자열
+	inputText?: string;
+}
+
+// 요소 기반 시나리오 빌더 — 현재 화면의 uiautomator 요소.
+export interface UIElement {
+	resourceId: string;
+	text: string;
+	contentDesc: string;
+	class: string;
+	clickable: boolean;
+	centerX: number;
+	centerY: number;
+	bounds: [number, number, number, number]; // [x1, y1, x2, y2]
 }
 
 export interface OcrRegion {
@@ -639,6 +657,17 @@ export function takeScreenshot(serverId: number, deviceId: string): Promise<{
 	success: boolean; width: number; height: number; imageBase64: string;
 }> {
 	return post(`/agent/macro/screenshot?serverId=${serverId}`, { deviceId });
+}
+
+// 현재 화면의 클릭 가능 요소 목록 (요소 기반 시나리오 빌더용 오버레이).
+export function listUiElements(
+	serverId: number,
+	deviceId: string,
+	clickableOnly = true
+): Promise<{ success: boolean; deviceWidth: number; deviceHeight: number; elements: UIElement[] }> {
+	return get(
+		`/agent/macro/ui-elements?serverId=${serverId}&deviceId=${encodeURIComponent(deviceId)}&clickableOnly=${clickableOnly}`
+	);
 }
 
 export function screenshotOcr(serverId: number, data: {

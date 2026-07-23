@@ -647,6 +647,13 @@ func (s *DeviceAgentServer) ScreenshotOcr(ctx context.Context, req *pb.Screensho
 	return s.macroMgr.ScreenshotOcr(ctx, req)
 }
 
+func (s *DeviceAgentServer) ListUiElements(ctx context.Context, req *pb.ListUiElementsRequest) (*pb.ListUiElementsResponse, error) {
+	if s.macroMgr == nil {
+		return &pb.ListUiElementsResponse{Success: false}, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.ListUiElements(ctx, req)
+}
+
 // ==================== Trace Reparse ====================
 
 func (s *DeviceAgentServer) ReparseTrace(ctx context.Context, req *pb.ReparseTraceRequest) (*pb.ReparseTraceResponse, error) {

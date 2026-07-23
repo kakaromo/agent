@@ -85,6 +85,7 @@ export function canvasToProto(
 			(step as any).macroClearMode = form.macroClearMode ?? 'force_stop';
 		}
 		return step;
+		// 참고: tap_element / text 는 params(buildStepParams) 로 셀렉터를 실어 보낸다.
 	});
 
 	// 엣지 → StepEdge
@@ -259,6 +260,21 @@ export function protoToCanvas(
 				iotestConfig
 			};
 
+			// 요소 기반 탭 / 텍스트 입력 params 복원 (extraText 로 새지 않게 formParams/extraText 를 비운다)
+			if (s.type === 'tap_element') {
+				form.elementResourceId = params.element_resource_id ?? '';
+				form.elementText = params.element_text ?? '';
+				form.elementContentDesc = params.element_content_desc ?? '';
+				form.elementX = params.x != null ? Number(params.x) : null;
+				form.elementY = params.y != null ? Number(params.y) : null;
+				form.formParams = {};
+				form.extraText = '';
+			} else if (s.type === 'text') {
+				form.inputText = params.input_text ?? '';
+				form.formParams = {};
+				form.extraText = '';
+			}
+
 			// 분기가 있으면 condition의 true/false 타겟에 따라 좌/우 배치
 			let xPos = 50;
 			if (hasConditions) {
@@ -426,6 +442,22 @@ function buildStepParams(s: StepForm): Record<string, string> {
 			params.path = s.cleanupPath.trim();
 		}
 		return params;
+	}
+
+	// 요소 기반 탭 — 셀렉터 + 폴백 좌표를 params 로 직렬화
+	if (s.type === 'tap_element') {
+		const params: Record<string, string> = {};
+		if (s.elementResourceId) params.element_resource_id = s.elementResourceId;
+		if (s.elementText) params.element_text = s.elementText;
+		if (s.elementContentDesc) params.element_content_desc = s.elementContentDesc;
+		if (s.elementX != null) params.x = String(s.elementX);
+		if (s.elementY != null) params.y = String(s.elementY);
+		return params;
+	}
+
+	// 텍스트 입력
+	if (s.type === 'text') {
+		return s.inputText ? { input_text: s.inputText } : {};
 	}
 
 	// IOTEST: config as JSON in params (independent step type)

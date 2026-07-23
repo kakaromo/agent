@@ -192,3 +192,41 @@ func (m *Manager) ScreenshotOcr(ctx context.Context, req *pb.ScreenshotOcrReques
 	dev := adb.NewDevice(serial)
 	return RunScreenshotOcr(ctx, dev, req.Region, req.ExtractPattern)
 }
+
+// ListUiElements 는 현재 화면의 uiautomator 요소 목록을 반환한다 (요소 기반 시나리오 빌더용).
+func (m *Manager) ListUiElements(ctx context.Context, req *pb.ListUiElementsRequest) (*pb.ListUiElementsResponse, error) {
+	serial, err := m.adbMgr.GetDeviceSerial(req.DeviceId)
+	if err != nil {
+		return nil, fmt.Errorf("device not found: %w", err)
+	}
+
+	dev := adb.NewDevice(serial)
+	els, err := DumpUIElements(ctx, dev, req.ClickableOnly)
+	if err != nil {
+		return &pb.ListUiElementsResponse{Success: false}, fmt.Errorf("dump ui elements: %w", err)
+	}
+
+	width, height := getDeviceResolution(ctx, serial)
+	out := make([]*pb.UiElement, 0, len(els))
+	for _, e := range els {
+		out = append(out, &pb.UiElement{
+			ResourceId:  e.ResourceID,
+			Text:        e.Text,
+			ContentDesc: e.ContentDesc,
+			Class:       e.Class,
+			Clickable:   e.Clickable,
+			CenterX:     int32(e.CenterX),
+			CenterY:     int32(e.CenterY),
+			BoundLeft:   int32(e.Bounds[0]),
+			BoundTop:    int32(e.Bounds[1]),
+			BoundRight:  int32(e.Bounds[2]),
+			BoundBottom: int32(e.Bounds[3]),
+		})
+	}
+	return &pb.ListUiElementsResponse{
+		Success:      true,
+		Elements:     out,
+		DeviceWidth:  int32(width),
+		DeviceHeight: int32(height),
+	}, nil
+}

@@ -45,6 +45,7 @@ service DeviceAgent {
   rpc ReplayMacro(ReplayMacroRequest) returns (ReplayMacroResponse);
   rpc TakeScreenshot(TakeScreenshotRequest) returns (TakeScreenshotResponse);
   rpc ScreenshotOcr(ScreenshotOcrRequest) returns (ScreenshotOcrResponse);
+  rpc ListUiElements(ListUiElementsRequest) returns (ListUiElementsResponse);
 
   // APK management (번들 폴더 list, install, uninstall)
   rpc ListBundledApks(ListBundledApksRequest) returns (ListBundledApksResponse);
@@ -577,7 +578,7 @@ message FilesystemInfo {
 
 message MacroEvent {
   int64 t = 1;                         // 녹화 시작 기준 경과시간 (ms)
-  string type = 2;                     // "tap", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"
+  string type = 2;                     // "tap", "tap_element", "text", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"
   int32 x = 3;                         // tap 좌표
   int32 y = 4;
   int32 x2 = 5;                        // swipe 끝 좌표
@@ -595,6 +596,13 @@ message MacroEvent {
   int32 scroll_pause = 17;             // scroll_capture: 스크롤 후 대기 (초)
   string ocr_pattern = 18;             // scroll_capture: OCR 추출 정규식
   OcrRegion ocr_region = 19;           // screenshot/scroll_capture: OCR 영역 지정
+  // 요소 기반 탭(tap_element) 셀렉터. 재생 시 uiautomator 트리에서 요소를 재탐색해
+  // 중심을 탭한다. 우선순위: resource-id → text → content-desc.
+  // 못 찾으면 폴백 좌표(위 x,y)로 탭한다 (게임/DRM 등 빈 트리 대응).
+  string element_resource_id = 20;     // tap_element: resource-id 셀렉터
+  string element_text = 21;            // tap_element: text 셀렉터
+  string element_content_desc = 22;    // tap_element: content-desc 셀렉터
+  string input_text = 23;              // text 이벤트: input text 로 입력할 문자열
 }
 
 message OcrRegion {
@@ -713,6 +721,33 @@ message ScreenshotOcrResponse {
   string full_text = 2;               // 전체 OCR 텍스트
   string extracted_value = 3;          // 정규식 매칭 결과
   bytes image_data = 4;               // 스크린샷 PNG
+}
+
+// 요소 기반 시나리오 빌더용 — 현재 화면의 클릭 가능 요소 목록 조회.
+message ListUiElementsRequest {
+  string device_id = 1;
+  bool clickable_only = 2;             // true 면 clickable="true" 요소만 반환
+}
+
+message ListUiElementsResponse {
+  bool success = 1;
+  repeated UiElement elements = 2;
+  int32 device_width = 3;              // 오버레이 좌표 변환용 화면 해상도
+  int32 device_height = 4;
+}
+
+message UiElement {
+  string resource_id = 1;
+  string text = 2;
+  string content_desc = 3;
+  string class = 4;
+  bool clickable = 5;
+  int32 center_x = 6;                  // bounds 중심 (탭 목표)
+  int32 center_y = 7;
+  int32 bound_left = 8;                // bounds [x1,y1][x2,y2]
+  int32 bound_top = 9;
+  int32 bound_right = 10;
+  int32 bound_bottom = 11;
 }
 
 // ==================== Trace Reparse ====================

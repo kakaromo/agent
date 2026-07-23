@@ -71,6 +71,36 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 			y := int(float64(ev.Y) * scaleY)
 			r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", x, y))
 
+		case "tap_element":
+			// 현재 화면 요소를 uiautomator 로 재탐색해 중심을 탭한다.
+			// 요소를 못 찾으면(빈 트리/게임/DRM 등) 저장된 x,y 좌표로 폴백.
+			tapped := false
+			els, err := DumpUIElements(ctx, r.dev, false)
+			if err != nil {
+				slog.Warn("tap_element: ui dump failed, using coordinate fallback", "error", err)
+			} else if el := findElementBySelector(els, ev.ElementResourceId, ev.ElementText, ev.ElementContentDesc); el != nil {
+				// 요소 중심 좌표는 현재 디바이스 해상도 기준이므로 스케일링하지 않는다.
+				r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", el.CenterX, el.CenterY))
+				slog.Info("tap_element: matched element",
+					"resourceId", el.ResourceID, "text", el.Text, "x", el.CenterX, "y", el.CenterY)
+				tapped = true
+			}
+			if !tapped {
+				// 폴백: 저장된 좌표(녹화 해상도 기준)를 스케일링해 탭.
+				x := int(float64(ev.X) * scaleX)
+				y := int(float64(ev.Y) * scaleY)
+				slog.Warn("tap_element: element not found, coordinate fallback",
+					"resourceId", ev.ElementResourceId, "text", ev.ElementText, "x", x, "y", y)
+				metrics["tap_element_fallback"]++
+				if x != 0 || y != 0 {
+					r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", x, y))
+				}
+			}
+
+		case "text":
+			// input text 로 문자열 입력. 공백은 %s 로, 그 외 셸 특수문자는 이스케이프.
+			r.dev.Shell(ctx, fmt.Sprintf("input text %s", escapeInputText(ev.InputText)))
+
 		case "swipe":
 			x1 := int(float64(ev.X) * scaleX)
 			y1 := int(float64(ev.Y) * scaleY)
@@ -387,6 +417,25 @@ func (r *Replayer) scrollCapture(ctx context.Context, ev *pb.MacroEvent) map[str
 	}
 
 	return results
+}
+
+// escapeInputText 는 `input text` 인자로 안전하게 넘길 수 있도록 문자열을 변환한다.
+// - 공백은 %s 로 (input text 는 공백을 인자 구분자로 봄)
+// - 셸/adb 에서 특수 취급되는 문자는 백슬래시 이스케이프
+func escapeInputText(s string) string {
+	var b strings.Builder
+	for _, ch := range s {
+		switch ch {
+		case ' ':
+			b.WriteString("%s")
+		case '"', '\'', '`', '\\', '$', '&', '|', ';', '<', '>', '(', ')', '*', '~', '#':
+			b.WriteByte('\\')
+			b.WriteRune(ch)
+		default:
+			b.WriteRune(ch)
+		}
+	}
+	return b.String()
 }
 
 // isNumericString checks if a string is purely numeric.

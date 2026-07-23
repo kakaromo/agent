@@ -177,6 +177,39 @@ func registerMacroRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sqlit
 		writeJSON(w, http.StatusOK, apps)
 	})
 
+	// macro/ui-elements  (gRPC ListUiElements) — 요소 기반 시나리오 빌더용
+	mux.HandleFunc("/api/agent/macro/ui-elements", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		deviceID := r.URL.Query().Get("deviceId")
+		if deviceID == "" {
+			writeError(w, http.StatusBadRequest, "deviceId required")
+			return
+		}
+		// 기본값: clickable 요소만. clickableOnly=false 로 전체 요청 가능.
+		clickableOnly := r.URL.Query().Get("clickableOnly") != "false"
+		resp, err := agent.ListUiElements(r.Context(), &pb.ListUiElementsRequest{
+			DeviceId:      deviceID,
+			ClickableOnly: clickableOnly,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		els := make([]map[string]any, 0, len(resp.GetElements()))
+		for _, e := range resp.GetElements() {
+			els = append(els, uiElementToMap(e))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":      resp.GetSuccess(),
+			"deviceWidth":  resp.GetDeviceWidth(),
+			"deviceHeight": resp.GetDeviceHeight(),
+			"elements":     els,
+		})
+	})
+
 	// macro/start-recording
 	mux.HandleFunc("/api/agent/macro/start-recording", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -444,7 +477,35 @@ func macroEventToMap(e *pb.MacroEvent) map[string]any {
 	if region := e.GetOcrRegion(); region != nil {
 		m["ocrRegion"] = ocrRegionToMap(region)
 	}
+	// 요소 기반 탭 셀렉터 (tap_element) + text 입력
+	if e.GetElementResourceId() != "" {
+		m["elementResourceId"] = e.GetElementResourceId()
+	}
+	if e.GetElementText() != "" {
+		m["elementText"] = e.GetElementText()
+	}
+	if e.GetElementContentDesc() != "" {
+		m["elementContentDesc"] = e.GetElementContentDesc()
+	}
+	if e.GetInputText() != "" {
+		m["inputText"] = e.GetInputText()
+	}
 	return m
+}
+
+func uiElementToMap(e *pb.UiElement) map[string]any {
+	return map[string]any{
+		"resourceId":  e.GetResourceId(),
+		"text":        e.GetText(),
+		"contentDesc": e.GetContentDesc(),
+		"class":       e.GetClass(),
+		"clickable":   e.GetClickable(),
+		"centerX":     e.GetCenterX(),
+		"centerY":     e.GetCenterY(),
+		"bounds": []int32{
+			e.GetBoundLeft(), e.GetBoundTop(), e.GetBoundRight(), e.GetBoundBottom(),
+		},
+	}
 }
 
 func buildMacroEvent(e map[string]any) *pb.MacroEvent {
@@ -505,6 +566,19 @@ func buildMacroEvent(e map[string]any) *pb.MacroEvent {
 	}
 	if region, ok := e["ocrRegion"].(map[string]any); ok {
 		out.OcrRegion = buildOcrRegion(region)
+	}
+	// 요소 기반 탭 셀렉터 (tap_element) + text 입력
+	if v, ok := e["elementResourceId"].(string); ok {
+		out.ElementResourceId = v
+	}
+	if v, ok := e["elementText"].(string); ok {
+		out.ElementText = v
+	}
+	if v, ok := e["elementContentDesc"].(string); ok {
+		out.ElementContentDesc = v
+	}
+	if v, ok := e["inputText"].(string); ok {
+		out.InputText = v
 	}
 	return out
 }
