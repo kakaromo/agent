@@ -37,6 +37,37 @@
 	let elementsDeviceWidth = $state(0);
 	let elementsDeviceHeight = $state(0);
 	let loadingElements = $state(false);
+	// hover 하이라이트 연동 — 오버레이 박스 ↔ 리스트 항목이 같은 인덱스로 강조된다.
+	let hoveredIdx = $state<number | null>(null);
+	// 리스트 패널 검색어
+	let elementFilter = $state('');
+
+	// 요소 하나의 대표 셀렉터 라벨 (재생 시 실제 매칭될 우선순위: id → text → desc).
+	function elementLabel(el: UIElement): string {
+		return el.text || el.contentDesc || el.resourceId || '(라벨 없음)';
+	}
+	// 재생 시 어떤 셀렉터로 매칭되는지 사람이 읽을 설명.
+	function selectorKind(el: UIElement): string {
+		if (el.resourceId) return 'id';
+		if (el.text) return 'text';
+		if (el.contentDesc) return 'desc';
+		return '좌표';
+	}
+
+	// 검색어로 필터링된 요소 목록 (원본 인덱스 유지 — 하이라이트 연동용).
+	let filteredElements = $derived(
+		uiElements
+			.map((el, idx) => ({ el, idx }))
+			.filter(({ el }) => {
+				if (!elementFilter.trim()) return true;
+				const q = elementFilter.toLowerCase();
+				return (
+					el.text.toLowerCase().includes(q) ||
+					el.contentDesc.toLowerCase().includes(q) ||
+					el.resourceId.toLowerCase().includes(q)
+				);
+			})
+	);
 
 	async function loadUiElements() {
 		if (serverId == null || !deviceId) return;
@@ -46,6 +77,7 @@
 			uiElements = res.elements ?? [];
 			elementsDeviceWidth = res.deviceWidth || deviceWidth;
 			elementsDeviceHeight = res.deviceHeight || deviceHeight;
+			hoveredIdx = null;
 			if (uiElements.length === 0) {
 				toast.info('클릭 가능한 요소를 찾지 못했습니다 (게임/DRM 화면일 수 있음)');
 			}
@@ -63,6 +95,8 @@
 			loadUiElements();
 		} else {
 			uiElements = [];
+			hoveredIdx = null;
+			elementFilter = '';
 		}
 	}
 
@@ -83,6 +117,38 @@
 		return `left:${left}px; top:${top}px; width:${w}px; height:${h}px;`;
 	}
 
+	// 요소 면적(디바이스 픽셀). 겹친 박스 중 최소 면적 우선 선택에 사용.
+	function elementArea(el: UIElement): number {
+		const [x1, y1, x2, y2] = el.bounds;
+		return Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+	}
+
+	// 오버레이 레이어 클릭 → 클릭 지점(디바이스 픽셀)을 포함하는 요소 중 가장 작은 것 선택.
+	// 겹쳐도 사용자가 조준한 작은 버튼이 잡히도록 한다.
+	function onOverlayClick(e: MouseEvent) {
+		const vr = getVideoRect();
+		const dw = elementsDeviceWidth || deviceWidth;
+		const dh = elementsDeviceHeight || deviceHeight;
+		if (!vr || dw <= 0 || dh <= 0) return;
+		// 화면 좌표 → 디바이스 픽셀
+		const dx = ((e.clientX - vr.left) / vr.width) * dw;
+		const dy = ((e.clientY - vr.top) / vr.height) * dh;
+
+		let best: UIElement | null = null;
+		let bestArea = Infinity;
+		for (const el of uiElements) {
+			const [x1, y1, x2, y2] = el.bounds;
+			if (dx >= x1 && dx <= x2 && dy >= y1 && dy <= y2) {
+				const area = elementArea(el);
+				if (area < bestArea) {
+					best = el;
+					bestArea = area;
+				}
+			}
+		}
+		if (best) pickElement(best);
+	}
+
 	function pickElement(el: UIElement) {
 		onSelectElement?.({
 			resourceId: el.resourceId,
@@ -91,8 +157,7 @@
 			x: el.centerX,
 			y: el.centerY
 		});
-		const label = el.text || el.resourceId || el.contentDesc || 'element';
-		toast.success(`요소 추가: ${label}`);
+		toast.success(`요소 추가: ${selectorKind(el)}=${elementLabel(el)}`);
 	}
 
 	let videoEl: HTMLVideoElement;
@@ -371,7 +436,7 @@
 </script>
 
 <Sheet.Root bind:open>
-	<Sheet.Content side="right" class="w-[400px] flex flex-col max-h-[100dvh]">
+	<Sheet.Content side="right" class="{elementMode ? 'w-[640px]' : 'w-[400px]'} flex flex-col max-h-[100dvh] transition-[width]">
 		<Sheet.Header>
 			<Sheet.Title class="text-sm flex items-center gap-2">
 				디바이스 화면
@@ -393,47 +458,113 @@
 					<span class="ml-2 text-xs text-muted-foreground">연결 중... (2~3초 소요)</span>
 				</div>
 			{:else if connected}
-				<!-- Video element (요소 선택 모드일 때 오버레이 박스 겹침) -->
-				<div
-					class="relative flex-1 flex items-center justify-center w-full overflow-hidden"
-					style="max-height: calc(100vh - 10rem);"
-				>
-					<!-- svelte-ignore a11y_media_has_caption -->
-					<video
-						id="agent-screen-video"
-						bind:this={videoEl}
-						class="max-w-full max-h-full border rounded bg-black {elementMode ? 'cursor-crosshair' : 'cursor-pointer'}"
-						style="aspect-ratio: {deviceWidth}/{deviceHeight};"
-						autoplay
-						muted
-						playsinline
-						onmousedown={elementMode ? undefined : handleMouseDown}
-						onmouseup={elementMode ? undefined : handleMouseUp}
-						onmousemove={elementMode ? undefined : handleMouseMove}
-						onwheel={elementMode ? undefined : handleWheel}
-						oncontextmenu={(e) => e.preventDefault()}
-					></video>
+				<div class="flex-1 flex w-full gap-2 overflow-hidden" style="max-height: calc(100vh - 10rem);">
+					<!-- Video element (요소 선택 모드일 때 오버레이 박스 겹침) -->
+					<div class="relative flex-1 flex items-center justify-center overflow-hidden">
+						<!-- svelte-ignore a11y_media_has_caption -->
+						<video
+							id="agent-screen-video"
+							bind:this={videoEl}
+							class="max-w-full max-h-full border rounded bg-black {elementMode ? 'cursor-crosshair' : 'cursor-pointer'}"
+							style="aspect-ratio: {deviceWidth}/{deviceHeight};"
+							autoplay
+							muted
+							playsinline
+							onmousedown={elementMode ? undefined : handleMouseDown}
+							onmouseup={elementMode ? undefined : handleMouseUp}
+							onmousemove={elementMode ? undefined : handleMouseMove}
+							onwheel={elementMode ? undefined : handleWheel}
+							oncontextmenu={(e) => e.preventDefault()}
+						></video>
+
+						{#if elementMode}
+							<!-- 요소 오버레이 레이어: video 레터박스 rect 기준 절대배치 -->
+							{@const vr = getVideoRect()}
+							{#if vr}
+								{@const wrap = videoEl?.parentElement?.getBoundingClientRect()}
+								<!-- 하이라이트 박스 (비인터랙티브) — hover 된 것만 진하게 -->
+								<div
+									class="absolute pointer-events-none"
+									style="left:{vr.left - (wrap?.left ?? 0)}px; top:{vr.top - (wrap?.top ?? 0)}px; width:{vr.width}px; height:{vr.height}px;"
+								>
+									{#each uiElements as el, i (i)}
+										<div
+											class="absolute rounded-sm border-2 transition-colors {hoveredIdx === i
+												? 'border-fuchsia-500 bg-fuchsia-400/30'
+												: 'border-fuchsia-500/40 bg-fuchsia-400/5'}"
+											style={elementBoxStyle(el)}
+										></div>
+									{/each}
+									{#if hoveredIdx !== null && uiElements[hoveredIdx]}
+										<!-- hover 툴팁: 셀렉터 종류 + 값 -->
+										{@const he = uiElements[hoveredIdx]}
+										<div
+											class="absolute z-10 pointer-events-none rounded bg-black/85 text-white text-[10px] px-1.5 py-1 max-w-[200px] leading-tight"
+											style="left:{(he.bounds[0] * vr.width) / (elementsDeviceWidth || deviceWidth)}px; top:{Math.max(0, (he.bounds[1] * vr.height) / (elementsDeviceHeight || deviceHeight) - 26)}px;"
+										>
+											<span class="text-fuchsia-300">{selectorKind(he)}</span> · {elementLabel(he)}
+										</div>
+									{/if}
+								</div>
+								<!-- 클릭 캐처 레이어 — 클릭 지점의 최소 면적 박스 선택 (오조준 방지) -->
+								<button
+									type="button"
+									aria-label="요소 선택 오버레이"
+									class="absolute cursor-crosshair"
+									style="left:{vr.left - (wrap?.left ?? 0)}px; top:{vr.top - (wrap?.top ?? 0)}px; width:{vr.width}px; height:{vr.height}px; background:transparent;"
+									onclick={onOverlayClick}
+								></button>
+							{/if}
+						{/if}
+					</div>
 
 					{#if elementMode}
-						<!-- 요소 오버레이 레이어: 각 박스는 video 레터박스 rect 기준 절대배치 -->
-						{@const vr = getVideoRect()}
-						{#if vr}
-							{@const wrap = videoEl?.parentElement?.getBoundingClientRect()}
-							<div
-								class="absolute pointer-events-none"
-								style="left:{vr.left - (wrap?.left ?? 0)}px; top:{vr.top - (wrap?.top ?? 0)}px; width:{vr.width}px; height:{vr.height}px;"
-							>
-								{#each uiElements as el, i (i)}
+						<!-- 사이드 요소 리스트 패널 -->
+						<div class="w-52 shrink-0 flex flex-col border rounded bg-background/50 overflow-hidden">
+							<div class="p-1.5 border-b space-y-1">
+								<div class="flex items-center justify-between">
+									<span class="text-[10px] font-medium text-muted-foreground">요소 {uiElements.length}개</span>
+									<button
+										onclick={loadUiElements}
+										disabled={loadingElements}
+										class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50"
+										title="요소 목록 새로고침"
+									>
+										<RefreshCwIcon class="size-3 {loadingElements ? 'animate-spin' : ''}" /> 새로고침
+									</button>
+								</div>
+								<input
+									bind:value={elementFilter}
+									placeholder="검색 (text/id/desc)"
+									class="w-full border rounded px-1.5 py-1 text-[10px] bg-background"
+								/>
+							</div>
+							<div class="flex-1 overflow-y-auto p-1 space-y-0.5">
+								{#each filteredElements as { el, idx } (idx)}
 									<button
 										type="button"
-										class="absolute pointer-events-auto border-2 border-fuchsia-500/70 bg-fuchsia-400/10 hover:bg-fuchsia-400/30 rounded-sm transition-colors"
-										style={elementBoxStyle(el)}
-										title={el.text || el.resourceId || el.contentDesc}
+										class="w-full text-left rounded px-1.5 py-1 text-[10px] leading-tight transition-colors {hoveredIdx === idx
+											? 'bg-fuchsia-100 dark:bg-fuchsia-950'
+											: 'hover:bg-muted'}"
+										onmouseenter={() => (hoveredIdx = idx)}
+										onmouseleave={() => (hoveredIdx = null)}
 										onclick={() => pickElement(el)}
-									></button>
+									>
+										<div class="flex items-center gap-1">
+											<span class="shrink-0 rounded bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400 px-1 text-[8px] font-medium">{selectorKind(el)}</span>
+											<span class="truncate font-medium">{elementLabel(el)}</span>
+										</div>
+										{#if el.resourceId && (el.text || el.contentDesc)}
+											<div class="truncate text-muted-foreground text-[9px] font-mono">{el.resourceId.split('/').pop()}</div>
+										{/if}
+									</button>
+								{:else}
+									<p class="text-[10px] text-muted-foreground text-center py-4">
+										{loadingElements ? '불러오는 중...' : elementFilter ? '검색 결과 없음' : '요소 없음'}
+									</p>
 								{/each}
 							</div>
-						{/if}
+						</div>
 					{/if}
 				</div>
 
@@ -457,16 +588,6 @@
 						>
 							<MousePointerClickIcon class="size-3.5" /> 요소 선택
 						</button>
-						{#if elementMode}
-							<button
-								onclick={loadUiElements}
-								disabled={loadingElements}
-								class="inline-flex items-center gap-1 rounded border px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
-								title="요소 목록 새로고침"
-							>
-								<RefreshCwIcon class="size-3.5 {loadingElements ? 'animate-spin' : ''}" />
-							</button>
-						{/if}
 					{/if}
 					<div class="w-px h-4 bg-border"></div>
 					<button onclick={stopAndClose} class="inline-flex items-center gap-1 rounded border border-destructive/50 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10">
