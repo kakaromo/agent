@@ -31,8 +31,14 @@ func buildBenchmarkSummary(ctx context.Context, agent *DeviceAgentServer, jobID 
 	if err != nil {
 		return "", nil // 메모리에 없으면 skip
 	}
-	if len(resp.GetResults()) == 0 {
-		return "", nil
+	return buildBenchmarkSummaryFrom(jobID, resp), nil
+}
+
+// buildBenchmarkSummaryFrom — 이미 fetch 한 결과를 summary JSON 으로 변환.
+// 결과가 없으면 빈 문자열.
+func buildBenchmarkSummaryFrom(jobID string, resp *pb.GetBenchmarkResultResponse) string {
+	if resp == nil || len(resp.GetResults()) == 0 {
+		return ""
 	}
 	devices := make([]map[string]any, 0, len(resp.GetResults()))
 	for _, br := range resp.GetResults() {
@@ -66,9 +72,9 @@ func buildBenchmarkSummary(ctx context.Context, agent *DeviceAgentServer, jobID 
 		"devices": devices,
 	})
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return string(data), nil
+	return string(data)
 }
 
 // trace summary: totalEvents, durationSeconds, 주요 latency (dtoc) min/max/avg/p99/p999, cmd top-N.
@@ -100,12 +106,14 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 		"durationSeconds":   s.GetDurationSeconds(),
 		"readTotalBytes":    s.GetReadTotalBytes(),
 		"writeTotalBytes":   s.GetWriteTotalBytes(),
+		"discardTotalBytes": s.GetDiscardTotalBytes(), // 워크로드 컨텍스트 DISCARD 해석용 (TRIM/캐시 정리)
 		"continuousRatio":   s.GetContinuousRatio(),
 		"alignedRatio":      s.GetAlignedRatio(),
 		"sendCount":         s.GetSendCount(),
 		"dtoc":              latencyStatsToMap(s.GetDtoc()),
 		"ctod":              latencyStatsToMap(s.GetCtod()),
 		"ctoc":              latencyStatsToMap(s.GetCtoc()),
+		"qd":                latencyStatsToMap(s.GetQd()), // QD 병렬성 해석용
 		"cmdTop":            cmds,
 	}
 	data, err := json.Marshal(summary)

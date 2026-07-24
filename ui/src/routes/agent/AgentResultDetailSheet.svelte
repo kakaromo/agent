@@ -15,7 +15,7 @@
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import ExecutionMiniCanvas from './scenario-canvas/ExecutionMiniCanvas.svelte';
-	import { AgentResultRenderer } from './agent-result/index.js';
+	import { AgentResultRenderer, WorkloadContextBanner } from './agent-result/index.js';
 
 	interface Props {
 		open: boolean;
@@ -71,6 +71,11 @@
 		// Final result
 		if (result) { for (const r of result.results) { if (r.rawOutput) addFromText(r.rawOutput); } }
 
+		// 3. 영속화된 trace job (만료된 잡 — live/result 둘 다 없을 때)
+		if (mappings.length === 0 && persistedTraceJobs.length > 0) {
+			return persistedTraceJobs;
+		}
+
 		return mappings;
 	}
 
@@ -112,6 +117,14 @@
 	let selectedDevice = $state<string | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let executionConfig = $state<{ steps?: any[]; loops?: any[] } | null>(null);
+	let workloadNote = $state<string | null>(null);
+	// DB 에 영구 저장된 metrics summary — 만료된(agent 메모리에서 사라진) 잡의
+	// 워크로드 컨텍스트 해석에 fallback 으로 사용.
+	let persistedSummary = $state<Record<string, number> | null>(null);
+	// DB 에 영구 저장된 trace job 매핑 — live 결과가 없는 만료된 잡에서도 기존 trace UI 진입용.
+	let persistedTraceJobs = $state<TraceJobMapping[]>([]);
+	// 만료된 잡의 device id fallback (execution.deviceIds JSON 의 첫 device).
+	let persistedDeviceId = $state<string>('');
 
 	$effect(() => {
 		if (open && serverId != null && jobId != null) { loadDetail(); loadExecutionConfig(); }
@@ -121,10 +134,41 @@
 
 	async function loadExecutionConfig() {
 		if (!jobId) return;
+		executionConfig = null;
+		workloadNote = null;
+		persistedSummary = null;
+		persistedTraceJobs = [];
+		persistedDeviceId = '';
 		try {
 			const exec = await fetchExecutionByJobId(jobId);
 			if (exec.config) {
 				executionConfig = JSON.parse(exec.config);
+			}
+			workloadNote = exec.workloadNote ?? null;
+			persistedTraceJobs = Array.isArray(exec.traceJobs) ? exec.traceJobs : [];
+			if (exec.deviceIds) {
+				try {
+					const ids = JSON.parse(exec.deviceIds);
+					if (Array.isArray(ids) && ids.length > 0) persistedDeviceId = String(ids[0]);
+				} catch { /* deviceIds 가 JSON 이 아닐 수 있음 */ }
+			}
+			if (exec.resultSummary) {
+				try {
+					const parsed = JSON.parse(exec.resultSummary);
+					// flat 숫자 + 1-depth 중첩 latency 객체(dtoc/qd/ctoc/ctod)를 {key}_{stat} 로 편다.
+					// (trace summary 는 dtoc:{p99,avg,...} / qd:{max,...} 형태라 flat 화 안 하면 배너가 못 읽음)
+					const flat: Record<string, number> = {};
+					for (const [k, v] of Object.entries(parsed)) {
+						if (typeof v === 'number' && isFinite(v)) {
+							flat[k] = v;
+						} else if (v && typeof v === 'object' && !Array.isArray(v)) {
+							for (const [sk, sv] of Object.entries(v as Record<string, unknown>)) {
+								if (typeof sv === 'number' && isFinite(sv)) flat[`${k}_${sk}`] = sv;
+							}
+						}
+					}
+					persistedSummary = Object.keys(flat).length > 0 ? flat : null;
+				} catch { persistedSummary = null; }
 			}
 		} catch { /* DB에 없을 수 있음 */ }
 	}
@@ -223,6 +267,14 @@
 	let effectiveMetrics = $derived.by(() => {
 		if (selectedResult) return selectedResult.metrics;
 		return Object.keys(liveMetricsCache).length > 0 ? liveMetricsCache : {};
+	});
+
+	// 워크로드 컨텍스트 배너용 metrics — 라이브 결과가 없으면(만료된 잡) DB summary 로 fallback.
+	// (full 결과 렌더러는 step prefix 가 필요해 effectiveMetrics 를 그대로 쓰지만,
+	//  배너 해석은 flat metric 만으로 충분해서 summary fallback 이 가능.)
+	let bannerMetrics = $derived.by(() => {
+		if (Object.keys(effectiveMetrics).length > 0) return effectiveMetrics;
+		return persistedSummary ?? {};
 	});
 
 	// ══════════════════════════════════════════
@@ -751,6 +803,33 @@
 			{#if loading}
 				<div class="flex items-center justify-center py-16"><LoaderIcon class="size-6 animate-spin text-muted-foreground" /></div>
 			{:else if jobStatus}
+				<!-- 워크로드 컨텍스트: 무엇이 돌았고 왜 이렇게 동작했나 (모든 job 공통) -->
+				{#if Object.keys(bannerMetrics).length > 0 || (executionConfig?.steps && executionConfig.steps.length > 0)}
+					<WorkloadContextBanner
+						{jobId}
+						metrics={bannerMetrics}
+						{executionConfig}
+						{workloadNote}
+					/>
+				{/if}
+
+				<!-- 전체 trace 확인 CTA — 이 job 에 trace 가 있으면 기존 trace UI(패턴/QD/CPU/latency)로 바로 진입 -->
+				{#if allTraceJobMappings.length > 0 && onViewTrace}
+					<button
+						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId))}
+						class="w-full flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-left hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
+					>
+						<ScanSearchIcon class="size-4 text-blue-600 shrink-0" />
+						<div class="min-w-0">
+							<div class="text-xs font-semibold text-blue-700 dark:text-blue-400">전체 trace 확인</div>
+							<div class="text-[10px] text-muted-foreground">
+								I/O 패턴 · QD · CPU · latency 분포를 한눈에 ({allTraceJobMappings.length}개 trace)
+							</div>
+						</div>
+						<span class="ml-auto text-[10px] text-blue-600 shrink-0">→</span>
+					</button>
+				{/if}
+
 				<!-- Device statuses -->
 				<div>
 					<h3 class="text-xs font-semibold mb-1">Devices</h3>
@@ -939,8 +1018,8 @@
 						</div>
 					{/if}
 
-					<!-- 통합 결과 렌더러: tool 자동 감지 + step별 탭 -->
-					<AgentResultRenderer metrics={effectiveMetrics} />
+					<!-- 통합 결과 렌더러: step별 탭 + GenPerf-스타일 cycle 비교 -->
+					<AgentResultRenderer metrics={effectiveMetrics} executionConfig={executionConfig} />
 				{:else if isRunning}
 					<div class="text-center text-xs text-muted-foreground py-8">
 						<LoaderIcon class="size-4 animate-spin mx-auto mb-2" />

@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -94,6 +95,32 @@ func registerExecutionRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 			return
 		}
 
+		// PUT /api/agent/executions/by-job-id/{jobId}/workload-note
+		// body: {"note": "..."} — 빈 문자열이면 규칙 자동 해석으로 되돌림.
+		if len(parts) == 3 && parts[0] == "by-job-id" && parts[2] == "workload-note" {
+			if r.Method != http.MethodPut {
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				Note string `json:"note"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+				return
+			}
+			if err := db.UpdateJobExecutionWorkloadNote(r.Context(), parts[1], body.Note); err != nil {
+				if errors.Is(err, sqlitedb.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "execution not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "workloadNote": body.Note})
+			return
+		}
+
 		// GET /api/agent/executions/by-job-id/{jobId}
 		if len(parts) == 2 && parts[0] == "by-job-id" {
 			if r.Method != http.MethodGet {
@@ -180,7 +207,22 @@ func executionToMap(e *sqlitedb.JobExecution) map[string]any {
 		"traceParsedAt":       nullTime(e.TraceParsedAt),
 		"traceParseState":     nullString(e.TraceParseState),
 		"traceParseError":     nullString(e.TraceParseError),
+		"workloadNote":        nullString(e.WorkloadNote),
+		"traceJobs":           nullJSONArray(e.TraceJobs),
 	}
+}
+
+// nullJSONArray — trace_jobs 처럼 JSON array 문자열로 저장된 컬럼을 파싱된 배열로 반환.
+// 파싱 실패/미설정이면 nil (FE 에서 없는 것으로 처리).
+func nullJSONArray(s sql.NullString) any {
+	if !s.Valid || s.String == "" {
+		return nil
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(s.String), &arr); err != nil {
+		return nil
+	}
+	return arr
 }
 
 func nullString(s sql.NullString) any {

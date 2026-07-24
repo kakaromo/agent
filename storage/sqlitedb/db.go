@@ -91,7 +91,9 @@ func (db *DB) migrate() error {
 			trace_parquet_keys TEXT,
 			trace_parsed_at TEXT,
 			trace_parse_state TEXT,
-			trace_parse_error TEXT
+			trace_parse_error TEXT,
+			workload_note TEXT,
+			trace_jobs TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_job_executions_server_id ON job_executions(server_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_job_executions_state ON job_executions(state)`,
@@ -171,6 +173,20 @@ func (db *DB) migrate() error {
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			return fmt.Errorf("migrate: %w (stmt: %s)", err, firstLine(s))
+		}
+	}
+
+	// 기존 DB 에 신규 컬럼을 추가 (CREATE TABLE IF NOT EXISTS 는 스키마 변경을 반영 못함).
+	// 이미 컬럼이 있으면 "duplicate column" 에러가 나므로 무시한다.
+	addColumns := []string{
+		// job 상세 "무엇이 돌았고 왜 이렇게 동작했나" 워크로드 컨텍스트 — 사용자 메모 오버라이드
+		`ALTER TABLE job_executions ADD COLUMN workload_note TEXT`,
+		// trace job 매핑(JSON) 영속화 — 만료된 job 도 job 상세에서 기존 trace UI 로 진입 가능
+		`ALTER TABLE job_executions ADD COLUMN trace_jobs TEXT`,
+	}
+	for _, s := range addColumns {
+		if _, err := db.Exec(s); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate(add column): %w (stmt: %s)", err, firstLine(s))
 		}
 	}
 	return nil

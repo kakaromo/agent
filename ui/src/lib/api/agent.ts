@@ -454,6 +454,10 @@ export interface JobExecutionRecord {
 	traceParsedAt?: string | null;
 	traceParseState?: string | null; // IDLE|UPLOADING|UPLOADED|PARSING|PARSED|PARSE_FAILED
 	traceParseError?: string | null;
+	// 워크로드 컨텍스트 — 사용자가 남긴 "무엇이 돌았고 왜 이렇게 동작했나" 메모 (규칙 자동 해석 오버라이드)
+	workloadNote?: string | null;
+	// 이 job 에 연결된 trace job 매핑 (영속화) — 만료된 job 도 기존 trace UI 로 진입 가능
+	traceJobs?: TraceJobMapping[] | null;
 }
 
 export interface JobExecutionPage {
@@ -481,6 +485,11 @@ export function fetchExecutions(params: {
 
 export function fetchExecutionByJobId(jobId: string): Promise<JobExecutionRecord> {
 	return get(`/agent/executions/by-job-id/${encodeURIComponent(jobId)}`);
+}
+
+/** 워크로드 컨텍스트 메모 저장. 빈 문자열이면 규칙 자동 해석으로 되돌린다. */
+export function updateWorkloadNote(jobId: string, note: string): Promise<{ success: boolean; workloadNote: string }> {
+	return put(`/agent/executions/by-job-id/${encodeURIComponent(jobId)}/workload-note`, { note });
 }
 
 export function deleteExecution(id: number): Promise<{ success: boolean }> {

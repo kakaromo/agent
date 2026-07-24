@@ -59,9 +59,9 @@
 	}));
 
 	function fmtBytes(b: number): string {
-		if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(2) + ' GiB';
-		if (b >= 1_048_576) return (b / 1_048_576).toFixed(2) + ' MiB';
-		if (b >= 1024) return (b / 1024).toFixed(1) + ' KiB';
+		if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(2) + ' GB';
+		if (b >= 1_048_576) return (b / 1_048_576).toFixed(2) + ' MB';
+		if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
 		return b.toFixed(0) + ' B';
 	}
 	function fmtNum(v: number, digits = 2): string {
@@ -134,8 +134,8 @@
 	}
 
 	const throughputChart = $derived(hasCycles
-		? buildMultiLineChart('throughput_bps', 'MiB/s')
-		: buildBar('throughputMBs', 'MiB/s', '#5470c6'));
+		? buildMultiLineChart('throughput_bps', 'MB/s')
+		: buildBar('throughputMBs', 'MB/s', '#5470c6'));
 	const iopsChart = $derived(hasCycles
 		? buildMultiLineChart('iops', 'IOPS')
 		: buildBar('iops', 'IOPS', '#fc8452'));
@@ -165,7 +165,7 @@
 		{ accessorKey: 'bytes', header: 'Bytes' },
 		{ accessorKey: 'ops', header: 'Ops' },
 		{ accessorKey: 'durationMs', header: 'Duration (ms)' },
-		{ accessorKey: 'throughputMBs', header: 'Throughput (MiB/s)' },
+		{ accessorKey: 'throughputMBs', header: 'Throughput (MB/s)' },
 		{ accessorKey: 'iops', header: 'IOPS' },
 		{ accessorKey: 'errors', header: 'Errors' },
 	];
@@ -189,7 +189,7 @@
 			</div>
 			<div>
 				<div class="text-[9px] text-muted-foreground">Throughput</div>
-				<div class="text-xs font-semibold">{fmtNum(totals.throughputMBs, 2)} MiB/s</div>
+				<div class="text-xs font-semibold">{fmtNum(totals.throughputMBs, 2)} MB/s</div>
 			</div>
 			<div>
 				<div class="text-[9px] text-muted-foreground">IOPS</div>
@@ -203,7 +203,7 @@
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 			{#if throughputChart}
 				<div>
-					<div class="text-[10px] text-muted-foreground font-medium mb-1">Throughput per Thread (MiB/s)</div>
+					<div class="text-[10px] text-muted-foreground font-medium mb-1">Throughput per Thread (MB/s)</div>
 					<PerfChart option={throughputChart} height="200px" />
 				</div>
 			{/if}
