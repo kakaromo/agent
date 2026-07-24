@@ -804,13 +804,16 @@
 				<div class="flex items-center justify-center py-16"><LoaderIcon class="size-6 animate-spin text-muted-foreground" /></div>
 			{:else if jobStatus}
 				<!-- 워크로드 컨텍스트: 무엇이 돌았고 왜 이렇게 동작했나 (모든 job 공통) -->
+				<!-- {#key jobId}: job 전환 시 배너를 재생성해 내부 localNote(메모) stale 방지 -->
 				{#if Object.keys(bannerMetrics).length > 0 || (executionConfig?.steps && executionConfig.steps.length > 0)}
-					<WorkloadContextBanner
-						{jobId}
-						metrics={bannerMetrics}
-						{executionConfig}
-						{workloadNote}
-					/>
+					{#key jobId}
+						<WorkloadContextBanner
+							{jobId}
+							metrics={bannerMetrics}
+							{executionConfig}
+							{workloadNote}
+						/>
+					{/key}
 				{/if}
 
 				<!-- 전체 trace 확인 CTA — 이 job 에 trace 가 있으면 기존 trace UI(패턴/QD/CPU/latency)로 바로 진입 -->
