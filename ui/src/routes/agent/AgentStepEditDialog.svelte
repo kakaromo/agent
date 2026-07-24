@@ -48,6 +48,11 @@
 		elementMatchMode?: string;    // exact | contains | prefix | suffix | regex
 		elementIndex?: number;
 		elementContainerId?: string;
+		// scroll 스텝 (유저처럼 피드 반복 스크롤)
+		scrollDirection?: string;     // down | up
+		scrollCount?: number;
+		scrollPause?: number;         // 각 스크롤 사이 대기(초)
+		scrollDuration?: number;      // 스와이프 속도(ms) — 작을수록 빠름
 	}
 
 	interface Props {
@@ -176,6 +181,7 @@
 							<option value="app_macro">App Macro</option>
 							<option value="tap_element">Tap Element</option>
 							<option value="text">Text Input</option>
+							<option value="scroll">Scroll</option>
 							<option value="install_apk">Install APK</option>
 							<option value="uninstall_apk">Uninstall APK</option>
 						</select>
@@ -542,6 +548,55 @@
 							placeholder="입력할 문자열 (input text)"
 						/>
 						<p class="{captionMuted}">공백은 자동으로 %s 로 변환됩니다. 특수문자는 이스케이프됩니다.</p>
+					</div>
+
+				{:else if local.type === 'scroll'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							유저처럼 피드를 반복 스크롤합니다. tap_element 패턴과 함께 쓰면 "스크롤하다 영상 하나 열기" 같은 실사용 흐름을 재현합니다.
+						</p>
+						<div class="flex gap-2">
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">방향</label>
+								<select
+									value={local.scrollDirection ?? 'down'}
+									onchange={(e) => { if (local) local.scrollDirection = (e.target as HTMLSelectElement).value; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								>
+									<option value="down">아래로 (down)</option>
+									<option value="up">위로 (up)</option>
+								</select>
+							</div>
+							<div class="space-y-1 w-24">
+								<label class="{sectionLabel}">횟수</label>
+								<input
+									type="number" min="1"
+									value={local.scrollCount ?? 3}
+									oninput={(e) => { if (local) local.scrollCount = Number((e.target as HTMLInputElement).value) || 1; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+						</div>
+						<div class="flex gap-2">
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">스크롤 간격 (초)</label>
+								<input
+									type="number" min="0" step="0.5"
+									value={local.scrollPause ?? 1}
+									oninput={(e) => { if (local) local.scrollPause = Number((e.target as HTMLInputElement).value) || 0; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">속도 (ms, 작을수록 빠름)</label>
+								<input
+									type="number" min="50"
+									value={local.scrollDuration ?? 400}
+									oninput={(e) => { if (local) local.scrollDuration = Number((e.target as HTMLInputElement).value) || 400; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+						</div>
 					</div>
 
 				{:else}

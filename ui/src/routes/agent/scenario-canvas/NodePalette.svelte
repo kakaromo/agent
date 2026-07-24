@@ -14,6 +14,7 @@
 	import PackageMinusIcon from '@lucide/svelte/icons/package-minus';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import TypeIcon from '@lucide/svelte/icons/type';
+	import MouseIcon from '@lucide/svelte/icons/mouse';
 
 	const stepTypes = [
 		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
@@ -26,6 +27,7 @@
 		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
 		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
 		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },
+		{ type: 'scroll', label: 'Scroll', icon: MouseIcon, desc: '피드 스크롤' },
 		{ type: 'install_apk', label: 'Install APK', icon: DownloadIcon, desc: 'APK 설치' },
 		{ type: 'uninstall_apk', label: 'Uninstall APK', icon: PackageMinusIcon, desc: '앱 제거' }
 	];

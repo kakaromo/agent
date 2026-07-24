@@ -73,6 +73,7 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
 	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
 	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
+	scroll: { bg: 'bg-sky-100', text: 'text-sky-700' },
 	install_apk: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
 	uninstall_apk: { bg: 'bg-rose-100', text: 'text-rose-700' }
 };
@@ -93,6 +94,7 @@ export function stepSummary(form: StepForm): string {
 			return form.elementIndex ? `${mode} [${form.elementIndex}]` : mode;
 		}
 		case 'text': return form.inputText ? `"${form.inputText.slice(0, 20)}"` : 'text';
+		case 'scroll': return `${form.scrollDirection === 'up' ? '위로' : '아래로'} ×${form.scrollCount ?? 3}`;
 		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
 		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
 		default: return form.type;

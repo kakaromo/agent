@@ -649,6 +649,30 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			return "", nil, fmt.Errorf("text: %w", err)
 		}
 		return fmt.Sprintf("TEXT|input=%s|success=%t", step.Params["input_text"], resp.Success), nil, nil
+	case "scroll":
+		// 유저처럼 피드 반복 스크롤 (워크로드 재현)
+		if o.macroMgr == nil {
+			return "", nil, fmt.Errorf("macro manager not configured")
+		}
+		ev := &pb.MacroEvent{Type: "scroll", Direction: step.Params["direction"]}
+		if v, err := strconv.Atoi(step.Params["count"]); err == nil {
+			ev.MaxScrolls = int32(v)
+		}
+		if v, err := strconv.Atoi(step.Params["pause"]); err == nil {
+			ev.ScrollPause = int32(v)
+		}
+		if v, err := strconv.Atoi(step.Params["duration"]); err == nil {
+			ev.Duration = int32(v)
+		}
+		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
+			DeviceId: deviceID,
+			Events:   []*pb.MacroEvent{ev},
+		})
+		if err != nil {
+			return "", nil, fmt.Errorf("scroll: %w", err)
+		}
+		return fmt.Sprintf("SCROLL|dir=%s|count=%d|success=%t",
+			step.Params["direction"], ev.MaxScrolls, resp.Success), nil, nil
 	case "condition":
 		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
 		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)

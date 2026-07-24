@@ -120,6 +120,13 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 			}
 			r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d %d", x1, y1, x2, y2, dur))
 
+		case "scroll":
+			// 유저처럼 피드를 반복 스크롤한다 (워크로드 재현).
+			// direction: "down"(기본, 아래로 넘김) | "up"
+			// max_scrolls: 반복 횟수(기본 1), scroll_pause: 각 스크롤 사이 대기 초(기본 1)
+			// duration: 스와이프 지속시간 ms — 작을수록 빠름/플링, 클수록 천천히(기본 400)
+			r.doScroll(ctx, ev)
+
 		case "key":
 			r.dev.Shell(ctx, fmt.Sprintf("input keyevent %d", ev.Keycode))
 
@@ -330,6 +337,45 @@ func (r *Replayer) dumpUITexts(ctx context.Context) ([]string, error) {
 		}
 	}
 	return texts, nil
+}
+
+// doScroll 은 유저의 피드 스크롤 행동을 재현한다 — 지정 방향으로 max_scrolls 회,
+// 각 스크롤 사이 scroll_pause 만큼 멈춘다. duration 으로 스와이프 속도를 조절한다.
+// scroll_capture 와 달리 UI 덤프/파싱은 하지 않는다(순수 워크로드 재현).
+func (r *Replayer) doScroll(ctx context.Context, ev *pb.MacroEvent) {
+	count := int(ev.MaxScrolls)
+	if count <= 0 {
+		count = 1
+	}
+	pause := time.Duration(ev.ScrollPause) * time.Second
+	if pause <= 0 {
+		pause = 1 * time.Second
+	}
+	dur := ev.Duration
+	if dur <= 0 {
+		dur = 400
+	}
+
+	targetWidth, targetHeight := getDeviceResolution(ctx, r.dev.Serial)
+	centerX := targetWidth / 2
+	// 아래로 넘기려면 손가락을 아래→위로 스와이프. up 이면 반대.
+	startY := targetHeight * 3 / 4
+	endY := targetHeight / 4
+	if ev.Direction == "up" {
+		startY, endY = endY, startY
+	}
+
+	for i := 0; i < count; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d %d", centerX, startY, centerX, endY, dur))
+		if i < count-1 {
+			time.Sleep(pause)
+		}
+	}
 }
 
 // scrollCapture performs scroll + uiautomator dump capture repeatedly.

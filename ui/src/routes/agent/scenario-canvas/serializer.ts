@@ -276,6 +276,13 @@ export function protoToCanvas(
 				form.inputText = params.input_text ?? '';
 				form.formParams = {};
 				form.extraText = '';
+			} else if (s.type === 'scroll') {
+				form.scrollDirection = params.direction ?? 'down';
+				form.scrollCount = params.count != null ? Number(params.count) : 3;
+				form.scrollPause = params.pause != null ? Number(params.pause) : 1;
+				form.scrollDuration = params.duration != null ? Number(params.duration) : 400;
+				form.formParams = {};
+				form.extraText = '';
 			}
 
 			// 분기가 있으면 condition의 true/false 타겟에 따라 좌/우 배치
@@ -465,6 +472,16 @@ function buildStepParams(s: StepForm): Record<string, string> {
 	// 텍스트 입력
 	if (s.type === 'text') {
 		return s.inputText ? { input_text: s.inputText } : {};
+	}
+
+	// 스크롤 (유저처럼 피드 반복 스크롤)
+	if (s.type === 'scroll') {
+		return {
+			direction: s.scrollDirection ?? 'down',
+			count: String(s.scrollCount ?? 3),
+			pause: String(s.scrollPause ?? 1),
+			duration: String(s.scrollDuration ?? 400)
+		};
 	}
 
 	// IOTEST: config as JSON in params (independent step type)
