@@ -76,9 +76,17 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 			// 요소를 못 찾으면(빈 트리/게임/DRM 등) 저장된 x,y 좌표로 폴백.
 			tapped := false
 			els, err := DumpUIElements(ctx, r.dev, false)
+			sel := ElementSelector{
+				ResourceID:  ev.ElementResourceId,
+				Text:        ev.ElementText,
+				ContentDesc: ev.ElementContentDesc,
+				MatchMode:   ev.ElementMatchMode,
+				Index:       int(ev.ElementIndex),
+				ContainerID: ev.ElementContainerId,
+			}
 			if err != nil {
 				slog.Warn("tap_element: ui dump failed, using coordinate fallback", "error", err)
-			} else if el := findElementBySelector(els, ev.ElementResourceId, ev.ElementText, ev.ElementContentDesc); el != nil {
+			} else if el := findElement(els, sel); el != nil {
 				// 요소 중심 좌표는 현재 디바이스 해상도 기준이므로 스케일링하지 않는다.
 				r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", el.CenterX, el.CenterY))
 				slog.Info("tap_element: matched element",

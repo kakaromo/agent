@@ -44,6 +44,10 @@
 		elementX?: number | null;
 		elementY?: number | null;
 		inputText?: string;
+		// 패턴 매칭 (동적 콘텐츠 재현)
+		elementMatchMode?: string;    // exact | contains | prefix | suffix | regex
+		elementIndex?: number;
+		elementContainerId?: string;
 	}
 
 	interface Props {
@@ -464,6 +468,46 @@
 								oninput={(e) => { if (local) local.elementContentDesc = (e.target as HTMLInputElement).value; }}
 								class="w-full border rounded px-2 py-1 text-xs bg-background"
 								placeholder="검색 버튼"
+							/>
+						</div>
+						<div class="flex gap-2">
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">매칭 방식</label>
+								<select
+									value={local.elementMatchMode ?? 'exact'}
+									onchange={(e) => { if (local) local.elementMatchMode = (e.target as HTMLSelectElement).value; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								>
+									<option value="exact">정확히 (기본)</option>
+									<option value="contains">포함</option>
+									<option value="prefix">~로 시작</option>
+									<option value="suffix">~로 끝남 (동적 콘텐츠)</option>
+									<option value="regex">정규식</option>
+								</select>
+							</div>
+							<div class="space-y-1 w-24">
+								<label class="{sectionLabel}">N번째</label>
+								<input
+									type="number"
+									min="0"
+									value={local.elementIndex ?? 0}
+									oninput={(e) => { if (local) local.elementIndex = Number((e.target as HTMLInputElement).value) || 0; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+						</div>
+						{#if (local.elementMatchMode ?? 'exact') !== 'exact'}
+							<p class="{captionMuted}">
+								text/content-desc 를 패턴으로 해석합니다. 콘텐츠 값이 바뀌어도 같은 자리의 요소를 재현합니다.
+							</p>
+						{/if}
+						<div class="space-y-1">
+							<label class="{sectionLabel}">컨테이너 Resource ID (선택 — 이 목록 안에서만 검색)</label>
+							<input
+								value={local.elementContainerId ?? ''}
+								oninput={(e) => { if (local) local.elementContainerId = (e.target as HTMLInputElement).value; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+								placeholder="com.google.android.youtube:id/results"
 							/>
 						</div>
 						<div class="flex gap-2">

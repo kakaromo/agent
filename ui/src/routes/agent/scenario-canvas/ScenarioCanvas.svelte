@@ -280,7 +280,8 @@
 			traceEnabled: false, traceType: 'ufs',
 			// 요소 기반 탭 / 텍스트 입력 기본값
 			elementResourceId: '', elementText: '', elementContentDesc: '',
-			elementX: null, elementY: null, inputText: ''
+			elementX: null, elementY: null, inputText: '',
+			elementMatchMode: 'exact', elementIndex: 0, elementContainerId: ''
 		};
 	}
 
@@ -288,6 +289,7 @@
 	// +page.svelte 가 canvas 인스턴스를 bind 해 호출한다.
 	export function addTapElementStep(sel: {
 		resourceId: string; text: string; contentDesc: string; x: number; y: number;
+		matchMode?: string; index?: number; containerId?: string;
 	}) {
 		const form = createDefaultStep('tap_element');
 		form.elementResourceId = sel.resourceId;
@@ -295,6 +297,9 @@
 		form.elementContentDesc = sel.contentDesc;
 		form.elementX = sel.x;
 		form.elementY = sel.y;
+		form.elementMatchMode = sel.matchMode ?? 'exact';
+		form.elementIndex = sel.index ?? 0;
+		form.elementContainerId = sel.containerId ?? '';
 
 		const id = `step-${nodeIdCounter++}`;
 		// 마지막 step 아래에 세로로 쌓는다.

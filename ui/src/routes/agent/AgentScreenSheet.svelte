@@ -19,6 +19,10 @@
 		contentDesc: string;
 		x: number;  // 폴백 좌표 (요소 중심, 디바이스 픽셀)
 		y: number;
+		// 패턴 매칭 (동적 콘텐츠 재현). 콘텐츠성 요소면 자동 채워진다.
+		matchMode?: string;      // "exact" | "contains" | "suffix" | "prefix" | "regex"
+		index?: number;          // 매칭 후보 중 N번째
+		containerId?: string;    // 이 컨테이너 하위에서만 검색
 	}
 
 	interface Props {
@@ -149,15 +153,82 @@
 		if (best) pickElement(best);
 	}
 
+	// ── 콘텐츠 셀렉터 자동 감지 ──
+	// 유튜브 피드/SNS/문자처럼 값이 매번 바뀌는 요소인지 판단한다.
+	// 판단 근거: resource-id 가 없고(구조 앵커 부재) text/desc 가 콘텐츠성일 때.
+	//  - 긴 문자열(> 15자)
+	//  - 알려진 동적 접미사("동영상 재생", "재생목록", "채널로 이동" 등)
+	// 콘텐츠성이면 값 대신 "접미사 패턴 + N번째"를 제안한다.
+	const DYNAMIC_SUFFIXES = ['동영상 재생', '재생목록', '채널로 이동', '님의 스토리', '님, ', '분 전'];
+
+	function looksLikeContent(el: UIElement): boolean {
+		if (el.resourceId) return false; // resource-id 있으면 구조 앵커 — 안정
+		const label = el.text || el.contentDesc;
+		if (!label) return false;
+		if (label.length > 15) return true;
+		return DYNAMIC_SUFFIXES.some((s) => label.includes(s));
+	}
+
+	// 콘텐츠성 요소에서 안정적인 접미사 패턴을 추출한다.
+	// 알려진 접미사가 있으면 그걸, 없으면 마지막 단어 몇 개를 후보로.
+	function suggestSuffix(el: UIElement): string {
+		const label = el.text || el.contentDesc;
+		for (const s of DYNAMIC_SUFFIXES) {
+			const idx = label.indexOf(s);
+			if (idx >= 0) return label.slice(idx); // 접미사부터 끝까지
+		}
+		// fallback: 마지막 공백 기준 뒤쪽 토막 (구조성 꼬리표일 가능성)
+		const parts = label.split(/\s+/);
+		return parts.slice(-2).join(' ');
+	}
+
+	// 패턴 제안 팝오버 상태
+	let pendingEl = $state<UIElement | null>(null);
+	let pendingSuffix = $state('');
+	let pendingIndex = $state(0);
+
 	function pickElement(el: UIElement) {
+		if (looksLikeContent(el)) {
+			// 콘텐츠성 → 바로 저장하지 않고 패턴 제안
+			pendingEl = el;
+			pendingSuffix = suggestSuffix(el);
+			pendingIndex = 0;
+			return;
+		}
+		// 안정적 요소 → 기존대로 정확 매칭 저장
+		emitElement(el, {});
+	}
+
+	// 실제 셀렉터 방출. opts 로 패턴 정보를 덮어쓸 수 있다.
+	function emitElement(
+		el: UIElement,
+		opts: { matchMode?: string; index?: number; suffix?: string }
+	) {
+		const useSuffix = opts.matchMode === 'suffix' && opts.suffix;
 		onSelectElement?.({
 			resourceId: el.resourceId,
-			text: el.text,
-			contentDesc: el.contentDesc,
+			// suffix 모드면 콘텐츠 값 대신 접미사 패턴을 셀렉터로.
+			text: useSuffix ? '' : el.text,
+			contentDesc: useSuffix ? opts.suffix! : el.contentDesc,
 			x: el.centerX,
-			y: el.centerY
+			y: el.centerY,
+			matchMode: opts.matchMode ?? 'exact',
+			index: opts.index ?? 0
 		});
-		toast.success(`요소 추가: ${selectorKind(el)}=${elementLabel(el)}`);
+		const kind = opts.matchMode === 'suffix' ? `패턴(*${opts.suffix})` : `${selectorKind(el)}=${elementLabel(el)}`;
+		toast.success(`요소 추가: ${kind}`);
+	}
+
+	function confirmPattern() {
+		if (!pendingEl) return;
+		emitElement(pendingEl, { matchMode: 'suffix', suffix: pendingSuffix, index: pendingIndex });
+		pendingEl = null;
+	}
+	function confirmExact() {
+		// 사용자가 "정확히 이 값" 을 원하면 콘텐츠 값 그대로 저장.
+		if (!pendingEl) return;
+		emitElement(pendingEl, {});
+		pendingEl = null;
 	}
 
 	let videoEl: HTMLVideoElement;
@@ -605,5 +676,44 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if pendingEl}
+			<!-- 콘텐츠 셀렉터 감지 → 패턴 저장 제안 팝오버 -->
+			<div class="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+				<div class="w-full max-w-sm rounded-lg border bg-background p-3 shadow-lg space-y-2">
+					<div class="flex items-start gap-2">
+						<span class="mt-0.5 shrink-0 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 text-[10px] font-medium">동적 콘텐츠</span>
+						<p class="text-[11px] leading-tight text-muted-foreground">
+							이 요소는 값이 매번 바뀔 수 있습니다(유튜브 영상·피드·목록 등).
+							고정된 <b>패턴</b>으로 저장하면 콘텐츠가 달라져도 재현됩니다.
+						</p>
+					</div>
+					<div class="rounded bg-muted/50 px-2 py-1 text-[10px] font-mono break-all">
+						원본: {elementLabel(pendingEl)}
+					</div>
+					<div class="space-y-1">
+						<label class="text-[10px] font-medium text-muted-foreground">접미사 패턴 (이 꼬리표로 끝나는 요소 매칭)</label>
+						<input
+							bind:value={pendingSuffix}
+							class="w-full border rounded px-2 py-1 text-[11px] bg-background font-mono"
+						/>
+					</div>
+					<div class="space-y-1">
+						<label class="text-[10px] font-medium text-muted-foreground">몇 번째 매칭 (0 = 첫 번째)</label>
+						<input
+							type="number"
+							min="0"
+							bind:value={pendingIndex}
+							class="w-20 border rounded px-2 py-1 text-[11px] bg-background"
+						/>
+					</div>
+					<div class="flex items-center justify-end gap-2 pt-1">
+						<button onclick={() => (pendingEl = null)} class="rounded border px-2.5 py-1 text-[11px] hover:bg-muted">취소</button>
+						<button onclick={confirmExact} class="rounded border px-2.5 py-1 text-[11px] hover:bg-muted" title="이 콘텐츠 값 그대로 저장 (1회용)">정확히 이 값</button>
+						<button onclick={confirmPattern} class="rounded bg-fuchsia-600 text-white px-2.5 py-1 text-[11px] hover:bg-fuchsia-700">패턴으로 저장</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</Sheet.Content>
 </Sheet.Root>

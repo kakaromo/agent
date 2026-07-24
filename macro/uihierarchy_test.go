@@ -65,6 +65,66 @@ func TestFindElementBySelector(t *testing.T) {
 	}
 }
 
+// 동적 피드를 흉내낸 XML — 컨테이너(results) 안에 콘텐츠성 desc 카드 2개.
+const feedXML = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node class="A" resource-id="com.yt:id/root" clickable="false" bounds="[0,0][1440,3120]">
+    <node class="B" resource-id="com.yt:id/results" clickable="false" bounds="[0,300][1440,3000]">
+      <node text="" resource-id="" content-desc="임금님 찜닭 - Shorts 동영상 재생" class="C" clickable="true" bounds="[45,313][705,1303]"></node>
+      <node text="" resource-id="" content-desc="자이로드롭 - Shorts 동영상 재생" class="C" clickable="true" bounds="[735,313][1395,1303]"></node>
+    </node>
+    <node text="" resource-id="com.yt:id/menu_search" content-desc="검색" class="D" clickable="true" bounds="[1300,100][1400,200]"></node>
+  </node>
+</hierarchy>`
+
+func TestFindElement_SuffixPattern(t *testing.T) {
+	els, _ := parseUIElements(feedXML, true)
+	// suffix 패턴 "동영상 재생" — 콘텐츠 제목 무관, 첫 번째(Index 0)
+	e := findElement(els, ElementSelector{ContentDesc: "동영상 재생", MatchMode: "suffix", Index: 0})
+	if e == nil || e.CenterX != (45+705)/2 {
+		t.Fatalf("suffix index0 실패: %+v", e)
+	}
+	// 두 번째 카드
+	e2 := findElement(els, ElementSelector{ContentDesc: "동영상 재생", MatchMode: "suffix", Index: 1})
+	if e2 == nil || e2.CenterX != (735+1395)/2 {
+		t.Fatalf("suffix index1 실패: %+v", e2)
+	}
+}
+
+func TestFindElement_ContainerScope(t *testing.T) {
+	els, _ := parseUIElements(feedXML, true)
+	// results 컨테이너 안에서만 검색 → 검색 버튼(컨테이너 밖)은 제외
+	e := findElement(els, ElementSelector{
+		ContentDesc: "동영상 재생", MatchMode: "suffix",
+		ContainerID: "com.yt:id/results", Index: 0,
+	})
+	if e == nil || e.ContentDesc != "임금님 찜닭 - Shorts 동영상 재생" {
+		t.Fatalf("container scope 실패: %+v", e)
+	}
+	// 컨테이너 밖 검색 버튼은 이 컨테이너 스코프에서 안 잡혀야 함
+	miss := findElement(els, ElementSelector{
+		ContentDesc: "검색", MatchMode: "contains",
+		ContainerID: "com.yt:id/results",
+	})
+	if miss != nil {
+		t.Fatalf("컨테이너 밖 요소가 잡힘: %+v", miss)
+	}
+}
+
+func TestFindElement_RegexAndExactBackcompat(t *testing.T) {
+	els, _ := parseUIElements(feedXML, true)
+	// regex
+	e := findElement(els, ElementSelector{ContentDesc: "동영상 재생$", MatchMode: "regex", Index: 1})
+	if e == nil || e.CenterX != (735+1395)/2 {
+		t.Fatalf("regex 실패: %+v", e)
+	}
+	// exact 모드(빈 MatchMode)는 기존 동작 — 검색 버튼 완전일치
+	e2 := findElement(els, ElementSelector{ContentDesc: "검색"})
+	if e2 == nil || e2.ResourceID != "com.yt:id/menu_search" {
+		t.Fatalf("exact 호환 실패: %+v", e2)
+	}
+}
+
 func TestParseBounds(t *testing.T) {
 	b, ok := parseBounds("[10,20][110,220]")
 	if !ok || b != [4]int{10, 20, 110, 220} {

@@ -4724,7 +4724,7 @@ func (x *FilesystemInfo) GetUsagePercent() float64 {
 type MacroEvent struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	T            int64                  `protobuf:"varint,1,opt,name=t,proto3" json:"t,omitempty"`      // 녹화 시작 기준 경과시간 (ms)
-	Type         string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"` // "tap", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"
+	Type         string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"` // "tap", "tap_element", "text", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"
 	X            int32                  `protobuf:"varint,3,opt,name=x,proto3" json:"x,omitempty"`      // tap 좌표
 	Y            int32                  `protobuf:"varint,4,opt,name=y,proto3" json:"y,omitempty"`
 	X2           int32                  `protobuf:"varint,5,opt,name=x2,proto3" json:"x2,omitempty"` // swipe 끝 좌표
@@ -4749,6 +4749,18 @@ type MacroEvent struct {
 	ElementText        string `protobuf:"bytes,21,opt,name=element_text,json=elementText,proto3" json:"element_text,omitempty"`                        // tap_element: text 셀렉터
 	ElementContentDesc string `protobuf:"bytes,22,opt,name=element_content_desc,json=elementContentDesc,proto3" json:"element_content_desc,omitempty"` // tap_element: content-desc 셀렉터
 	InputText          string `protobuf:"bytes,23,opt,name=input_text,json=inputText,proto3" json:"input_text,omitempty"`                              // text 이벤트: input text 로 입력할 문자열
+	// 패턴 매칭 — 동적 콘텐츠(유튜브 피드/SNS/브라우저) 재현용.
+	// text/content-desc 값이 매번 바뀌는 경우, 값 대신 규칙으로 매칭한다.
+	// match_mode: "exact"(기본) | "contains" | "prefix" | "suffix" | "regex".
+	//
+	//	비어있거나 "exact" 면 기존 동작(완전일치 후 부분일치 폴백) 유지.
+	//	그 외 모드는 element_text/element_content_desc 를 패턴으로 해석한다.
+	//
+	// element_index: 매칭된 요소가 여러 개일 때 N번째(0-based)를 고른다. 기본 0.
+	// element_container_id: 지정 시 해당 resource-id 컨테이너 하위에서만 검색.
+	ElementMatchMode   string `protobuf:"bytes,24,opt,name=element_match_mode,json=elementMatchMode,proto3" json:"element_match_mode,omitempty"`
+	ElementIndex       int32  `protobuf:"varint,25,opt,name=element_index,json=elementIndex,proto3" json:"element_index,omitempty"`
+	ElementContainerId string `protobuf:"bytes,26,opt,name=element_container_id,json=elementContainerId,proto3" json:"element_container_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4940,6 +4952,27 @@ func (x *MacroEvent) GetElementContentDesc() string {
 func (x *MacroEvent) GetInputText() string {
 	if x != nil {
 		return x.InputText
+	}
+	return ""
+}
+
+func (x *MacroEvent) GetElementMatchMode() string {
+	if x != nil {
+		return x.ElementMatchMode
+	}
+	return ""
+}
+
+func (x *MacroEvent) GetElementIndex() int32 {
+	if x != nil {
+		return x.ElementIndex
+	}
+	return 0
+}
+
+func (x *MacroEvent) GetElementContainerId() string {
+	if x != nil {
+		return x.ElementContainerId
 	}
 	return ""
 }
@@ -7343,7 +7376,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"used_bytes\x18\x04 \x01(\x04R\tusedBytes\x12'\n" +
 	"\x0favailable_bytes\x18\x05 \x01(\x04R\x0eavailableBytes\x12#\n" +
-	"\rusage_percent\x18\x06 \x01(\x01R\fusagePercent\"\xa9\x05\n" +
+	"\rusage_percent\x18\x06 \x01(\x01R\fusagePercent\"\xae\x06\n" +
 	"\n" +
 	"MacroEvent\x12\f\n" +
 	"\x01t\x18\x01 \x01(\x03R\x01t\x12\x12\n" +
@@ -7374,7 +7407,10 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\felement_text\x18\x15 \x01(\tR\velementText\x120\n" +
 	"\x14element_content_desc\x18\x16 \x01(\tR\x12elementContentDesc\x12\x1d\n" +
 	"\n" +
-	"input_text\x18\x17 \x01(\tR\tinputText\"U\n" +
+	"input_text\x18\x17 \x01(\tR\tinputText\x12,\n" +
+	"\x12element_match_mode\x18\x18 \x01(\tR\x10elementMatchMode\x12#\n" +
+	"\relement_index\x18\x19 \x01(\x05R\felementIndex\x120\n" +
+	"\x14element_container_id\x18\x1a \x01(\tR\x12elementContainerId\"U\n" +
 	"\tOcrRegion\x12\f\n" +
 	"\x01x\x18\x01 \x01(\x05R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x05R\x01y\x12\x14\n" +

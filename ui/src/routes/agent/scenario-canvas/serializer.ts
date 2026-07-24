@@ -267,6 +267,9 @@ export function protoToCanvas(
 				form.elementContentDesc = params.element_content_desc ?? '';
 				form.elementX = params.x != null ? Number(params.x) : null;
 				form.elementY = params.y != null ? Number(params.y) : null;
+				form.elementMatchMode = params.element_match_mode ?? 'exact';
+				form.elementIndex = params.element_index != null ? Number(params.element_index) : 0;
+				form.elementContainerId = params.element_container_id ?? '';
 				form.formParams = {};
 				form.extraText = '';
 			} else if (s.type === 'text') {
@@ -452,6 +455,10 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		if (s.elementContentDesc) params.element_content_desc = s.elementContentDesc;
 		if (s.elementX != null) params.x = String(s.elementX);
 		if (s.elementY != null) params.y = String(s.elementY);
+		// 패턴 매칭 (동적 콘텐츠)
+		if (s.elementMatchMode && s.elementMatchMode !== 'exact') params.element_match_mode = s.elementMatchMode;
+		if (s.elementIndex) params.element_index = String(s.elementIndex);
+		if (s.elementContainerId) params.element_container_id = s.elementContainerId;
 		return params;
 	}
 

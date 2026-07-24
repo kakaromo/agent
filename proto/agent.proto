@@ -603,6 +603,16 @@ message MacroEvent {
   string element_text = 21;            // tap_element: text 셀렉터
   string element_content_desc = 22;    // tap_element: content-desc 셀렉터
   string input_text = 23;              // text 이벤트: input text 로 입력할 문자열
+  // 패턴 매칭 — 동적 콘텐츠(유튜브 피드/SNS/브라우저) 재현용.
+  // text/content-desc 값이 매번 바뀌는 경우, 값 대신 규칙으로 매칭한다.
+  // match_mode: "exact"(기본) | "contains" | "prefix" | "suffix" | "regex".
+  //   비어있거나 "exact" 면 기존 동작(완전일치 후 부분일치 폴백) 유지.
+  //   그 외 모드는 element_text/element_content_desc 를 패턴으로 해석한다.
+  // element_index: 매칭된 요소가 여러 개일 때 N번째(0-based)를 고른다. 기본 0.
+  // element_container_id: 지정 시 해당 resource-id 컨테이너 하위에서만 검색.
+  string element_match_mode = 24;
+  int32 element_index = 25;
+  string element_container_id = 26;
 }
 
 message OcrRegion {

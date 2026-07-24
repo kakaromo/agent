@@ -611,12 +611,17 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			ElementResourceId:  step.Params["element_resource_id"],
 			ElementText:        step.Params["element_text"],
 			ElementContentDesc: step.Params["element_content_desc"],
+			ElementMatchMode:   step.Params["element_match_mode"],
+			ElementContainerId: step.Params["element_container_id"],
 		}
 		if v, err := strconv.Atoi(step.Params["x"]); err == nil {
 			ev.X = int32(v)
 		}
 		if v, err := strconv.Atoi(step.Params["y"]); err == nil {
 			ev.Y = int32(v)
+		}
+		if v, err := strconv.Atoi(step.Params["element_index"]); err == nil {
+			ev.ElementIndex = int32(v)
 		}
 		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
 			DeviceId: deviceID,

@@ -581,6 +581,10 @@ export interface MacroEvent {
 	elementContentDesc?: string;
 	// text 이벤트: input text 로 입력할 문자열
 	inputText?: string;
+	// 패턴 매칭 (동적 콘텐츠 재현)
+	elementMatchMode?: string;    // exact | contains | prefix | suffix | regex
+	elementIndex?: number;
+	elementContainerId?: string;
 }
 
 // 요소 기반 시나리오 빌더 — 현재 화면의 uiautomator 요소.

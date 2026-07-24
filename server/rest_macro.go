@@ -490,6 +490,16 @@ func macroEventToMap(e *pb.MacroEvent) map[string]any {
 	if e.GetInputText() != "" {
 		m["inputText"] = e.GetInputText()
 	}
+	// 패턴 매칭 (동적 콘텐츠 재현)
+	if e.GetElementMatchMode() != "" {
+		m["elementMatchMode"] = e.GetElementMatchMode()
+	}
+	if e.GetElementIndex() != 0 {
+		m["elementIndex"] = e.GetElementIndex()
+	}
+	if e.GetElementContainerId() != "" {
+		m["elementContainerId"] = e.GetElementContainerId()
+	}
 	return m
 }
 
@@ -579,6 +589,16 @@ func buildMacroEvent(e map[string]any) *pb.MacroEvent {
 	}
 	if v, ok := e["inputText"].(string); ok {
 		out.InputText = v
+	}
+	// 패턴 매칭 (동적 콘텐츠 재현)
+	if v, ok := e["elementMatchMode"].(string); ok {
+		out.ElementMatchMode = v
+	}
+	if v, ok := numberOf(e["elementIndex"]); ok {
+		out.ElementIndex = int32(v)
+	}
+	if v, ok := e["elementContainerId"].(string); ok {
+		out.ElementContainerId = v
 	}
 	return out
 }

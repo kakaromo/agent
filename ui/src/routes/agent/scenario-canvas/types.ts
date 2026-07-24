@@ -87,7 +87,11 @@ export function stepSummary(form: StepForm): string {
 		case 'trace_start': return `${form.formParams.trace_type ?? 'ufs'} trace`;
 		case 'trace_stop': return 'stop';
 		case 'app_macro': return form.macroName ?? `Macro #${form.macroId ?? '?'}`;
-		case 'tap_element': return form.elementText || form.elementResourceId || form.elementContentDesc || 'element';
+		case 'tap_element': {
+			const sel = form.elementText || form.elementContentDesc || form.elementResourceId || 'element';
+			const mode = form.elementMatchMode && form.elementMatchMode !== 'exact' ? `~${sel}` : sel;
+			return form.elementIndex ? `${mode} [${form.elementIndex}]` : mode;
+		}
 		case 'text': return form.inputText ? `"${form.inputText.slice(0, 20)}"` : 'text';
 		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
 		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
