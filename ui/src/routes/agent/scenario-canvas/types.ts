@@ -70,6 +70,7 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	sleep: { bg: 'bg-yellow-100', text: 'text-yellow-700' },
 	trace_start: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	trace_stop: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+	launch_app: { bg: 'bg-green-100', text: 'text-green-700' },
 	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
 	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
 	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
@@ -87,6 +88,11 @@ export function stepSummary(form: StepForm): string {
 		case 'sleep': return `${form.extraText.replace('seconds=', '')}s`;
 		case 'trace_start': return `${form.formParams.trace_type ?? 'ufs'} trace`;
 		case 'trace_stop': return 'stop';
+		case 'launch_app': {
+			const pkg = form.launchPackage ? form.launchPackage.split('.').pop() : 'app';
+			const m = form.launchClearMode === 'clear' ? '초기화' : form.launchClearMode === 'cache' ? '캐시삭제' : form.launchClearMode === 'none' ? '' : '재시작';
+			return m ? `${pkg} (${m})` : pkg ?? 'app';
+		}
 		case 'app_macro': return form.macroName ?? `Macro #${form.macroId ?? '?'}`;
 		case 'tap_element': {
 			const sel = form.elementText || form.elementContentDesc || form.elementResourceId || 'element';

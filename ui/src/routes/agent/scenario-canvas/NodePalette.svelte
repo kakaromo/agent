@@ -15,6 +15,7 @@
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import MouseIcon from '@lucide/svelte/icons/mouse';
+	import RocketIcon from '@lucide/svelte/icons/rocket';
 
 	const stepTypes = [
 		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
@@ -24,6 +25,7 @@
 		{ type: 'sleep', label: 'Sleep', icon: ClockIcon, desc: '대기' },
 		{ type: 'trace_start', label: 'Trace Start', icon: ScanSearchIcon, desc: 'ftrace 시작' },
 		{ type: 'trace_stop', label: 'Trace Stop', icon: SquareIcon, desc: 'ftrace 중지' },
+		{ type: 'launch_app', label: 'Launch App', icon: RocketIcon, desc: '앱 초기화+시작' },
 		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
 		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
 		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },

@@ -283,7 +283,9 @@
 			elementX: null, elementY: null, inputText: '',
 			elementMatchMode: 'exact', elementIndex: 0, elementContainerId: '',
 			// scroll 기본값
-			scrollDirection: 'down', scrollCount: 3, scrollPause: 1, scrollDuration: 400
+			scrollDirection: 'down', scrollCount: 3, scrollPause: 1, scrollDuration: 400,
+			// launch_app 기본값
+			launchPackage: '', launchClearMode: 'force_stop', launchWaitSeconds: 3, launchWaitActivity: ''
 		};
 	}
 

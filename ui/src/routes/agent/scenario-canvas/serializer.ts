@@ -283,6 +283,13 @@ export function protoToCanvas(
 				form.scrollDuration = params.duration != null ? Number(params.duration) : 400;
 				form.formParams = {};
 				form.extraText = '';
+			} else if (s.type === 'launch_app') {
+				form.launchPackage = params.package_name ?? '';
+				form.launchClearMode = params.clear_mode ?? 'force_stop';
+				form.launchWaitSeconds = params.wait_seconds != null ? Number(params.wait_seconds) : 3;
+				form.launchWaitActivity = params.wait_activity ?? '';
+				form.formParams = {};
+				form.extraText = '';
 			}
 
 			// 분기가 있으면 condition의 true/false 타겟에 따라 좌/우 배치
@@ -482,6 +489,17 @@ function buildStepParams(s: StepForm): Record<string, string> {
 			pause: String(s.scrollPause ?? 1),
 			duration: String(s.scrollDuration ?? 400)
 		};
+	}
+
+	// 앱 실행 (초기화 + 시작)
+	if (s.type === 'launch_app') {
+		const params: Record<string, string> = {
+			package_name: s.launchPackage ?? '',
+			clear_mode: s.launchClearMode ?? 'force_stop',
+			wait_seconds: String(s.launchWaitSeconds ?? 3)
+		};
+		if (s.launchWaitActivity) params.wait_activity = s.launchWaitActivity;
+		return params;
 	}
 
 	// IOTEST: config as JSON in params (independent step type)

@@ -673,6 +673,71 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		return fmt.Sprintf("SCROLL|dir=%s|count=%d|success=%t",
 			step.Params["direction"], ev.MaxScrolls, resp.Success), nil, nil
+	case "launch_app":
+		// 앱을 지정 초기화 모드로 깨끗하게 시작한다 (AnTuTu 등 cold start 재현).
+		pkg := step.Params["package_name"]
+		if pkg == "" {
+			return "", nil, fmt.Errorf("launch_app step missing 'package_name' param")
+		}
+		mode := step.Params["clear_mode"]
+		if mode == "" {
+			mode = "force_stop"
+		}
+
+		// 디바이스 준비: 깨우기 + 홈 + 잠금 해제
+		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP")
+		time.Sleep(500 * time.Millisecond)
+		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME")
+		time.Sleep(500 * time.Millisecond)
+		md.Device.Shell(ctx, "input swipe 540 2000 540 800 300")
+		time.Sleep(1 * time.Second)
+
+		switch mode {
+		case "clear":
+			// 데이터+캐시 전체 초기화 (첫 실행 상태)
+			slog.Info("launch_app: pm clear", "package", pkg)
+			md.Device.Shell(ctx, fmt.Sprintf("pm clear %s", pkg))
+			time.Sleep(1 * time.Second)
+		case "cache":
+			// 캐시만 삭제, 데이터 유지 (SDK 지원 시)
+			slog.Info("launch_app: pm clear --cache-only", "package", pkg)
+			md.Device.Shell(ctx, fmt.Sprintf("pm clear --cache-only %s", pkg))
+			time.Sleep(1 * time.Second)
+		case "force_stop":
+			md.Device.Shell(ctx, fmt.Sprintf("am force-stop %s", pkg))
+			time.Sleep(500 * time.Millisecond)
+		case "none":
+			// 초기화 없이 실행
+		}
+
+		// 실행
+		md.Device.Shell(ctx, fmt.Sprintf("monkey -p %s -c android.intent.category.LAUNCHER 1", pkg))
+
+		// 실행 후 대기: wait_activity 지정 시 해당 activity 포커스까지, 아니면 고정 대기.
+		waitActivity := step.Params["wait_activity"]
+		waitSec := 3
+		if v, err := strconv.Atoi(step.Params["wait_seconds"]); err == nil && v >= 0 {
+			waitSec = v
+		}
+		if waitActivity != "" {
+			deadline := time.Now().Add(time.Duration(waitSec) * time.Second)
+			if waitSec <= 0 {
+				deadline = time.Now().Add(30 * time.Second) // activity 대기 기본 상한
+			}
+			matched := false
+			for time.Now().Before(deadline) {
+				focus, _ := md.Device.Shell(ctx, "dumpsys window | grep mCurrentFocus")
+				if strings.Contains(focus, waitActivity) {
+					matched = true
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			slog.Info("launch_app: wait_activity", "pattern", waitActivity, "matched", matched)
+		} else {
+			time.Sleep(time.Duration(waitSec) * time.Second)
+		}
+		return fmt.Sprintf("LAUNCH_APP|pkg=%s|mode=%s", pkg, mode), nil, nil
 	case "condition":
 		// 선형 실행 모드에서 condition은 스킵 (DAG 모드에서만 처리)
 		slog.Info("skipping condition step in linear mode", "step", es.stepIndex)

@@ -53,6 +53,11 @@
 		scrollCount?: number;
 		scrollPause?: number;         // 각 스크롤 사이 대기(초)
 		scrollDuration?: number;      // 스와이프 속도(ms) — 작을수록 빠름
+		// launch_app 스텝 (앱 깨끗하게 시작)
+		launchPackage?: string;
+		launchClearMode?: string;     // clear | cache | force_stop | none
+		launchWaitSeconds?: number;
+		launchWaitActivity?: string;  // 지정 시 이 activity 포커스까지 대기
 	}
 
 	interface Props {
@@ -89,7 +94,7 @@
 		if (local.type === 'install_apk' && bundledApks.length === 0) {
 			listBundledApks().then(v => bundledApks = v).catch(() => {});
 		}
-		if (local.type === 'uninstall_apk' && installedApps.length === 0 && serverId != null && deviceId) {
+		if ((local.type === 'uninstall_apk' || local.type === 'launch_app') && installedApps.length === 0 && serverId != null && deviceId) {
 			listInstalledApps(serverId, deviceId).then(v => installedApps = v).catch(() => {});
 		}
 	});
@@ -178,6 +183,7 @@
 							<option value="sleep">Sleep</option>
 							<option value="trace_start">Trace Start</option>
 							<option value="trace_stop">Trace Stop</option>
+							<option value="launch_app">Launch App</option>
 							<option value="app_macro">App Macro</option>
 							<option value="tap_element">Tap Element</option>
 							<option value="text">Text Input</option>
@@ -594,6 +600,70 @@
 									value={local.scrollDuration ?? 400}
 									oninput={(e) => { if (local) local.scrollDuration = Number((e.target as HTMLInputElement).value) || 400; }}
 									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+						</div>
+					</div>
+
+				{:else if local.type === 'launch_app'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							앱을 지정 초기화 모드로 깨끗하게 시작합니다. AnTuTu 등 벤치마크의 cold start 재현에 씁니다.
+							시나리오 첫 스텝으로 두면 이후 tap_element/scroll 이 예측 가능한 상태에서 실행됩니다.
+						</p>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">패키지</label>
+							{#if installedApps.length > 0}
+								<select
+									value={local.launchPackage ?? ''}
+									onchange={(e) => { if (local) local.launchPackage = (e.target as HTMLSelectElement).value; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								>
+									<option value="">앱 선택...</option>
+									{#each installedApps as app (app.packageName)}
+										<option value={app.packageName}>{app.appName || app.packageName} ({app.packageName})</option>
+									{/each}
+								</select>
+							{:else}
+								<input
+									value={local.launchPackage ?? ''}
+									oninput={(e) => { if (local) local.launchPackage = (e.target as HTMLInputElement).value; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+									placeholder="com.google.android.youtube"
+								/>
+								<p class="{captionMuted}">{deviceId ? '설치된 앱을 가져오지 못했습니다. 패키지명을 직접 입력하세요.' : '디바이스를 선택하면 앱 목록이 나옵니다. 지금은 직접 입력하세요.'}</p>
+							{/if}
+						</div>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">초기화 모드</label>
+							<select
+								value={local.launchClearMode ?? 'force_stop'}
+								onchange={(e) => { if (local) local.launchClearMode = (e.target as HTMLSelectElement).value; }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+							>
+								<option value="clear">완전 초기화 — pm clear (데이터+캐시, cold start)</option>
+								<option value="cache">캐시만 삭제 — pm clear --cache-only (데이터 유지)</option>
+								<option value="force_stop">재시작 — force-stop (데이터 유지, warm start)</option>
+								<option value="none">초기화 없이 실행</option>
+							</select>
+						</div>
+						<div class="flex gap-2">
+							<div class="space-y-1 w-28">
+								<label class="{sectionLabel}">실행 후 대기 (초)</label>
+								<input
+									type="number" min="0"
+									value={local.launchWaitSeconds ?? 3}
+									oninput={(e) => { if (local) local.launchWaitSeconds = Number((e.target as HTMLInputElement).value) || 0; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+								/>
+							</div>
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">대기할 Activity (선택)</label>
+								<input
+									value={local.launchWaitActivity ?? ''}
+									oninput={(e) => { if (local) local.launchWaitActivity = (e.target as HTMLInputElement).value; }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
+									placeholder="HomeActivity (지정 시 이 화면 뜰 때까지 대기)"
 								/>
 							</div>
 						</div>
