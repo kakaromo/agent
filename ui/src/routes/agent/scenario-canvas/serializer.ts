@@ -88,6 +88,17 @@ export function canvasToProto(
 		// 참고: tap_element / text 는 params(buildStepParams) 로 셀렉터를 실어 보낸다.
 	});
 
+	// stop_app 패키지 자동 채움: 비어있으면 앞선 launch_app 의 패키지를 물려받는다.
+	// (유저가 stop_app 만 두고 패키지를 안 넣어도 "그 앱을 종료" 로 동작하게)
+	let lastLaunchPkg = '';
+	for (const step of steps) {
+		if (step.type === 'launch_app' && step.params?.package_name) {
+			lastLaunchPkg = step.params.package_name;
+		} else if (step.type === 'stop_app' && !step.params?.package_name && lastLaunchPkg) {
+			step.params = { ...step.params, package_name: lastLaunchPkg };
+		}
+	}
+
 	// 엣지 → StepEdge
 	const stepEdges: StepEdge[] = [];
 	for (const e of edges) {

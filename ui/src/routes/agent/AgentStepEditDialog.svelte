@@ -586,6 +586,11 @@
 						<p class="{captionMuted}">
 							유저처럼 피드를 반복 스크롤합니다. tap_element 패턴과 함께 쓰면 "스크롤하다 영상 하나 열기" 같은 실사용 흐름을 재현합니다.
 						</p>
+						{#if (local.scrollCount ?? 3) >= 6}
+							<p class="text-[10px] text-amber-600 dark:text-amber-400">
+								⚠ 스크롤이 많으면(≥6회) 검색 결과처럼 짧은 목록에선 원하는 요소를 지나칠 수 있습니다. 검색→영상 흐름은 1~2회가 적당합니다.
+							</p>
+						{/if}
 						<div class="flex gap-2">
 							<div class="space-y-1 flex-1">
 								<label class="{sectionLabel}">방향</label>
@@ -736,7 +741,7 @@
 								placeholder="앱 이름 또는 패키지명 검색 (예: youtube)"
 							/>
 							<p class="{captionMuted}">
-								{installedApps.length > 0 ? `실행 가능한 앱 ${installedApps.length}개 검색 가능. ` : ''}보통 앞선 launch_app 과 같은 패키지를 넣습니다.
+								{installedApps.length > 0 ? `실행 가능한 앱 ${installedApps.length}개 검색 가능. ` : ''}비워두면 앞선 <b>Launch App</b> 의 패키지를 자동으로 종료합니다.
 							</p>
 						</div>
 					</div>

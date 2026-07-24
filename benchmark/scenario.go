@@ -701,9 +701,12 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 	case "stop_app":
 		// 앱을 완전히 종료한다 (am force-stop). 유튜브 PIP 처럼 뒤로가기로 안 멈추는
 		// 백그라운드 재생까지 확실히 중단 — 워크로드 측정 종료용.
+		// 패키지는 보통 UI serializer 가 앞선 launch_app 에서 자동 채움. 그래도 비면
+		// 시나리오 전체를 실패시키지 않고 경고 후 skip (관대한 처리).
 		pkg := step.Params["package_name"]
 		if pkg == "" {
-			return "", nil, fmt.Errorf("stop_app step missing 'package_name' param")
+			slog.Warn("stop_app: package_name 없음 — skip (앞선 launch_app 이 없거나 패키지 미지정)")
+			return "STOP_APP|skipped (no package)", nil, nil
 		}
 		md.Device.Shell(ctx, fmt.Sprintf("am force-stop %s", pkg))
 		return fmt.Sprintf("STOP_APP|pkg=%s", pkg), nil, nil
