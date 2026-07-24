@@ -71,10 +71,12 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	trace_start: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	trace_stop: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
 	launch_app: { bg: 'bg-green-100', text: 'text-green-700' },
+	stop_app: { bg: 'bg-red-100', text: 'text-red-700' },
 	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
 	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
 	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
 	scroll: { bg: 'bg-sky-100', text: 'text-sky-700' },
+	key: { bg: 'bg-slate-100', text: 'text-slate-700' },
 	install_apk: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
 	uninstall_apk: { bg: 'bg-rose-100', text: 'text-rose-700' }
 };
@@ -93,6 +95,7 @@ export function stepSummary(form: StepForm): string {
 			const m = form.launchClearMode === 'clear' ? '초기화' : form.launchClearMode === 'cache' ? '캐시삭제' : form.launchClearMode === 'none' ? '' : '재시작';
 			return m ? `${pkg} (${m})` : pkg ?? 'app';
 		}
+		case 'stop_app': return (form.stopPackage ? form.stopPackage.split('.').pop() : 'app') + ' 종료';
 		case 'app_macro': return form.macroName ?? `Macro #${form.macroId ?? '?'}`;
 		case 'tap_element': {
 			const sel = form.elementText || form.elementContentDesc || form.elementResourceId || 'element';
@@ -101,6 +104,10 @@ export function stepSummary(form: StepForm): string {
 		}
 		case 'text': return (form.inputText ? `"${form.inputText.slice(0, 18)}"` : 'text') + (form.inputSubmit ? ' ⏎' : '');
 		case 'scroll': return `${form.scrollDirection === 'up' ? '위로' : '아래로'} ×${form.scrollCount ?? 3}`;
+		case 'key': {
+			const names: Record<number, string> = { 4: '뒤로가기', 3: '홈', 187: '최근앱', 85: '재생/정지', 86: '정지', 66: '엔터' };
+			return names[form.keycode ?? 4] ?? `keycode ${form.keycode ?? 4}`;
+		}
 		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
 		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
 		default: return form.type;

@@ -16,6 +16,8 @@
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import MouseIcon from '@lucide/svelte/icons/mouse';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
+	import CornerUpLeftIcon from '@lucide/svelte/icons/corner-up-left';
+	import CircleStopIcon from '@lucide/svelte/icons/circle-stop';
 
 	const stepTypes = [
 		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
@@ -26,10 +28,12 @@
 		{ type: 'trace_start', label: 'Trace Start', icon: ScanSearchIcon, desc: 'ftrace 시작' },
 		{ type: 'trace_stop', label: 'Trace Stop', icon: SquareIcon, desc: 'ftrace 중지' },
 		{ type: 'launch_app', label: 'Launch App', icon: RocketIcon, desc: '앱 초기화+시작' },
+		{ type: 'stop_app', label: 'Stop App', icon: CircleStopIcon, desc: '앱 완전 종료' },
 		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
 		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
 		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },
 		{ type: 'scroll', label: 'Scroll', icon: MouseIcon, desc: '피드 스크롤' },
+		{ type: 'key', label: 'Key', icon: CornerUpLeftIcon, desc: '뒤로/홈/제어 키' },
 		{ type: 'install_apk', label: 'Install APK', icon: DownloadIcon, desc: 'APK 설치' },
 		{ type: 'uninstall_apk', label: 'Uninstall APK', icon: PackageMinusIcon, desc: '앱 제거' }
 	];

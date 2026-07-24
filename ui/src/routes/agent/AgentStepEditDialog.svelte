@@ -55,6 +55,10 @@
 		scrollCount?: number;
 		scrollPause?: number;         // 각 스크롤 사이 대기(초)
 		scrollDuration?: number;      // 스와이프 속도(ms) — 작을수록 빠름
+		// key 스텝 (범용 키 이벤트 — 뒤로/홈/일시정지 등)
+		keycode?: number;
+		// stop_app 스텝 (앱 완전 종료 — PIP 재생까지 중단)
+		stopPackage?: string;
 		// launch_app 스텝 (앱 깨끗하게 시작)
 		launchPackage?: string;
 		launchClearMode?: string;     // clear | cache | force_stop | none
@@ -96,7 +100,7 @@
 		if (local.type === 'install_apk' && bundledApks.length === 0) {
 			listBundledApks().then(v => bundledApks = v).catch(() => {});
 		}
-		if ((local.type === 'uninstall_apk' || local.type === 'launch_app') && installedApps.length === 0 && serverId != null && deviceId) {
+		if ((local.type === 'uninstall_apk' || local.type === 'launch_app' || local.type === 'stop_app') && installedApps.length === 0 && serverId != null && deviceId) {
 			listInstalledApps(serverId, deviceId).then(v => installedApps = v).catch(() => {});
 		}
 	});
@@ -186,10 +190,12 @@
 							<option value="trace_start">Trace Start</option>
 							<option value="trace_stop">Trace Stop</option>
 							<option value="launch_app">Launch App</option>
+							<option value="stop_app">Stop App</option>
 							<option value="app_macro">App Macro</option>
 							<option value="tap_element">Tap Element</option>
 							<option value="text">Text Input</option>
 							<option value="scroll">Scroll</option>
+							<option value="key">Key (뒤로/홈)</option>
 							<option value="install_apk">Install APK</option>
 							<option value="uninstall_apk">Uninstall APK</option>
 						</select>
@@ -624,6 +630,46 @@
 						</div>
 					</div>
 
+				{:else if local.type === 'key'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							키 이벤트를 보냅니다. 뒤로가기로 재생 중단, 홈으로 세션 리셋 등 제어 동작에 씁니다.
+						</p>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">키</label>
+							<select
+								value={String(local.keycode ?? 4)}
+								onchange={(e) => { if (local) local.keycode = Number((e.target as HTMLSelectElement).value); }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+							>
+								<option value="86">▶ 재생 정지 (MEDIA_STOP) — 유튜브 PIP 재생도 멈춤 ✓</option>
+								<option value="4">뒤로가기 (BACK) — 이전 화면 (⚠ 유튜브는 PIP로 계속 재생됨)</option>
+								<option value="3">홈 (HOME) — 홈 화면으로 (⚠ PIP 재생 유지)</option>
+								<option value="187">최근 앱 (RECENTS)</option>
+								<option value="85">재생/일시정지 토글 (MEDIA_PLAY_PAUSE)</option>
+								<option value="87">다음 (MEDIA_NEXT)</option>
+								<option value="88">이전 (MEDIA_PREVIOUS)</option>
+								<option value="24">볼륨 업</option>
+								<option value="25">볼륨 다운</option>
+								<option value="26">전원 (POWER)</option>
+								<option value="66">엔터 (ENTER)</option>
+							</select>
+						</div>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">직접 keycode 입력 (선택)</label>
+							<input
+								type="number" min="1"
+								value={local.keycode ?? 4}
+								oninput={(e) => { if (local) local.keycode = Number((e.target as HTMLInputElement).value) || 0; }}
+								class="w-24 border rounded px-2 py-1 text-xs bg-background"
+							/>
+							<p class="{captionMuted}">
+								⚠ 유튜브는 <b>뒤로가기/홈으로는 재생이 안 멈추고 PIP(작은 창)로 계속 재생</b>됩니다.
+								재생 I/O 를 확실히 멈추려면 <b>재생 정지(MEDIA_STOP)</b> 또는 <b>앱 종료(stop_app)</b> 스텝을 쓰세요.
+							</p>
+						</div>
+					</div>
+
 				{:else if local.type === 'launch_app'}
 					<div class="space-y-2">
 						<p class="{captionMuted}">
@@ -674,6 +720,24 @@
 									placeholder="HomeActivity (지정 시 이 화면 뜰 때까지 대기)"
 								/>
 							</div>
+						</div>
+					</div>
+
+				{:else if local.type === 'stop_app'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							앱을 완전히 종료합니다 (force-stop). 유튜브처럼 뒤로가기로 안 멈추고 PIP(작은 창)로 계속 재생되는 경우도 확실히 중단됩니다. 워크로드 측정 종료 스텝으로 적합합니다.
+						</p>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">패키지</label>
+							<AppSearchSelect
+								bind:value={local.stopPackage}
+								apps={installedApps}
+								placeholder="앱 이름 또는 패키지명 검색 (예: youtube)"
+							/>
+							<p class="{captionMuted}">
+								{installedApps.length > 0 ? `실행 가능한 앱 ${installedApps.length}개 검색 가능. ` : ''}보통 앞선 launch_app 과 같은 패키지를 넣습니다.
+							</p>
 						</div>
 					</div>
 

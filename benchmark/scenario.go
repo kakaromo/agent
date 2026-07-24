@@ -678,6 +678,35 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		return fmt.Sprintf("SCROLL|dir=%s|count=%d|success=%t",
 			step.Params["direction"], ev.MaxScrolls, resp.Success), nil, nil
+	case "key":
+		// 범용 키 이벤트 — BACK(4)/HOME(3)/일시정지(85) 등 제어 동작.
+		if o.macroMgr == nil {
+			return "", nil, fmt.Errorf("macro manager not configured")
+		}
+		keycode := 0
+		if v, err := strconv.Atoi(step.Params["keycode"]); err == nil {
+			keycode = v
+		}
+		if keycode <= 0 {
+			return "", nil, fmt.Errorf("key step missing valid 'keycode' param")
+		}
+		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
+			DeviceId: deviceID,
+			Events:   []*pb.MacroEvent{{Type: "key", Keycode: int32(keycode)}},
+		})
+		if err != nil {
+			return "", nil, fmt.Errorf("key: %w", err)
+		}
+		return fmt.Sprintf("KEY|keycode=%d|success=%t", keycode, resp.Success), nil, nil
+	case "stop_app":
+		// 앱을 완전히 종료한다 (am force-stop). 유튜브 PIP 처럼 뒤로가기로 안 멈추는
+		// 백그라운드 재생까지 확실히 중단 — 워크로드 측정 종료용.
+		pkg := step.Params["package_name"]
+		if pkg == "" {
+			return "", nil, fmt.Errorf("stop_app step missing 'package_name' param")
+		}
+		md.Device.Shell(ctx, fmt.Sprintf("am force-stop %s", pkg))
+		return fmt.Sprintf("STOP_APP|pkg=%s", pkg), nil, nil
 	case "launch_app":
 		// 앱을 지정 초기화 모드로 깨끗하게 시작한다 (AnTuTu 등 cold start 재현).
 		pkg := step.Params["package_name"]

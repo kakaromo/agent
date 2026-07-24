@@ -272,6 +272,14 @@ export function protoToCanvas(
 				form.elementContainerId = params.element_container_id ?? '';
 				form.formParams = {};
 				form.extraText = '';
+			} else if (s.type === 'key') {
+				form.keycode = params.keycode != null ? Number(params.keycode) : 4;
+				form.formParams = {};
+				form.extraText = '';
+			} else if (s.type === 'stop_app') {
+				form.stopPackage = params.package_name ?? '';
+				form.formParams = {};
+				form.extraText = '';
 			} else if (s.type === 'text') {
 				form.inputText = params.input_text ?? '';
 				form.inputSubmit = params.submit === 'true';
@@ -477,6 +485,11 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		return params;
 	}
 
+	// 키 이벤트 (뒤로/홈/제어)
+	if (s.type === 'key') {
+		return { keycode: String(s.keycode ?? 4) };
+	}
+
 	// 텍스트 입력 (+ 입력 후 Enter)
 	if (s.type === 'text') {
 		const params: Record<string, string> = {};
@@ -493,6 +506,11 @@ function buildStepParams(s: StepForm): Record<string, string> {
 			pause: String(s.scrollPause ?? 1),
 			duration: String(s.scrollDuration ?? 400)
 		};
+	}
+
+	// 앱 완전 종료
+	if (s.type === 'stop_app') {
+		return { package_name: s.stopPackage ?? '' };
 	}
 
 	// 앱 실행 (초기화 + 시작)
