@@ -54,11 +54,13 @@ export function describeWorkload(
 		list.push(summarizeStep(i, type, s));
 	}
 
-	// loop 가 있으면 반복 서술
+	// loop 가 있으면 반복 서술.
+	// 주의: 여러 loop 의 count 를 단순 합산한 근사치다. 중첩/독립 loop 이 섞이면
+	// 실제 반복 횟수와 다를 수 있으나, 한 줄 요약의 개략 표기라 근사로 충분하다.
 	let loopSuffix = '';
 	if (loops && loops.length > 0) {
 		const total = loops.reduce((n: number, l: any) => n + (Number(l?.count) || 0), 0);
-		if (total > 0) loopSuffix = ` · 반복 ${total}회`;
+		if (total > 0) loopSuffix = ` · 반복 ${total}회(근사)`;
 	}
 
 	const oneLine = list.length > 0
@@ -144,7 +146,7 @@ export interface WorkloadInsight {
  * I/O 볼륨(bytes) 요약. trace 로 측정된 워크로드에선 READ/WRITE/DISCARD 총량으로
  * "무슨 성격의 I/O 였나"를 판단한다. metrics 에 io_bytes 계열이 없으면 null.
  */
-export interface IoVolume {
+interface IoVolume {
 	readBytes: number;
 	writeBytes: number;
 	discardBytes: number;
@@ -158,7 +160,7 @@ export interface IoVolume {
  * bw_kb / bw_bytes / throughput_bps / iops 같은 rate(속도) 키는 제외 —
  * 이걸 볼륨으로 합산하면 해석이 오염된다 (리뷰 #3).
  */
-export function extractIoVolume(metrics: Record<string, number>): IoVolume | null {
+function extractIoVolume(metrics: Record<string, number>): IoVolume | null {
 	let read = 0, write = 0, discard = 0;
 	let found = false;
 

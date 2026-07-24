@@ -158,7 +158,6 @@
 
 	const statsRows: StatsRow[] = $derived.by(() => {
 		const rows: StatsRow[] = [];
-		const baseline: Record<string, number> = {};
 		for (const c of matrix.cycles) {
 			const row: StatsRow = { cycle: c };
 			for (const g of chartGroups) {
@@ -166,7 +165,6 @@
 					const raw = matrix.values[m.rawKey]?.[c] ?? 0;
 					const v = raw / getMetricUnit(m.rawKey).divisor;
 					row[m.rawKey] = v.toLocaleString('en-US', { maximumFractionDigits: 2 });
-					if (c === matrix.cycles[0]) baseline[m.rawKey] = v;
 				}
 			}
 			rows.push(row);
