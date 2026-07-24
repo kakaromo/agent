@@ -274,6 +274,7 @@ export function protoToCanvas(
 				form.extraText = '';
 			} else if (s.type === 'text') {
 				form.inputText = params.input_text ?? '';
+				form.inputSubmit = params.submit === 'true';
 				form.formParams = {};
 				form.extraText = '';
 			} else if (s.type === 'scroll') {
@@ -476,9 +477,12 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		return params;
 	}
 
-	// 텍스트 입력
+	// 텍스트 입력 (+ 입력 후 Enter)
 	if (s.type === 'text') {
-		return s.inputText ? { input_text: s.inputText } : {};
+		const params: Record<string, string> = {};
+		if (s.inputText) params.input_text = s.inputText;
+		if (s.inputSubmit) params.submit = 'true';
+		return params;
 	}
 
 	// 스크롤 (유저처럼 피드 반복 스크롤)

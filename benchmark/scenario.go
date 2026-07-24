@@ -637,18 +637,23 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
 			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
 	case "text":
-		// input text — 단일 MacroEvent 로 실행
+		// input text — 단일 MacroEvent 로 실행. submit=true 면 입력 후 Enter(66).
 		if o.macroMgr == nil {
 			return "", nil, fmt.Errorf("macro manager not configured")
 		}
+		ev := &pb.MacroEvent{Type: "text", InputText: step.Params["input_text"]}
+		if step.Params["submit"] == "true" {
+			ev.Keycode = 66 // KEYCODE_ENTER
+		}
 		resp, err := o.macroMgr.ReplayMacro(ctx, &pb.ReplayMacroRequest{
 			DeviceId: deviceID,
-			Events:   []*pb.MacroEvent{{Type: "text", InputText: step.Params["input_text"]}},
+			Events:   []*pb.MacroEvent{ev},
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("text: %w", err)
 		}
-		return fmt.Sprintf("TEXT|input=%s|success=%t", step.Params["input_text"], resp.Success), nil, nil
+		return fmt.Sprintf("TEXT|input=%s|submit=%s|success=%t",
+			step.Params["input_text"], step.Params["submit"], resp.Success), nil, nil
 	case "scroll":
 		// 유저처럼 피드 반복 스크롤 (워크로드 재현)
 		if o.macroMgr == nil {

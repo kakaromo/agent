@@ -45,6 +45,7 @@
 		elementX?: number | null;
 		elementY?: number | null;
 		inputText?: string;
+		inputSubmit?: boolean;   // 입력 후 Enter (검색 실행)
 		// 패턴 매칭 (동적 콘텐츠 재현)
 		elementMatchMode?: string;    // exact | contains | prefix | suffix | regex
 		elementIndex?: number;
@@ -554,6 +555,15 @@
 							class="w-full border rounded px-2 py-1 text-xs bg-background"
 							placeholder="입력할 문자열 (input text)"
 						/>
+						<label class="flex items-center gap-1.5 text-[10px] cursor-pointer mt-1">
+							<input
+								type="checkbox"
+								checked={local.inputSubmit ?? false}
+								onchange={(e) => { if (local) local.inputSubmit = (e.target as HTMLInputElement).checked; }}
+								class="size-3"
+							/>
+							입력 후 Enter 전송 (검색 실행)
+						</label>
 						<p class="{captionMuted}">공백은 자동으로 %s 로 변환됩니다. 특수문자는 이스케이프됩니다.</p>
 					</div>
 

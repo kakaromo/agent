@@ -108,6 +108,11 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 		case "text":
 			// input text 로 문자열 입력. 공백은 %s 로, 그 외 셸 특수문자는 이스케이프.
 			r.dev.Shell(ctx, fmt.Sprintf("input text %s", escapeInputText(ev.InputText)))
+			// keycode 지정 시 입력 후 그 키 전송 (검색 실행용 Enter=66 등).
+			if ev.Keycode > 0 {
+				time.Sleep(300 * time.Millisecond)
+				r.dev.Shell(ctx, fmt.Sprintf("input keyevent %d", ev.Keycode))
+			}
 
 		case "swipe":
 			x1 := int(float64(ev.X) * scaleX)

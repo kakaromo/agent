@@ -280,7 +280,7 @@
 			traceEnabled: false, traceType: 'ufs',
 			// 요소 기반 탭 / 텍스트 입력 기본값
 			elementResourceId: '', elementText: '', elementContentDesc: '',
-			elementX: null, elementY: null, inputText: '',
+			elementX: null, elementY: null, inputText: '', inputSubmit: false,
 			elementMatchMode: 'exact', elementIndex: 0, elementContainerId: '',
 			// scroll 기본값
 			scrollDirection: 'down', scrollCount: 3, scrollPause: 1, scrollDuration: 400,

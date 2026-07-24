@@ -99,7 +99,7 @@ export function stepSummary(form: StepForm): string {
 			const mode = form.elementMatchMode && form.elementMatchMode !== 'exact' ? `~${sel}` : sel;
 			return form.elementIndex ? `${mode} [${form.elementIndex}]` : mode;
 		}
-		case 'text': return form.inputText ? `"${form.inputText.slice(0, 20)}"` : 'text';
+		case 'text': return (form.inputText ? `"${form.inputText.slice(0, 18)}"` : 'text') + (form.inputSubmit ? ' ⏎' : '');
 		case 'scroll': return `${form.scrollDirection === 'up' ? '위로' : '아래로'} ×${form.scrollCount ?? 3}`;
 		case 'install_apk': return form.formParams.apk_filename ?? 'APK';
 		case 'uninstall_apk': return form.formParams.package_name ?? 'package';
