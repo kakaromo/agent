@@ -55,6 +55,9 @@
 		scrollCount?: number;
 		scrollPause?: number;         // 각 스크롤 사이 대기(초)
 		scrollDuration?: number;      // 스와이프 속도(ms) — 작을수록 빠름
+		// tap 스텝 (절대 좌표 탭 — 커스텀뷰/게임 등 요소 미노출 화면)
+		tapX?: number | null;
+		tapY?: number | null;
 		// key 스텝 (범용 키 이벤트 — 뒤로/홈/일시정지 등)
 		keycode?: number;
 		// stop_app 스텝 (앱 완전 종료 — PIP 재생까지 중단)
@@ -193,6 +196,7 @@
 							<option value="stop_app">Stop App</option>
 							<option value="app_macro">App Macro</option>
 							<option value="tap_element">Tap Element</option>
+							<option value="tap">Tap (좌표)</option>
 							<option value="text">Text Input</option>
 							<option value="scroll">Scroll</option>
 							<option value="key">Key (뒤로/홈)</option>
@@ -455,6 +459,38 @@
 							/>
 							사용자 데이터/캐시 유지 (<code>pm uninstall -k</code>)
 						</label>
+					</div>
+
+				{:else if local.type === 'tap'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							지정한 화면 좌표를 직접 탭합니다. 삼성 노트 AI 메뉴처럼 요소가 안 잡히는 커스텀 화면·게임에 씁니다. 좌표는 디바이스 실제 픽셀 기준(스케일링 없음).
+						</p>
+						<div class="flex gap-2">
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">X</label>
+								<input
+									type="number" min="0"
+									value={local.tapX ?? ''}
+									oninput={(e) => { if (local) { const v=(e.target as HTMLInputElement).value; local.tapX = v===''?null:Number(v); } }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+									placeholder="예: 1157"
+								/>
+							</div>
+							<div class="space-y-1 flex-1">
+								<label class="{sectionLabel}">Y</label>
+								<input
+									type="number" min="0"
+									value={local.tapY ?? ''}
+									oninput={(e) => { if (local) { const v=(e.target as HTMLInputElement).value; local.tapY = v===''?null:Number(v); } }}
+									class="w-full border rounded px-2 py-1 text-xs bg-background"
+									placeholder="예: 2115"
+								/>
+							</div>
+						</div>
+						<p class="{captionMuted}">
+							💡 라이브 화면에서 요소를 클릭하면 tap_element 로 잡히지만, 요소가 없는 버튼은 이 tap 으로 좌표를 직접 넣으세요.
+						</p>
 					</div>
 
 				{:else if local.type === 'tap_element'}

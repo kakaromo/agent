@@ -283,6 +283,11 @@ export function protoToCanvas(
 				form.elementContainerId = params.element_container_id ?? '';
 				form.formParams = {};
 				form.extraText = '';
+			} else if (s.type === 'tap') {
+				form.tapX = params.x != null ? Number(params.x) : null;
+				form.tapY = params.y != null ? Number(params.y) : null;
+				form.formParams = {};
+				form.extraText = '';
 			} else if (s.type === 'key') {
 				form.keycode = params.keycode != null ? Number(params.keycode) : 4;
 				form.formParams = {};
@@ -493,6 +498,14 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		if (s.elementMatchMode && s.elementMatchMode !== 'exact') params.element_match_mode = s.elementMatchMode;
 		if (s.elementIndex) params.element_index = String(s.elementIndex);
 		if (s.elementContainerId) params.element_container_id = s.elementContainerId;
+		return params;
+	}
+
+	// 좌표 탭 (커스텀뷰/게임 등)
+	if (s.type === 'tap') {
+		const params: Record<string, string> = {};
+		if (s.tapX != null) params.x = String(s.tapX);
+		if (s.tapY != null) params.y = String(s.tapY);
 		return params;
 	}
 

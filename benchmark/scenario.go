@@ -636,6 +636,16 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
 			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
+	case "tap":
+		// 절대 좌표 탭. 커스텀뷰(요소 미노출) 화면 — 삼성 노트 AI 메뉴, 게임 등 —
+		// tap_element 로 못 잡는 버튼을 좌표로 직접 누른다. 스케일링 없이 raw 좌표 그대로.
+		x, errX := strconv.Atoi(step.Params["x"])
+		y, errY := strconv.Atoi(step.Params["y"])
+		if errX != nil || errY != nil {
+			return "", nil, fmt.Errorf("tap step needs valid 'x','y' params")
+		}
+		md.Device.Shell(ctx, fmt.Sprintf("input tap %d %d", x, y))
+		return fmt.Sprintf("TAP|x=%d|y=%d", x, y), nil, nil
 	case "text":
 		// input text — 단일 MacroEvent 로 실행. submit=true 면 입력 후 Enter(66).
 		if o.macroMgr == nil {

@@ -13,6 +13,7 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import PackageMinusIcon from '@lucide/svelte/icons/package-minus';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import PointerIcon from '@lucide/svelte/icons/pointer';
 	import TypeIcon from '@lucide/svelte/icons/type';
 	import MouseIcon from '@lucide/svelte/icons/mouse';
 	import RocketIcon from '@lucide/svelte/icons/rocket';
@@ -31,6 +32,7 @@
 		{ type: 'stop_app', label: 'Stop App', icon: CircleStopIcon, desc: '앱 완전 종료' },
 		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
 		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
+		{ type: 'tap', label: 'Tap', icon: PointerIcon, desc: '좌표 탭' },
 		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },
 		{ type: 'scroll', label: 'Scroll', icon: MouseIcon, desc: '피드 스크롤' },
 		{ type: 'key', label: 'Key', icon: CornerUpLeftIcon, desc: '뒤로/홈/제어 키' },

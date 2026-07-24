@@ -74,6 +74,7 @@ export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 	stop_app: { bg: 'bg-red-100', text: 'text-red-700' },
 	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
 	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
+	tap: { bg: 'bg-pink-100', text: 'text-pink-700' },
 	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
 	scroll: { bg: 'bg-sky-100', text: 'text-sky-700' },
 	key: { bg: 'bg-slate-100', text: 'text-slate-700' },
@@ -102,6 +103,7 @@ export function stepSummary(form: StepForm): string {
 			const mode = form.elementMatchMode && form.elementMatchMode !== 'exact' ? `~${sel}` : sel;
 			return form.elementIndex ? `${mode} [${form.elementIndex}]` : mode;
 		}
+		case 'tap': return (form.tapX != null && form.tapY != null) ? `(${form.tapX}, ${form.tapY})` : 'tap';
 		case 'text': return (form.inputText ? `"${form.inputText.slice(0, 18)}"` : 'text') + (form.inputSubmit ? ' ⏎' : '');
 		case 'scroll': return `${form.scrollDirection === 'up' ? '위로' : '아래로'} ×${form.scrollCount ?? 3}`;
 		case 'key': {
