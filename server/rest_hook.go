@@ -117,24 +117,46 @@ func (r *dbRecorder) OnResult(ctx context.Context, agent *DeviceAgentServer, job
 	if jobID == "" || agent == nil {
 		return
 	}
+
+	// benchmark/scenario 는 summary·traceJobs·autoArchive 셋 다 GetBenchmarkResult 를 쓰므로
+	// 한 번만 fetch 해서 공유한다 (terminal 잡마다 동일 RPC 3회 방지).
+	if jobType == "benchmark" || jobType == "scenario" {
+		resp, err := agent.GetBenchmarkResult(ctx, &pb.GetBenchmarkResultRequest{JobId: jobID})
+		if err != nil || len(resp.GetResults()) == 0 {
+			return // 메모리에 없으면 skip
+		}
+		if summary := buildBenchmarkSummaryFrom(jobID, resp); summary != "" {
+			if err := r.db.UpdateJobExecutionResultSummary(ctx, jobID, summary); err != nil {
+				slog.Debug("update job execution result_summary failed", "jobId", jobID, "error", err)
+			}
+		}
+		// trace job 매핑 영속화 — 만료된 job 도 job 상세에서 기존 trace UI 로 진입 가능하게.
+		if tj := collectTraceJobsFrom(resp); tj != "" {
+			if err := r.db.UpdateJobExecutionTraceJobs(ctx, jobID, tj); err != nil {
+				slog.Debug("update job execution trace_jobs failed", "jobId", jobID, "error", err)
+			}
+		}
+		// archive_base 가 설정돼 있으면 풀 결과 JSON 도 디스크에 자동 저장.
+		if r.archiveBase != "" {
+			r.autoArchiveBenchmarkFrom(jobID, resp)
+		}
+		return
+	}
+
+	// trace 등 그 외 타입: 별도 RPC(GetTraceResult) 경로.
 	summary, err := buildResultSummary(ctx, agent, jobID, jobType)
 	if err == nil && summary != "" {
 		if err := r.db.UpdateJobExecutionResultSummary(ctx, jobID, summary); err != nil {
 			slog.Debug("update job execution result_summary failed", "jobId", jobID, "error", err)
 		}
 	}
-	// archive_base 가 설정돼 있고 benchmark/scenario 라면 풀 결과 JSON 도 디스크에 자동 저장.
-	if r.archiveBase != "" && (jobType == "benchmark" || jobType == "scenario") {
-		r.autoArchiveBenchmark(ctx, agent, jobID)
-	}
 }
 
-// autoArchiveBenchmark — 잡 종료 시 GetBenchmarkResult 응답을
+// autoArchiveBenchmarkFrom — 이미 fetch 한 결과를
 // {archiveBase}/auto/{yyyy-mm-dd}/{jobId}/{deviceId}_result.json 으로 저장.
 // 수동 upload (`/api/agent/upload/benchmark`) 와 폴더 분리.
-func (r *dbRecorder) autoArchiveBenchmark(ctx context.Context, agent *DeviceAgentServer, jobID string) {
-	resp, err := agent.GetBenchmarkResult(ctx, &pb.GetBenchmarkResultRequest{JobId: jobID})
-	if err != nil || len(resp.GetResults()) == 0 {
+func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmarkResultResponse) {
+	if resp == nil || len(resp.GetResults()) == 0 {
 		return
 	}
 	dstDir := filepath.Join(r.archiveBase, "auto", time.Now().Format("2006-01-02"), jobID)
@@ -156,6 +178,41 @@ func (r *dbRecorder) autoArchiveBenchmark(ctx context.Context, agent *DeviceAgen
 		}
 		slog.Info("benchmark result auto-archived", "jobId", jobID, "deviceId", br.GetDeviceId(), "path", fullPath)
 	}
+}
+
+// collectTraceJobsFrom — 이미 fetch 한 결과에서 trace job 매핑을 모아 JSON array 문자열로 반환.
+// FE TraceJobMapping shape ({traceJobId, stepIndex, loopIndex, repeatIndex, traceType}) 와 동일.
+// trace 가 없으면 빈 문자열.
+func collectTraceJobsFrom(resp *pb.GetBenchmarkResultResponse) string {
+	if resp == nil || len(resp.GetResults()) == 0 {
+		return ""
+	}
+	seen := make(map[string]bool)
+	jobs := make([]map[string]any, 0)
+	for _, br := range resp.GetResults() {
+		for _, tj := range br.GetTraceJobs() {
+			id := tj.GetTraceJobId()
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			jobs = append(jobs, map[string]any{
+				"traceJobId":  id,
+				"stepIndex":   tj.GetStepIndex(),
+				"loopIndex":   tj.GetLoopIndex(),
+				"repeatIndex": tj.GetRepeatIndex(),
+				"traceType":   tj.GetTraceType(),
+			})
+		}
+	}
+	if len(jobs) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(jobs)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // nullStr — empty 면 invalid sql.NullString.

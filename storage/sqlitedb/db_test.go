@@ -127,6 +127,41 @@ func TestJobExecutionLifecycle(t *testing.T) {
 		t.Fatalf("update result: %v", err)
 	}
 
+	// 워크로드 컨텍스트 메모 round-trip (신규 컬럼 workload_note).
+	if err := db.UpdateJobExecutionWorkloadNote(ctx, "job-1", "warm start, 모델 이미 로드됨"); err != nil {
+		t.Fatalf("update workload note: %v", err)
+	}
+	noted, _ := db.FindJobExecutionByJobID(ctx, "job-1")
+	if !noted.WorkloadNote.Valid || noted.WorkloadNote.String != "warm start, 모델 이미 로드됨" {
+		t.Errorf("workload note round-trip failed: %+v", noted.WorkloadNote)
+	}
+	// 빈 문자열 저장 시 NULL 로 되돌림 (자동 해석 복귀).
+	if err := db.UpdateJobExecutionWorkloadNote(ctx, "job-1", ""); err != nil {
+		t.Fatalf("clear workload note: %v", err)
+	}
+	cleared, _ := db.FindJobExecutionByJobID(ctx, "job-1")
+	if cleared.WorkloadNote.Valid {
+		t.Errorf("empty note should clear to NULL, got %q", cleared.WorkloadNote.String)
+	}
+
+	// trace job 매핑 영속화 round-trip (신규 컬럼 trace_jobs).
+	tjJSON := `[{"traceJobId":"t-1","stepIndex":1,"loopIndex":0,"repeatIndex":1,"traceType":"ufs"}]`
+	if err := db.UpdateJobExecutionTraceJobs(ctx, "job-1", tjJSON); err != nil {
+		t.Fatalf("update trace jobs: %v", err)
+	}
+	tjRec, _ := db.FindJobExecutionByJobID(ctx, "job-1")
+	if !tjRec.TraceJobs.Valid || tjRec.TraceJobs.String != tjJSON {
+		t.Errorf("trace_jobs round-trip failed: %+v", tjRec.TraceJobs)
+	}
+	// 빈 문자열은 기존 값 보존 (갱신 안 함).
+	if err := db.UpdateJobExecutionTraceJobs(ctx, "job-1", ""); err != nil {
+		t.Fatalf("empty trace jobs update: %v", err)
+	}
+	kept, _ := db.FindJobExecutionByJobID(ctx, "job-1")
+	if !kept.TraceJobs.Valid || kept.TraceJobs.String != tjJSON {
+		t.Errorf("empty trace_jobs should preserve existing, got %+v", kept.TraceJobs)
+	}
+
 	stats, err := db.GetExecutionStats(ctx, nil)
 	if err != nil {
 		t.Fatalf("stats: %v", err)

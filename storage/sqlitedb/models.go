@@ -42,6 +42,13 @@ type JobExecution struct {
 	CompletedAt    sql.NullTime   `json:"completedAt"`
 	CreatedAt      time.Time      `json:"createdAt"`
 
+	// WorkloadNote — job 상세 워크로드 컨텍스트에서 사용자가 직접 남긴 메모 (규칙 자동 해석 오버라이드).
+	WorkloadNote sql.NullString `json:"workloadNote"`
+
+	// TraceJobs — 이 job 에 연결된 trace job 매핑 JSON array (step/loop/repeat/type + traceJobId).
+	// 만료된 job 도 job 상세에서 기존 trace UI 로 진입할 수 있게 영속화.
+	TraceJobs sql.NullString `json:"traceJobs"`
+
 	// Trace archive 메타 (nullable)
 	TraceRawKey         sql.NullString `json:"traceRawKey"`
 	TraceRawFormat      sql.NullString `json:"traceRawFormat"`

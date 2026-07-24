@@ -13,7 +13,8 @@ const execCols = `id, job_id, server_id, server_name, type, tool, job_name, devi
 	state, config, result_summary, scheduled_job_id, retry_attempt, error_message,
 	started_at, completed_at, created_at,
 	trace_raw_key, trace_raw_format, trace_raw_size, trace_raw_uploaded_at,
-	trace_parquet_keys, trace_parsed_at, trace_parse_state, trace_parse_error`
+	trace_parquet_keys, trace_parsed_at, trace_parse_state, trace_parse_error,
+	workload_note, trace_jobs`
 
 func scanExec(row interface{ Scan(...any) error }) (*JobExecution, error) {
 	e := &JobExecution{}
@@ -24,6 +25,7 @@ func scanExec(row interface{ Scan(...any) error }) (*JobExecution, error) {
 		&startedAt, &completedAt, &createdAt,
 		&e.TraceRawKey, &e.TraceRawFormat, &e.TraceRawSize, &traceRawUploadedAt,
 		&e.TraceParquetKeys, &traceParsedAt, &e.TraceParseState, &e.TraceParseError,
+		&e.WorkloadNote, &e.TraceJobs,
 	)
 	if err != nil {
 		return nil, err
@@ -110,6 +112,39 @@ func (db *DB) UpdateJobExecutionState(ctx context.Context, jobID, state, errMsg 
 // UpdateJobExecutionResultSummary — 최종 결과 metric JSON 저장.
 func (db *DB) UpdateJobExecutionResultSummary(ctx context.Context, jobID, resultJSON string) error {
 	res, err := db.ExecContext(ctx, `UPDATE job_executions SET result_summary=? WHERE job_id=?`, resultJSON, jobID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateJobExecutionWorkloadNote — job 상세 워크로드 컨텍스트 메모 저장/수정.
+// 빈 문자열이면 NULL 로 저장해 규칙 자동 해석으로 되돌린다.
+func (db *DB) UpdateJobExecutionWorkloadNote(ctx context.Context, jobID, note string) error {
+	res, err := db.ExecContext(ctx, `UPDATE job_executions SET workload_note=? WHERE job_id=?`,
+		nullableString(note), jobID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateJobExecutionTraceJobs — 잡 종료 시 trace job 매핑 JSON 을 영속화.
+// 빈 문자열이면 갱신하지 않는다 (기존 값 보존).
+func (db *DB) UpdateJobExecutionTraceJobs(ctx context.Context, jobID, traceJobsJSON string) error {
+	if traceJobsJSON == "" {
+		return nil
+	}
+	res, err := db.ExecContext(ctx, `UPDATE job_executions SET trace_jobs=? WHERE job_id=?`,
+		traceJobsJSON, jobID)
 	if err != nil {
 		return err
 	}
