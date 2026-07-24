@@ -124,7 +124,11 @@ func (m *Manager) RecordScrollEvent(deviceID string, x, y float64, hScroll, vScr
 	// Not directly recorded as scroll — user can add wait/screenshot events manually
 }
 
-// ListInstalledApps returns third-party installed apps on the device.
+// ListInstalledApps returns launchable apps on the device (런처에서 실행 가능한 앱).
+//
+// third-party(-3) 만 가져오면 기본 유튜브·크롬 같은 시스템앱이 빠진다. 대신 LAUNCHER
+// 인텐트를 가진 액티비티를 조회해 "런처에 아이콘으로 뜨는 앱"을 모두 포함한다. 배경
+// 서비스/프로바이더는 제외되고, 사용자가 실제로 열 수 있는 앱만 남는다.
 func (m *Manager) ListInstalledApps(ctx context.Context, req *pb.ListInstalledAppsRequest) (*pb.ListInstalledAppsResponse, error) {
 	serial, err := m.adbMgr.GetDeviceSerial(req.DeviceId)
 	if err != nil {
@@ -133,29 +137,61 @@ func (m *Manager) ListInstalledApps(ctx context.Context, req *pb.ListInstalledAp
 
 	dev := adb.NewDevice(serial)
 
-	// Get third-party packages
-	out, err := dev.Shell(ctx, "pm list packages -3")
-	if err != nil {
-		return nil, fmt.Errorf("pm list packages: %w", err)
+	// LAUNCHER 인텐트를 가진 액티비티 조회 → "package/activity" 라인들.
+	out, err := dev.Shell(ctx,
+		"cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER")
+	pkgs := parseLaunchablePackages(out)
+
+	// query-activities 미지원/실패 시 third-party 목록으로 폴백.
+	if err != nil || len(pkgs) == 0 {
+		fallback, ferr := dev.Shell(ctx, "pm list packages -3")
+		if ferr != nil {
+			return nil, fmt.Errorf("list apps: %w", ferr)
+		}
+		pkgs = nil
+		seen := make(map[string]bool)
+		for _, line := range strings.Split(fallback, "\n") {
+			pkg := strings.TrimPrefix(strings.TrimSpace(line), "package:")
+			if pkg != "" && !seen[pkg] {
+				seen[pkg] = true
+				pkgs = append(pkgs, pkg)
+			}
+		}
 	}
 
-	var apps []*pb.InstalledApp
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		pkg := strings.TrimPrefix(line, "package:")
-		if pkg == "" || pkg == line {
-			continue
-		}
-
-		// Get app label
-		label := getAppLabel(ctx, dev, pkg)
+	apps := make([]*pb.InstalledApp, 0, len(pkgs))
+	for _, pkg := range pkgs {
 		apps = append(apps, &pb.InstalledApp{
 			PackageName: pkg,
-			AppName:     label,
+			AppName:     getAppLabel(ctx, dev, pkg),
 		})
 	}
-
 	return &pb.ListInstalledAppsResponse{Apps: apps}, nil
+}
+
+// parseLaunchablePackages 는 `cmd package query-activities --brief` 출력에서
+// 고유 패키지명을 추출한다. 라인 형식: "  com.example/com.example.MainActivity".
+func parseLaunchablePackages(out string) []string {
+	var pkgs []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		// "package/activity" 형태만 관심. component name 은 '/' 를 포함한다.
+		slash := strings.Index(line, "/")
+		if slash <= 0 {
+			continue
+		}
+		pkg := line[:slash]
+		// 패키지명처럼 보이는지(점 포함, 공백 없음) 최소 검증.
+		if strings.Contains(pkg, " ") || !strings.Contains(pkg, ".") {
+			continue
+		}
+		if !seen[pkg] {
+			seen[pkg] = true
+			pkgs = append(pkgs, pkg)
+		}
+	}
+	return pkgs
 }
 
 // ReplayMacro replays recorded events on the device using ADB input commands.

@@ -9,6 +9,7 @@
 	} from '$lib/api/agent.js';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import IOTestEditor from './iotest/IOTestEditor.svelte';
+	import AppSearchSelect from './AppSearchSelect.svelte';
 	import type { IOTestConfig } from './iotest/types.js';
 
 	let availableMacros = $state<AppMacro[]>([]);
@@ -613,26 +614,15 @@
 						</p>
 						<div class="space-y-1">
 							<label class="{sectionLabel}">패키지</label>
-							{#if installedApps.length > 0}
-								<select
-									value={local.launchPackage ?? ''}
-									onchange={(e) => { if (local) local.launchPackage = (e.target as HTMLSelectElement).value; }}
-									class="w-full border rounded px-2 py-1 text-xs bg-background"
-								>
-									<option value="">앱 선택...</option>
-									{#each installedApps as app (app.packageName)}
-										<option value={app.packageName}>{app.appName || app.packageName} ({app.packageName})</option>
-									{/each}
-								</select>
-							{:else}
-								<input
-									value={local.launchPackage ?? ''}
-									oninput={(e) => { if (local) local.launchPackage = (e.target as HTMLInputElement).value; }}
-									class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
-									placeholder="com.google.android.youtube"
-								/>
-								<p class="{captionMuted}">{deviceId ? '설치된 앱을 가져오지 못했습니다. 패키지명을 직접 입력하세요.' : '디바이스를 선택하면 앱 목록이 나옵니다. 지금은 직접 입력하세요.'}</p>
-							{/if}
+							<!-- 검색 가능한 콤보박스: 앱 이름/패키지명으로 검색, 목록에 없는 값도 직접 입력. -->
+							<AppSearchSelect
+								bind:value={local.launchPackage}
+								apps={installedApps}
+								placeholder="앱 이름 또는 패키지명 검색 (예: youtube)"
+							/>
+							<p class="{captionMuted}">
+								{installedApps.length > 0 ? `실행 가능한 앱 ${installedApps.length}개 검색 가능 (시스템앱 포함). ` : ''}목록에 없는 패키지도 직접 입력할 수 있습니다.
+							</p>
 						</div>
 						<div class="space-y-1">
 							<label class="{sectionLabel}">초기화 모드</label>
