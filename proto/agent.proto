@@ -758,6 +758,7 @@ message UiElement {
   int32 bound_top = 9;
   int32 bound_right = 10;
   int32 bound_bottom = 11;
+  string container_id = 12;            // 가장 가까운 스크롤 컨테이너 id (자동 채움용)
 }
 
 // ==================== Trace Reparse ====================

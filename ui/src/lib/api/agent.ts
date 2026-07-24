@@ -597,6 +597,7 @@ export interface UIElement {
 	centerX: number;
 	centerY: number;
 	bounds: [number, number, number, number]; // [x1, y1, x2, y2]
+	containerId: string; // 가장 가까운 스크롤 컨테이너 id (자동 채움용)
 }
 
 export interface OcrRegion {

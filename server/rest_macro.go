@@ -515,6 +515,7 @@ func uiElementToMap(e *pb.UiElement) map[string]any {
 		"bounds": []int32{
 			e.GetBoundLeft(), e.GetBoundTop(), e.GetBoundRight(), e.GetBoundBottom(),
 		},
+		"containerId": e.GetContainerId(),
 	}
 }
 

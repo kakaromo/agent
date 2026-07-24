@@ -6299,6 +6299,7 @@ type UiElement struct {
 	BoundTop      int32                  `protobuf:"varint,9,opt,name=bound_top,json=boundTop,proto3" json:"bound_top,omitempty"`
 	BoundRight    int32                  `protobuf:"varint,10,opt,name=bound_right,json=boundRight,proto3" json:"bound_right,omitempty"`
 	BoundBottom   int32                  `protobuf:"varint,11,opt,name=bound_bottom,json=boundBottom,proto3" json:"bound_bottom,omitempty"`
+	ContainerId   string                 `protobuf:"bytes,12,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"` // 가장 가까운 스크롤 컨테이너 id (자동 채움용)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6408,6 +6409,13 @@ func (x *UiElement) GetBoundBottom() int32 {
 		return x.BoundBottom
 	}
 	return 0
+}
+
+func (x *UiElement) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
 }
 
 type ReparseTraceRequest struct {
@@ -7507,7 +7515,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12,\n" +
 	"\belements\x18\x02 \x03(\v2\x10.agent.UiElementR\belements\x12!\n" +
 	"\fdevice_width\x18\x03 \x01(\x05R\vdeviceWidth\x12#\n" +
-	"\rdevice_height\x18\x04 \x01(\x05R\fdeviceHeight\"\xcd\x02\n" +
+	"\rdevice_height\x18\x04 \x01(\x05R\fdeviceHeight\"\xf0\x02\n" +
 	"\tUiElement\x12\x1f\n" +
 	"\vresource_id\x18\x01 \x01(\tR\n" +
 	"resourceId\x12\x12\n" +
@@ -7523,7 +7531,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\vbound_right\x18\n" +
 	" \x01(\x05R\n" +
 	"boundRight\x12!\n" +
-	"\fbound_bottom\x18\v \x01(\x05R\vboundBottom\",\n" +
+	"\fbound_bottom\x18\v \x01(\x05R\vboundBottom\x12!\n" +
+	"\fcontainer_id\x18\f \x01(\tR\vcontainerId\",\n" +
 	"\x13ReparseTraceRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"J\n" +
 	"\x14ReparseTraceResponse\x12\x18\n" +

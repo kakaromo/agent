@@ -213,7 +213,9 @@
 			x: el.centerX,
 			y: el.centerY,
 			matchMode: opts.matchMode ?? 'exact',
-			index: opts.index ?? 0
+			index: opts.index ?? 0,
+			// 패턴 모드면 자동 감지된 스크롤 컨테이너로 검색 범위 한정 (유저는 id 를 몰라도 됨).
+			containerId: useSuffix ? el.containerId : ''
 		});
 		const kind = opts.matchMode === 'suffix' ? `패턴(*${opts.suffix})` : `${selectorKind(el)}=${elementLabel(el)}`;
 		toast.success(`요소 추가: ${kind}`);
@@ -691,6 +693,11 @@
 					<div class="rounded bg-muted/50 px-2 py-1 text-[10px] font-mono break-all">
 						원본: {elementLabel(pendingEl)}
 					</div>
+					{#if pendingEl.containerId}
+						<div class="flex items-center gap-1.5 text-[10px] text-green-600 dark:text-green-400">
+							<span>✓ 이 목록 안에서만 검색하도록 자동 설정됨</span>
+						</div>
+					{/if}
 					<div class="space-y-1">
 						<label class="text-[10px] font-medium text-muted-foreground">접미사 패턴 (이 꼬리표로 끝나는 요소 매칭)</label>
 						<input

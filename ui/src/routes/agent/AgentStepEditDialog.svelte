@@ -515,15 +515,23 @@
 								text/content-desc 를 패턴으로 해석합니다. 콘텐츠 값이 바뀌어도 같은 자리의 요소를 재현합니다.
 							</p>
 						{/if}
-						<div class="space-y-1">
-							<label class="{sectionLabel}">컨테이너 Resource ID (선택 — 이 목록 안에서만 검색)</label>
+						<!-- 컨테이너는 라이브 화면에서 요소 클릭 시 자동 채워진다.
+						     유저는 id 를 직접 알 필요가 없어 기본은 상태 표시만, 상세는 details 안에. -->
+						{#if local.elementContainerId}
+							<div class="flex items-center justify-between text-[10px] text-green-600 dark:text-green-400">
+								<span>✓ 이 목록(스크롤 영역) 안에서만 검색</span>
+								<button type="button" class="underline text-muted-foreground" onclick={() => { if (local) local.elementContainerId = ''; }}>지우기</button>
+							</div>
+						{/if}
+						<details class="text-[10px]">
+							<summary class="cursor-pointer text-muted-foreground">고급: 컨테이너 Resource ID 직접 지정</summary>
 							<input
 								value={local.elementContainerId ?? ''}
 								oninput={(e) => { if (local) local.elementContainerId = (e.target as HTMLInputElement).value; }}
-								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
-								placeholder="com.google.android.youtube:id/results"
+								class="w-full border rounded px-2 py-1 text-xs bg-background font-mono mt-1"
+								placeholder="라이브 화면에서 요소를 클릭하면 자동으로 채워집니다"
 							/>
-						</div>
+						</details>
 						<div class="flex gap-2">
 							<div class="space-y-1 flex-1">
 								<label class="{sectionLabel}">폴백 X</label>

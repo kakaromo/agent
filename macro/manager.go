@@ -257,6 +257,7 @@ func (m *Manager) ListUiElements(ctx context.Context, req *pb.ListUiElementsRequ
 			BoundTop:    int32(e.Bounds[1]),
 			BoundRight:  int32(e.Bounds[2]),
 			BoundBottom: int32(e.Bounds[3]),
+			ContainerId: e.ContainerID,
 		})
 	}
 	return &pb.ListUiElementsResponse{

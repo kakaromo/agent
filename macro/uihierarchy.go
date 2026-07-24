@@ -26,6 +26,10 @@ type UIElement struct {
 	// ancestorIDs 는 이 요소의 조상 노드 resource-id 목록(빈 값 제외).
 	// 컨테이너 스코프 매칭(element_container_id)에 쓴다. JSON 으로 내보내지 않는다.
 	ancestorIDs []string
+	// ContainerID 는 이 요소를 담은 "가장 가까운 스크롤 컨테이너"의 resource-id.
+	// 없으면 빈 문자열. 유저가 라이브 화면에서 요소를 클릭할 때 컨테이너를 자동
+	// 채우기 위한 값 — 유저는 id 를 직접 알 필요가 없다.
+	ContainerID string `json:"containerId"`
 }
 
 // uiNode 는 uiautomator dump XML 의 <node> 요소를 언마샬링하기 위한 내부 구조체다.
@@ -36,6 +40,7 @@ type uiNode struct {
 	ContentDesc string   `xml:"content-desc,attr"`
 	Class       string   `xml:"class,attr"`
 	Clickable   string   `xml:"clickable,attr"`
+	Scrollable  string   `xml:"scrollable,attr"`
 	Bounds      string   `xml:"bounds,attr"`
 	Children    []uiNode `xml:"node"`
 }
@@ -78,9 +83,10 @@ func parseUIElements(xmlStr string, clickableOnly bool) ([]UIElement, error) {
 	}
 
 	var elements []UIElement
-	// ancestors 는 현재 노드까지 내려오는 경로의 resource-id 스택.
-	var walk func(n *uiNode, ancestors []string)
-	walk = func(n *uiNode, ancestors []string) {
+	// ancestors: 현재 노드까지 내려오는 경로의 resource-id 스택.
+	// container: 가장 가까운 "스크롤 컨테이너(scrollable=true + id 있음)"의 resource-id.
+	var walk func(n *uiNode, ancestors []string, container string)
+	walk = func(n *uiNode, ancestors []string, container string) {
 		clickable := n.Clickable == "true"
 		if !clickableOnly || clickable {
 			bounds, ok := parseBounds(n.Bounds)
@@ -101,6 +107,7 @@ func parseUIElements(xmlStr string, clickableOnly bool) ([]UIElement, error) {
 						CenterY:     (bounds[1] + bounds[3]) / 2,
 						Bounds:      bounds,
 						ancestorIDs: anc,
+						ContainerID: container,
 					})
 				}
 			}
@@ -110,12 +117,17 @@ func parseUIElements(xmlStr string, clickableOnly bool) ([]UIElement, error) {
 		if n.ResourceID != "" {
 			childAncestors = append(ancestors, n.ResourceID)
 		}
+		// 현재 노드가 스크롤 컨테이너이고 id 가 있으면, 자식들의 컨테이너로 갱신.
+		childContainer := container
+		if n.Scrollable == "true" && n.ResourceID != "" {
+			childContainer = n.ResourceID
+		}
 		for i := range n.Children {
-			walk(&n.Children[i], childAncestors)
+			walk(&n.Children[i], childAncestors, childContainer)
 		}
 	}
 	for i := range root.Nodes {
-		walk(&root.Nodes[i], nil)
+		walk(&root.Nodes[i], nil, "")
 	}
 	return elements, nil
 }

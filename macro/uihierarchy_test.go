@@ -91,6 +91,37 @@ func TestFindElement_SuffixPattern(t *testing.T) {
 	}
 }
 
+func TestParseUIElements_AutoContainer(t *testing.T) {
+	// feedXML 의 results 는 scrollable=true 가 아니므로, scrollable 을 붙인 변형으로 검증.
+	xml := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node class="A" resource-id="com.yt:id/root" clickable="false" scrollable="false" bounds="[0,0][1440,3120]">
+    <node class="RecyclerView" resource-id="com.yt:id/results" clickable="false" scrollable="true" bounds="[0,300][1440,3000]">
+      <node text="" resource-id="" content-desc="영상 A - 동영상 재생" class="C" clickable="true" bounds="[45,313][705,1303]"></node>
+    </node>
+    <node text="" resource-id="com.yt:id/menu_search" content-desc="검색" class="D" clickable="true" bounds="[1300,100][1400,200]"></node>
+  </node>
+</hierarchy>`
+	els, _ := parseUIElements(xml, true)
+	var vid, search *UIElement
+	for i := range els {
+		if els[i].ContentDesc == "영상 A - 동영상 재생" {
+			vid = &els[i]
+		}
+		if els[i].ContentDesc == "검색" {
+			search = &els[i]
+		}
+	}
+	// 피드 안 영상은 컨테이너가 results 로 자동 감지
+	if vid == nil || vid.ContainerID != "com.yt:id/results" {
+		t.Fatalf("영상 컨테이너 자동감지 실패: %+v", vid)
+	}
+	// 컨테이너 밖 검색 버튼은 컨테이너 없음
+	if search == nil || search.ContainerID != "" {
+		t.Fatalf("검색 버튼은 컨테이너 없어야: %+v", search)
+	}
+}
+
 func TestFindElement_ContainerScope(t *testing.T) {
 	els, _ := parseUIElements(feedXML, true)
 	// results 컨테이너 안에서만 검색 → 검색 버튼(컨테이너 밖)은 제외
