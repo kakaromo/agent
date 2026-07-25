@@ -11,7 +11,7 @@ trace_grpc_port = 50053
 # Enabled=true 시 127.0.0.1 만 바인딩, Svelte UI 서빙, tools/trace 대신 Go 내장 파서 사용.
 # CLI 플래그(--standalone)로도 켤 수 있다.
 [standalone]
-enabled = false
+enabled = true
 # db_path = 미설정 시 $HOME/.agent-standalone/agent.db. CLI: --db-path
 # archive_base = "" (미설정 시 $HOME/.agent-standalone/archive).
 #   /api/agent/upload/benchmark → <archive_base>/<remotePath>/<jobId>/{deviceId}_result.json
