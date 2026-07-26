@@ -177,6 +177,29 @@ func registerMacroRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sqlit
 		writeJSON(w, http.StatusOK, apps)
 	})
 
+	// macro/current-activity — 현재 포그라운드 activity 조회 (wait_until 자동 채움용)
+	mux.HandleFunc("/api/agent/macro/current-activity", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		deviceID := r.URL.Query().Get("deviceId")
+		if deviceID == "" {
+			writeError(w, http.StatusBadRequest, "deviceId required")
+			return
+		}
+		act, err := agent.GetCurrentActivity(r.Context(), deviceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"component": act.Component,
+			"package":   act.Package,
+			"raw":       act.Raw,
+		})
+	})
+
 	// macro/ui-elements  (gRPC ListUiElements) — 요소 기반 시나리오 빌더용
 	mux.HandleFunc("/api/agent/macro/ui-elements", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

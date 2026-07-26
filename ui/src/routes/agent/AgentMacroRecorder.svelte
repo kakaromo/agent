@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
 		fetchAppMacros, createAppMacro, updateAppMacro, deleteAppMacro, duplicateAppMacro,
-		listInstalledApps, replayMacro, getScreenWebSocketUrl,
+		listInstalledApps, replayMacro, getScreenWebSocketUrl, fetchCurrentActivity,
 		type AppMacro, type MacroEvent, type InstalledApp
 	} from '$lib/api/agent.js';
 	import AgentAppManager from './AgentAppManager.svelte';
@@ -167,6 +167,28 @@
 			toast.error('앱 목록 조회 실패: ' + (e.message ?? ''));
 		} finally {
 			appsLoading = false;
+		}
+	}
+
+	// 현재 디바이스의 포그라운드 activity 를 조회해 wait_until 패턴에 채운다.
+	let activityLoading = $state(false);
+	async function fillCurrentActivity() {
+		if (serverId == null || !firstSelectedDevice) {
+			toast.error('서버와 디바이스를 선택해주세요');
+			return;
+		}
+		activityLoading = true;
+		try {
+			const act = await fetchCurrentActivity(serverId, firstSelectedDevice);
+			// component("pkg/activity") 우선, 없으면 package, 그것도 없으면 raw.
+			const value = act.component || act.package || act.raw;
+			if (!value) { toast.error('현재 activity 를 읽지 못했습니다'); return; }
+			insertForm.waitPattern = value;
+			toast.success('현재 activity: ' + value);
+		} catch (e: any) {
+			toast.error('activity 조회 실패: ' + (e.message ?? ''));
+		} finally {
+			activityLoading = false;
 		}
 	}
 
@@ -812,8 +834,21 @@
 					</label>
 					{#if insertForm.waitMethod !== 'screen_stable'}
 						<label class="block"><span class="text-xs text-muted-foreground">감지 패턴</span>
-							<input bind:value={insertForm.waitPattern} placeholder="예: 다시 테스트" class="w-full rounded border px-2 py-1 text-xs mt-1 bg-background" />
+							<input bind:value={insertForm.waitPattern} placeholder={insertForm.waitMethod === 'activity' ? '예: com.google.android.youtube' : '예: 다시 테스트'} class="w-full rounded border px-2 py-1 text-xs mt-1 bg-background" />
 						</label>
+						{#if insertForm.waitMethod === 'activity'}
+							<button
+								type="button"
+								onclick={fillCurrentActivity}
+								disabled={activityLoading || !firstSelectedDevice}
+								class="w-full rounded border px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50 flex items-center justify-center gap-1"
+								title="선택된 디바이스의 현재 화면 activity 를 읽어 패턴에 채웁니다">
+								{activityLoading ? '조회 중…' : '현재 activity 가져오기'}
+							</button>
+							<p class="text-[10px] text-muted-foreground">
+								기다릴 화면을 디바이스에 띄운 뒤 누르면 현재 activity 를 자동으로 채웁니다. 부분 일치라 패키지명만으로도 동작합니다.
+							</p>
+						{/if}
 					{/if}
 					<div class="grid grid-cols-2 gap-2">
 						<label><span class="text-xs text-muted-foreground">타임아웃 (초)</span>

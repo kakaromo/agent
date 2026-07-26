@@ -267,3 +267,58 @@ func (m *Manager) ListUiElements(ctx context.Context, req *pb.ListUiElementsRequ
 		DeviceHeight: int32(height),
 	}, nil
 }
+
+// CurrentActivity holds the parsed foreground activity of a device.
+type CurrentActivity struct {
+	// Raw 는 `dumpsys window | grep mCurrentFocus` 원본 라인.
+	Raw string
+	// Component 는 파싱된 "package/activity" (없으면 빈 문자열).
+	Component string
+	// Package 는 파싱된 패키지명 (없으면 빈 문자열).
+	Package string
+}
+
+// GetCurrentActivity 는 디바이스의 현재 포그라운드 activity 를 조회한다.
+// wait_until(activity) 스텝의 waitPattern 을 UI 에서 자동 채우는 데 사용.
+//
+// mCurrentFocus 출력 예:
+//
+//	mCurrentFocus=Window{abc123 u0 com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity}
+//
+// 여기서 "package/activity" 컴포넌트를 뽑아 Component/Package 로 반환한다.
+func (m *Manager) GetCurrentActivity(ctx context.Context, deviceID string) (*CurrentActivity, error) {
+	serial, err := m.adbMgr.GetDeviceSerial(deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("device not found: %w", err)
+	}
+	dev := adb.NewDevice(serial)
+	raw, err := getDeviceActivityFocus(ctx, dev)
+	if err != nil {
+		return nil, fmt.Errorf("get current activity: %w", err)
+	}
+
+	res := &CurrentActivity{Raw: raw}
+	res.Component, res.Package = parseFocusComponent(raw)
+	return res, nil
+}
+
+// parseFocusComponent 는 mCurrentFocus 라인에서 "package/activity" 와 패키지명을 뽑는다.
+// 매칭 실패 시 빈 문자열을 반환한다 (호출측에서 Raw 로 폴백).
+func parseFocusComponent(raw string) (component, pkg string) {
+	// "package/activity" 는 '/' 를 포함하고 공백이 없는 토큰이다.
+	// 라인을 공백으로 쪼개 그런 토큰을 찾는다 ('}' 등 후행 문자는 제거).
+	for _, tok := range strings.Fields(raw) {
+		t := strings.TrimRight(tok, "}")
+		if !strings.Contains(t, "/") {
+			continue
+		}
+		// 패키지명은 '.' 을 포함하는 게 일반적 (com.foo.bar). 이걸로 노이즈 토큰 배제.
+		slash := strings.Index(t, "/")
+		p := t[:slash]
+		if p == "" || !strings.Contains(p, ".") {
+			continue
+		}
+		return t, p
+	}
+	return "", ""
+}
