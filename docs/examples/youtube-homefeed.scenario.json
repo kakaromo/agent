@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "유튜브 홈피드 소비",
+  "description": "홈피드 스크롤 + 영상 재생 구간의 UFS trace. READ 지배 워크로드(피드/영상 프리페치). warm start(clearMode=none).",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "ufs" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.google.android.youtube",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "wait", "seconds": 3 },
+          { "type": "scroll_capture", "direction": "down", "maxScrolls": 8, "scrollPause": 1 },
+          { "type": "tap_element", "elementText": "동영상", "elementMatchMode": "contains", "x": 540, "y": 800 },
+          { "type": "wait", "seconds": 5 },
+          { "type": "key", "keycode": 86 }
+        ]
+      }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "requirements": {
+    "packages": ["com.google.android.youtube"],
+    "sourceWidth": 1080,
+    "sourceHeight": 2340,
+    "traceType": "ufs"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}
