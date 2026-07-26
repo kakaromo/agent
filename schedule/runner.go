@@ -45,6 +45,10 @@ func sqlNullInt64(n int64) sql.NullInt64 {
 type JobRunner interface {
 	RunBenchmark(ctx context.Context, req *pb.RunBenchmarkRequest) (*pb.RunBenchmarkResponse, error)
 	RunScenario(ctx context.Context, req *pb.RunScenarioRequest) (*pb.RunScenarioResponse, error)
+	// RunScenarioFromScheduleConfig — ScheduledJob.Config(JSON) 를 RunScenarioRequest 로
+	// 변환(수동 /scenario/run 과 동일 경로)한 뒤 실행하고 jobID 를 반환한다.
+	// schedule 패키지가 server 를 import 할 수 없어(cycle) 변환을 server 로 위임하기 위한 메서드.
+	RunScenarioFromScheduleConfig(ctx context.Context, config string, deviceIDs []string, scenarioName, busyPolicy string) (string, error)
 }
 
 // Runner — cron 라이브러리 + DB + JobRunner 를 묶는다.
@@ -215,19 +219,18 @@ func (r *Runner) dispatch(ctx context.Context, j *sqlitedb.ScheduledJob) (string
 		r.saveExecution(ctx, resp.GetJobId(), "benchmark", toolStr, jobName, j, deviceIDs, cfg)
 		return resp.GetJobId(), nil
 	case "scenario":
-		stepsRaw, _ := cfg["stepsJson"].(string)
-		loopsRaw, _ := cfg["loopsJson"].(string)
-		repeat := int32(1)
-		if v, ok := cfg["repeatCount"].(float64); ok {
-			repeat = int32(v)
+		scenarioName, _ := cfg["scenarioName"].(string)
+		if scenarioName == "" {
+			scenarioName = j.Name
 		}
-		// 단순화: ScenarioStep / ScenarioLoop 풀 파싱은 portal Spring 측의 일이고,
-		// standalone 에서 scenario 자체는 stepsJson / loopsJson 만 RunScenarioRequest 에 직접 매핑할 수 없으니
-		// 현재 phase 에서는 placeholder — Phase 7 이후 ScenarioStep proto 구조에 맞춰 변환.
-		_ = stepsRaw
-		_ = loopsRaw
-		_ = repeat
-		return "", fmt.Errorf("scenario dispatch not yet implemented (Phase 7 후속)")
+		// config(JSON) → RunScenarioRequest 변환 + 실행. 변환은 수동 /scenario/run 과
+		// 동일 경로(server 위임): protojson + tool 정규화 + app_macro macroId hydrate.
+		jobID, err := r.agent.RunScenarioFromScheduleConfig(ctx, j.Config, deviceIDs, scenarioName, j.BusyPolicy)
+		if err != nil {
+			return "", err
+		}
+		r.saveExecution(ctx, jobID, "scenario", "", scenarioName, j, deviceIDs, cfg)
+		return jobID, nil
 	default:
 		return "", fmt.Errorf("unknown schedule type: %s", j.Type)
 	}
