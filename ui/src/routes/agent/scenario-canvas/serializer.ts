@@ -79,10 +79,16 @@ export function canvasToProto(
 			tool: form.type === 'benchmark' ? form.tool : undefined,
 			params
 		};
-		if (form.type === 'app_macro' && form.macroId) {
-			(step as any).macroId = form.macroId;
-			(step as any).macroName = form.macroName;
-			(step as any).macroClearMode = form.macroClearMode ?? 'force_stop';
+		if (form.type === 'app_macro') {
+			if (form.macroId) {
+				// 녹화 매크로 참조: 서버가 DB 에서 events 를 hydrate 한다.
+				(step as any).macroId = form.macroId;
+				(step as any).macroName = form.macroName;
+				(step as any).macroClearMode = form.macroClearMode ?? 'force_stop';
+			} else if (form.macroInline) {
+				// 인라인 macro(events 직접 보유 — import 시나리오): proto macro 필드로 그대로 전송.
+				(step as any).macro = form.macroInline;
+			}
 		}
 		return step;
 		// 참고: tap_element / text 는 params(buildStepParams) 로 셀렉터를 실어 보낸다.
@@ -268,6 +274,9 @@ export function protoToCanvas(
 				macroId: (s as any).macroId ?? null,
 				macroName: (s as any).macroName ?? '',
 				macroClearMode: (s as any).macroClearMode ?? 'force_stop',
+				// 인라인 macro(events 포함) 보존 — macroId 없이 events 를 직접 가진 import 시나리오 대응.
+				// 이게 없으면 캔버스 로드 시 events 가 버려져 실행이 "missing macro config" 로 실패한다.
+				macroInline: (s as any).macro ?? null,
 				iotestConfig
 			};
 
@@ -546,6 +555,12 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		};
 		if (s.launchWaitActivity) params.wait_activity = s.launchWaitActivity;
 		return params;
+	}
+
+	// trace_start: trace_type 을 params 로 실어보낸다. 이게 없으면 서버가 기본값(ufs)을 쓰므로
+	// import 시나리오의 trace_type(both/block)이 유실된다.
+	if (s.type === 'trace_start') {
+		return { trace_type: s.traceType || 'ufs' };
 	}
 
 	// IOTEST: config as JSON in params (independent step type)

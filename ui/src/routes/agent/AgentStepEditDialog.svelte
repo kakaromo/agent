@@ -37,6 +37,9 @@
 		macroId?: number | null;
 		macroName?: string;
 		macroClearMode?: 'none' | 'force_stop' | 'clear';
+		// 인라인 macro config (macroId 없이 events 를 직접 담은 경우 — import 된 시나리오 등).
+		// proto AppMacroConfig shape 을 그대로 보존해 실행 시 되돌려 보낸다.
+		macroInline?: Record<string, unknown> | null;
 		iotestConfig?: IOTestConfig;
 		// 요소 기반 탭(tap_element) 셀렉터 + 폴백 좌표. text 입력은 inputText.
 		elementResourceId?: string;

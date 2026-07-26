@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "브라우저 멀티탭 로딩",
+  "description": "크롬으로 여러 사이트를 연속 로딩하며 캐시 write + 병렬 로딩(QD) + 스크롤 read 를 유발. URL 로딩은 shell(am start)로 처리해 요소 의존 없이 안정적으로 재현. 스크롤은 macro. READ·QD 혼합 워크로드 셀 강화용. 네트워크가 있어야 실제 캐시 IO 가 발생함(오프라인이면 IO 적음).",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "both" }
+    },
+    {
+      "type": "shell",
+      "params": { "cmd": "am force-stop com.android.chrome" }
+    },
+    {
+      "type": "shell",
+      "params": { "cmd": "am start -a android.intent.action.VIEW -d 'https://en.wikipedia.org/wiki/Solid-state_drive' com.android.chrome" }
+    },
+    {
+      "type": "sleep",
+      "params": { "seconds": "5" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.android.chrome",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "scroll_capture", "direction": "down", "maxScrolls": 6, "scrollPause": 1 }
+        ]
+      }
+    },
+    {
+      "type": "shell",
+      "params": { "cmd": "am start -a android.intent.action.VIEW -d 'https://en.wikipedia.org/wiki/Flash_memory' com.android.chrome" }
+    },
+    {
+      "type": "sleep",
+      "params": { "seconds": "4" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.android.chrome",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "scroll_capture", "direction": "down", "maxScrolls": 6, "scrollPause": 1 }
+        ]
+      }
+    },
+    {
+      "type": "shell",
+      "params": { "cmd": "am start -a android.intent.action.VIEW -d 'https://en.wikipedia.org/wiki/UFS' com.android.chrome" }
+    },
+    {
+      "type": "sleep",
+      "params": { "seconds": "4" }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "requirements": {
+    "packages": ["com.android.chrome"],
+    "sourceWidth": 1080,
+    "sourceHeight": 2340,
+    "traceType": "both"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}
