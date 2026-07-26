@@ -672,6 +672,15 @@ func (s *DeviceAgentServer) ScreenshotOcr(ctx context.Context, req *pb.Screensho
 	return s.macroMgr.ScreenshotOcr(ctx, req)
 }
 
+// GetCurrentActivity — 디바이스의 현재 포그라운드 activity 조회 (REST 전용, proto RPC 아님).
+// wait_until(activity) 스텝의 waitPattern 을 UI 에서 자동 채우는 데 쓴다.
+func (s *DeviceAgentServer) GetCurrentActivity(ctx context.Context, deviceID string) (*macro.CurrentActivity, error) {
+	if s.macroMgr == nil {
+		return nil, fmt.Errorf("macro manager not configured")
+	}
+	return s.macroMgr.GetCurrentActivity(ctx, deviceID)
+}
+
 func (s *DeviceAgentServer) ListUiElements(ctx context.Context, req *pb.ListUiElementsRequest) (*pb.ListUiElementsResponse, error) {
 	if s.macroMgr == nil {
 		return &pb.ListUiElementsResponse{Success: false}, fmt.Errorf("macro manager not configured")

@@ -4,7 +4,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { getBasicOptions, getAdvancedOptions, getDefaultParams, type OptionDef } from './benchmarkOptions.js';
 	import {
-		fetchAppMacros, listBundledApks, listInstalledApps,
+		fetchAppMacros, listBundledApks, listInstalledApps, fetchCurrentActivity,
 		type AppMacro, type BundledApk, type InstalledApp
 	} from '$lib/api/agent.js';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
@@ -110,6 +110,29 @@
 			listInstalledApps(serverId, deviceId).then(v => installedApps = v).catch(() => {});
 		}
 	});
+
+	// launch_app 의 "대기할 Activity" 를 현재 디바이스 화면에서 자동으로 채운다.
+	let activityLoading = $state(false);
+	let activityHint = $state('');
+	async function fillWaitActivity() {
+		if (serverId == null || !deviceId || !local) {
+			activityHint = '디바이스를 먼저 선택하세요';
+			return;
+		}
+		activityLoading = true;
+		activityHint = '';
+		try {
+			const act = await fetchCurrentActivity(serverId, deviceId);
+			const value = act.component || act.package || act.raw;
+			if (!value) { activityHint = '현재 activity 를 읽지 못했습니다'; return; }
+			local.launchWaitActivity = value;
+			activityHint = '채움: ' + value;
+		} catch (e: any) {
+			activityHint = '조회 실패: ' + (e?.message ?? '');
+		} finally {
+			activityLoading = false;
+		}
+	}
 
 	function handleSave() {
 		if (local) onSave(local);
@@ -757,12 +780,27 @@
 							</div>
 							<div class="space-y-1 flex-1">
 								<label class="{sectionLabel}">대기할 Activity (선택)</label>
-								<input
-									value={local.launchWaitActivity ?? ''}
-									oninput={(e) => { if (local) local.launchWaitActivity = (e.target as HTMLInputElement).value; }}
-									class="w-full border rounded px-2 py-1 text-xs bg-background font-mono"
-									placeholder="HomeActivity (지정 시 이 화면 뜰 때까지 대기)"
-								/>
+								<div class="flex gap-1">
+									<input
+										value={local.launchWaitActivity ?? ''}
+										oninput={(e) => { if (local) local.launchWaitActivity = (e.target as HTMLInputElement).value; }}
+										class="flex-1 border rounded px-2 py-1 text-xs bg-background font-mono"
+										placeholder="HomeActivity (지정 시 이 화면 뜰 때까지 대기)"
+									/>
+									<button
+										type="button"
+										onclick={fillWaitActivity}
+										disabled={activityLoading || !deviceId}
+										class="shrink-0 border rounded px-2 py-1 text-xs hover:bg-muted disabled:opacity-50 whitespace-nowrap"
+										title="선택된 디바이스의 현재 화면 activity 를 읽어 채웁니다">
+										{activityLoading ? '조회 중…' : '현재 화면'}
+									</button>
+								</div>
+								{#if activityHint}
+									<p class="text-[10px] text-muted-foreground break-all">{activityHint}</p>
+								{:else}
+									<p class="text-[10px] text-muted-foreground">기다릴 화면을 기기에 띄운 뒤 "현재 화면"을 누르면 activity 를 자동으로 채웁니다.</p>
+								{/if}
 							</div>
 						</div>
 					</div>

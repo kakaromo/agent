@@ -692,6 +692,17 @@ export function listInstalledApps(serverId: number, deviceId: string): Promise<I
 	return get(`/agent/macro/installed-apps?serverId=${serverId}&deviceId=${encodeURIComponent(deviceId)}`);
 }
 
+export interface CurrentActivity {
+	component: string;  // "package/activity" (없으면 빈 문자열)
+	package: string;    // 패키지명
+	raw: string;        // mCurrentFocus 원본
+}
+
+// 현재 포그라운드 activity 조회 — wait_until(activity) 의 waitPattern 자동 채움용.
+export function fetchCurrentActivity(serverId: number, deviceId: string): Promise<CurrentActivity> {
+	return get(`/agent/macro/current-activity?serverId=${serverId}&deviceId=${encodeURIComponent(deviceId)}`);
+}
+
 export function startRecording(serverId: number, deviceId: string): Promise<{ success: boolean; sessionId: string }> {
 	return post(`/agent/macro/start-recording?serverId=${serverId}`, { deviceId });
 }
