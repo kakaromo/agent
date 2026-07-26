@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "캐시 정리 / 대량 삭제 (DISCARD)",
+  "description": "앱 캐시 지우기 조작으로 TRIM/DISCARD 폭주를 의도적으로 유발. 정상 조작으론 안 나오는 IO 유형(DISCARD 매트릭스 셀)을 커버. 설정 앱의 저장공간 화면 경로는 OneUI 버전마다 다르니 tap 좌표/요소 텍스트를 실기기에서 재확인 필요(아래는 예시). shell 스텝으로 pm 캐시 삭제를 직접 트리거하는 대안도 가능(주석 참고).",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "block" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.android.settings",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "wait", "seconds": 2 },
+          { "type": "tap_element", "elementText": "저장", "elementMatchMode": "contains", "x": 540, "y": 700 },
+          { "type": "wait", "seconds": 2 },
+          { "type": "tap_element", "elementText": "캐시", "elementMatchMode": "contains", "x": 540, "y": 1200 },
+          { "type": "wait", "seconds": 3 }
+        ]
+      }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "requirements": {
+    "packages": ["com.android.settings"],
+    "sourceWidth": 1080,
+    "sourceHeight": 2340,
+    "traceType": "block"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}

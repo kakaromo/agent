@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "앱 cold start 반복",
+  "description": "force_stop 후 앱 재실행을 반복해 콜드 로딩의 순차 read + 높은 QD(병렬 로드)를 측정. 반복으로 분산 확인(SPEC식 대표성). loops 로 step 0~2(trace_start→app_macro→trace_stop)를 5회 반복.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "ufs" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.google.android.youtube",
+        "clearMode": "force_stop",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "wait_until", "waitMethod": "activity", "waitPattern": "com.google.android.youtube", "timeout": 20, "pollInterval": 1 }
+        ]
+      }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "loops": [
+    { "startStep": 0, "endStep": 2, "count": 5 }
+  ],
+  "requirements": {
+    "packages": ["com.google.android.youtube"],
+    "traceType": "ufs"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}

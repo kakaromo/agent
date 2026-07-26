@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "노트 AI 요약 저장",
+  "description": "문서 로드 + AI 요약 + 결과 저장 구간의 UFS trace. MIXED 워크로드(읽기=문서 로드, 쓰기=결과 저장, SQLite). 삼성 노트는 전체 커스텀뷰라 요소가 uiautomator에 안 잡히는 경우가 많음 → tap 좌표 의존(아래 x,y는 1080x2340 기준 예시, 실기기 재확인 필요). 탭마다 툴팁 팝업이 뜨니 wait 넉넉히.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "ufs" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.samsung.android.app.notes",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "wait", "seconds": 3 },
+          { "type": "tap", "x": 300, "y": 600 },
+          { "type": "wait", "seconds": 2 },
+          { "type": "tap_element", "elementText": "AI", "elementMatchMode": "contains", "x": 900, "y": 180 },
+          { "type": "wait", "seconds": 2 },
+          { "type": "tap_element", "elementText": "요약", "elementMatchMode": "contains", "x": 540, "y": 900 },
+          { "type": "wait_until", "waitMethod": "ui_text", "waitPattern": "완료", "timeout": 30, "pollInterval": 1 }
+        ]
+      }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "requirements": {
+    "packages": ["com.samsung.android.app.notes"],
+    "sourceWidth": 1080,
+    "sourceHeight": 2340,
+    "traceType": "ufs"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}

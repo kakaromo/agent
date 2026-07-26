@@ -42,15 +42,20 @@
 
 | 이벤트 | 필드 (camelCase) | 쓰임 |
 |---|---|---|
-| `tap_element` | `elementText` / `elementResourceId` / `elementMatchMode` / `elementIndex` / `elementContainerId` (+폴백 `x`,`y`) | 동적 콘텐츠 조작 |
 | `tap` | `x`, `y` | 커스텀뷰·게임 좌표 |
+| `tap_element` | `elementText` / `elementResourceId` / `elementContentDesc` / `elementMatchMode` / `elementIndex` / `elementContainerId` (+폴백 `x`,`y`) | 동적 콘텐츠 조작 |
 | `text` | `inputText` | 검색·메시지 입력 |
-| `scroll_capture` | `direction`, `maxScrolls`, `scrollPause` | 피드 로딩(read) |
+| `swipe` | `x`,`y` → `x2`,`y2`, `duration` | 드래그·플링 |
+| `scroll_capture` | `direction`(down/up), `maxScrolls`, `scrollPause` | 피드 로딩(read) |
 | `key` | `keycode` (BACK=4, HOME=3, MEDIA_STOP=86) | 종료·정지 |
 | `wait` | `seconds` (초 단위) | 로딩 대기 |
-| `wait_until` | `waitMethod`, `waitPattern`, `timeout`, `pollInterval` | 조건 대기 |
+| `wait_until` | `waitMethod`(activity/ui_text/screen_stable), `waitPattern`, `timeout`, `pollInterval` | 조건 대기 |
+| `screenshot` | `name`, `ocrRegion`, `ocrPattern` | 캡처·OCR |
 
-앱 실행은 별도 이벤트가 아니라 `app_macro.macro` 의 `packageName` + `clearMode`(none/force_stop/clear)가 담당한다.
+- 좌표 단위 필드(`x`/`y`/`x2`/`y2`)는 `sourceWidth`/`sourceHeight` 기준으로 녹화되고 재생 시 대상 해상도로 스케일된다.
+- `elementMatchMode`: `exact`(기본, 완전일치 후 부분일치 폴백) · `contains` · `prefix` · `suffix` · `regex`.
+- 앱 실행은 별도 이벤트가 아니라 `app_macro.macro` 의 `packageName` + `clearMode`(none/force_stop/clear)가 담당한다.
+- 전체 필드 정의: [`schemas/scenario.schema.json`](../schemas/scenario.schema.json) (proto `MacroEvent` / `server/rest_macro.go` `macroEventToMap` 기준).
 
 ## 3. 측정 구간을 감싼다 — trace 위치가 전부
 
@@ -65,15 +70,20 @@
 
 ## 4. 바로 쓰는 워크로드 카탈로그
 
-IO 특성 매트릭스의 셀을 채우는 시작 세트. 실행 가능한 완전한 JSON 은 [`examples/`](../examples/) 참고.
+IO 특성 매트릭스의 셀을 채우는 시작 세트. 아래 5종 모두 실행 가능한 완전한 JSON 이 [`examples/`](../examples/) 에 있고, 스키마 검증을 통과한다.
 
-| 앱 · 워크로드 | IO 성격 | 흐름 (trace 로 감쌈) |
-|---|---|---|
-| 유튜브 홈피드 소비 | READ 지배 | `app_macro`(scroll_capture ×8 → tap_element → wait → key MEDIA_STOP) |
-| 갤러리 연속 촬영/저장 | WRITE 지배 + DISCARD | `app_macro`(tap 셔터 ×5 → key BACK) |
-| 노트 AI 요약 저장 | MIXED (R+W+SQLite) | `app_macro`(tap 문서 → tap_element AI요약 → wait) — 커스텀뷰라 `tap` 좌표 의존 |
-| 앱 cold start ×N | READ · 높은 QD | loop{ `app_macro`(clearMode=force_stop → wait_until activity) } |
-| 캐시 정리 / 대량 삭제 | DISCARD (TRIM) | `app_macro`(설정/파일앱 → 캐시 지우기) |
+| 앱 · 워크로드 | IO 성격 | 흐름 (trace 로 감쌈) | 파일 |
+|---|---|---|---|
+| 유튜브 홈피드 소비 | READ 지배 | `app_macro`(scroll_capture ×8 → tap_element → wait → key MEDIA_STOP) | [youtube-homefeed](../examples/youtube-homefeed.scenario.json) |
+| 갤러리 연속 촬영/저장 | WRITE 지배 + DISCARD | `app_macro`(tap 셔터 ×5 → key BACK) | [gallery-capture](../examples/gallery-capture.scenario.json) |
+| 노트 AI 요약 저장 | MIXED (R+W+SQLite) | `app_macro`(tap 문서 → tap_element AI요약 → wait_until) — 커스텀뷰라 `tap` 좌표 의존 | [note-ai-summary](../examples/note-ai-summary.scenario.json) |
+| 앱 cold start ×N | READ · 높은 QD | loop{ `app_macro`(clearMode=force_stop → wait_until activity) } ×5 | [cold-start-repeat](../examples/cold-start-repeat.scenario.json) |
+| 캐시 정리 / 대량 삭제 | DISCARD (TRIM) | `app_macro`(설정 → 저장공간 → 캐시 지우기) | [cache-clear-discard](../examples/cache-clear-discard.scenario.json) |
+
+!!! note "좌표 예제는 실기기 재확인 필요"
+    `tap` 좌표(셔터·메뉴 위치)와 일부 `elementText`(OneUI 버전별 라벨)는 기기·앱 버전마다 다르다.
+    예제의 `x`/`y` 는 1080×2340 기준 **예시값** 이며, 각 파일 `description` 에 그 취지가 적혀 있다.
+    실제 실행 전 dry-run 으로 좌표·요소를 맞춘 뒤 `sourceWidth`/`sourceHeight` 와 함께 확정한다.
 
 완전한 예제: [youtube-homefeed.scenario.json](../examples/youtube-homefeed.scenario.json) — 실제 이벤트 필드명(`scroll_capture`/`maxScrolls`/`elementText`/`seconds`)으로 작성돼 스키마 검증을 통과한다.
 
