@@ -26,6 +26,9 @@ import (
 //	PUT    /api/agent/scenario-templates/{id}
 //	DELETE /api/agent/scenario-templates/{id}
 //	POST   /api/agent/scenario-templates/{id}/duplicate
+//	GET    /api/agent/scenario-templates/{id}/export   — 자체완결 .scenario.json 다운로드
+//	GET    /api/agent/scenario-templates/export-all     — 전체 .scenariopack.json 다운로드
+//	POST   /api/agent/scenario-templates/import         — JSON(단일/배열) 업로드 → DB insert
 func registerPresetRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 	// ---------- BenchmarkPreset ----------
 	mux.HandleFunc("/api/agent/benchmark-presets", func(w http.ResponseWriter, r *http.Request) {
@@ -205,9 +208,26 @@ func registerPresetRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 			writeError(w, http.StatusNotFound, "id required")
 			return
 		}
+
+		// 이식(export/import) — 숫자 id 파싱 전에 처리 (경로가 숫자가 아님).
+		if len(parts) == 1 && parts[0] == "import" && r.Method == http.MethodPost {
+			handleScenarioImport(w, r, db)
+			return
+		}
+		if len(parts) == 1 && parts[0] == "export-all" && r.Method == http.MethodGet {
+			handleScenarioExportAll(w, r, db)
+			return
+		}
+
 		id, err := strconv.ParseInt(parts[0], 10, 64)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid id: "+parts[0])
+			return
+		}
+
+		// export: /scenario-templates/{id}/export
+		if len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet {
+			handleScenarioExport(w, r, db, id)
 			return
 		}
 
