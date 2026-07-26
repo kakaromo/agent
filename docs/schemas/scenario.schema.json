@@ -72,8 +72,8 @@
         "clearMode": {
           "type": "string",
           "enum": ["none", "force_stop", "clear"],
-          "default": "none",
-          "description": "앱 초기화 방식. none=warm, force_stop/clear=cold start 재현."
+          "default": "force_stop",
+          "description": "앱 초기화 방식. none=warm start, force_stop(am force-stop)/clear(pm clear)=cold start 재현. 빈 값이면 코드 기본값 force_stop 이 적용되므로(benchmark/scenario.go), warm start 를 원하면 반드시 \"none\" 을 명시할 것."
         },
         "sourceWidth": { "type": "integer", "description": "녹화 기준 해상도 폭. 좌표 tap 이벤트 스케일 기준." },
         "sourceHeight": { "type": "integer" },
