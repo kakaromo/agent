@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "갤러리 연속 촬영/저장",
+  "description": "카메라 연속 촬영 구간의 UFS trace. WRITE 지배(대용량 순차 write) + DISCARD(썸네일 캐시 생성). 셔터/BACK 좌표는 기기별로 다르니 실기기에서 재확인 필요(아래 x,y는 1080x2340 기준 예시).",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "type": "trace_start",
+      "params": { "trace_type": "both" }
+    },
+    {
+      "type": "app_macro",
+      "macro": {
+        "packageName": "com.sec.android.app.camera",
+        "clearMode": "none",
+        "sourceWidth": 1080,
+        "sourceHeight": 2340,
+        "events": [
+          { "type": "wait", "seconds": 3 },
+          { "type": "tap", "x": 540, "y": 2050 },
+          { "type": "wait", "seconds": 1 },
+          { "type": "tap", "x": 540, "y": 2050 },
+          { "type": "wait", "seconds": 1 },
+          { "type": "tap", "x": 540, "y": 2050 },
+          { "type": "wait", "seconds": 1 },
+          { "type": "tap", "x": 540, "y": 2050 },
+          { "type": "wait", "seconds": 1 },
+          { "type": "tap", "x": 540, "y": 2050 },
+          { "type": "wait", "seconds": 2 },
+          { "type": "key", "keycode": 4 }
+        ]
+      }
+    },
+    {
+      "type": "trace_stop",
+      "params": {}
+    }
+  ],
+  "requirements": {
+    "packages": ["com.sec.android.app.camera"],
+    "sourceWidth": 1080,
+    "sourceHeight": 2340,
+    "traceType": "both"
+  },
+  "origin": {
+    "deviceModel": "SM-S938N",
+    "exportedAt": "2026-07-26T00:00:00Z"
+  }
+}

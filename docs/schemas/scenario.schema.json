@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/kakaromo/agent/docs/schemas/scenario.schema.json",
+  "title": "Agent Scenario Export",
+  "description": "시나리오를 자체완결 파일로 내보내는 이식 포맷. 필드명은 server/rest_macro.go 의 macroEventToMap/buildMacroEvent (camelCase) 와 proto ScenarioStep/MacroEvent 를 그대로 따른다.",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "name", "steps"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "포맷 버전. import 시 호환 판정·마이그레이션 기준."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["scenario", "scenario-pack"],
+      "description": "scenario = 단일, scenario-pack = 배열(팀 배포용)."
+    },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "repeatCount": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "전체 시나리오 반복 (RunScenarioRequest.repeat)."
+    },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/scenarioStep" }
+    },
+    "loops": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/scenarioLoop" }
+    },
+    "requirements": { "$ref": "#/definitions/requirements" },
+    "origin": { "$ref": "#/definitions/origin" }
+  },
+  "definitions": {
+    "scenarioStep": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "benchmark", "shell", "cleanup", "sleep",
+            "trace_start", "trace_stop", "condition",
+            "app_macro", "install_apk", "uninstall_apk"
+          ],
+          "description": "proto ScenarioStep.type. 요소 조작(tap_element/scroll_capture/text 등)은 최상위 타입이 아니라 app_macro 스텝의 macro.events 안에 들어간다."
+        },
+        "tool": {
+          "type": "string",
+          "enum": ["fio", "iozone", "tiotest", "iotest"],
+          "description": "type=benchmark 일 때."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "map<string,string>. 예: trace_start → {trace_type:\"ufs\"}, install_apk → {apk_filename:\"foo.apk\"}."
+        },
+        "macro": { "$ref": "#/definitions/appMacroConfig" }
+      }
+    },
+    "appMacroConfig": {
+      "type": "object",
+      "description": "type=app_macro 일 때. 실앱 UX 워크로드를 events 로 재현한다.",
+      "properties": {
+        "macroId": { "type": "integer", "description": "DB 저장 매크로 ID (있으면 events 대신 참조)." },
+        "macroName": { "type": "string" },
+        "packageName": { "type": "string", "description": "실행할 앱 패키지명." },
+        "clearMode": {
+          "type": "string",
+          "enum": ["none", "force_stop", "clear"],
+          "default": "force_stop",
+          "description": "앱 초기화 방식. none=warm start, force_stop(am force-stop)/clear(pm clear)=cold start 재현. 빈 값이면 코드 기본값 force_stop 이 적용되므로(benchmark/scenario.go), warm start 를 원하면 반드시 \"none\" 을 명시할 것."
+        },
+        "sourceWidth": { "type": "integer", "description": "녹화 기준 해상도 폭. 좌표 tap 이벤트 스케일 기준." },
+        "sourceHeight": { "type": "integer" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/macroEvent" }
+        }
+      }
+    },
+    "macroEvent": {
+      "type": "object",
+      "required": ["type"],
+      "description": "proto MacroEvent + macroEventToMap(camelCase). 필드는 type 에 따라 선택적으로 채운다.",
+      "properties": {
+        "t": { "type": "integer", "description": "녹화 시작 기준 경과시간(ms)." },
+        "type": {
+          "type": "string",
+          "enum": ["tap", "tap_element", "text", "swipe", "key", "wait", "wait_until", "screenshot", "scroll_capture"],
+          "description": "이벤트 종류. 주의: 앱 실행은 이벤트가 아니라 appMacroConfig.packageName+clearMode 가 담당(launch 이벤트 없음)."
+        },
+        "x": { "type": "integer", "description": "tap 좌표 (tap_element 폴백 좌표)." },
+        "y": { "type": "integer" },
+        "x2": { "type": "integer", "description": "swipe 끝 좌표." },
+        "y2": { "type": "integer" },
+        "duration": { "type": "integer", "description": "swipe 지속(ms)." },
+        "keycode": { "type": "integer", "description": "key 이벤트 keycode. 예: BACK=4, HOME=3, MEDIA_STOP=86." },
+        "seconds": { "type": "integer", "description": "wait 대기 초(秒 단위, ms 아님)." },
+        "waitMethod": { "type": "string", "enum": ["activity", "ui_text", "screen_stable"], "description": "wait_until 감지 방식." },
+        "waitPattern": { "type": "string", "description": "wait_until 감지 문자열/정규식." },
+        "timeout": { "type": "integer", "description": "wait_until 최대 대기(초)." },
+        "pollInterval": { "type": "integer", "description": "wait_until 확인 간격(초)." },
+        "name": { "type": "string", "description": "screenshot 이름." },
+        "direction": { "type": "string", "enum": ["down", "up"], "description": "scroll_capture 방향." },
+        "maxScrolls": { "type": "integer", "description": "scroll_capture 최대 스크롤 횟수." },
+        "scrollPause": { "type": "integer", "description": "scroll_capture 스크롤 후 대기(초)." },
+        "ocrPattern": { "type": "string" },
+        "elementResourceId": { "type": "string", "description": "tap_element resource-id 셀렉터." },
+        "elementText": { "type": "string", "description": "tap_element text 셀렉터." },
+        "elementContentDesc": { "type": "string", "description": "tap_element content-desc 셀렉터." },
+        "inputText": { "type": "string", "description": "text 이벤트로 입력할 문자열." },
+        "elementMatchMode": {
+          "type": "string",
+          "enum": ["exact", "contains", "prefix", "suffix", "regex"],
+          "description": "동적 콘텐츠 매칭 모드. 빈 값/exact=완전일치 후 부분일치 폴백."
+        },
+        "elementIndex": { "type": "integer", "description": "매칭 요소가 여럿일 때 N번째(0-based)." },
+        "elementContainerId": { "type": "string", "description": "지정 시 해당 컨테이너 하위에서만 검색." }
+      }
+    },
+    "scenarioLoop": {
+      "type": "object",
+      "required": ["startStep", "endStep", "count"],
+      "properties": {
+        "startStep": { "type": "integer", "description": "시작 step index(0-based)." },
+        "endStep": { "type": "integer", "description": "끝 step index(inclusive)." },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "description": "다른 환경 이식의 핵심. import 시 대조해 미충족을 경고한다.",
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "설치돼 있어야 하는 앱 패키지. steps 의 app_macro.packageName 에서 자동 수집."
+        },
+        "sourceWidth": { "type": "integer", "description": "좌표 tap 스텝 기준 해상도. 다르면 경고." },
+        "sourceHeight": { "type": "integer" },
+        "traceType": { "type": "string", "enum": ["ufs", "block", "both"] }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "description": "재현 맥락(선택).",
+      "properties": {
+        "deviceModel": { "type": "string" },
+        "exportedAt": { "type": "string", "format": "date-time" },
+        "contentHash": { "type": "string", "description": "steps+loops 의 sha256. 중복 수입 스킵·변경 감지용." }
+      }
+    }
+  }
+}

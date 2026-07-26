@@ -25,6 +25,16 @@ Go 기반 Android 디바이스 평가 에이전트의 상세 문서.
 ### UI
 - **[Svelte UI 구조](09-ui.md)** — portal/frontend 포팅 노트, 인증 stub, 사이즈 프리셋
 
+### 워크로드 방법론
+- **[워크로드 방법론 개요](workload/README.md)** — 발굴 → 실사용 확인 → 자동 실행 → 조립·이식 전 과정
+- **[배너 설계 근거](workload/01-context-banner-grounding.md)** — 워크로드 컨텍스트 배너가 선 학술·업계 방법론
+- **[시나리오 발굴 방법론](workload/02-scenario-discovery.md)** — 측정할 워크로드를 찾는 5가지 소스
+- **[실사용 워크로드 확인](workload/03-real-usage-discovery.md)** — "자주 쓰는"을 데이터로 정의하는 4층 실측
+- **[자동 실행](workload/04-automation.md)** — 사람이 정의한 워크로드를 자동 반복·순회
+- **[발굴 워크북 (how-to)](workload/05-authoring-howto.md)** — 우리 도구로 시나리오를 직접 조립하는 절차
+- **[시나리오 이식성 설계](workload/06-portability.md)** — export/import 로 다른 환경·팀·git 재사용
+- ADR: **[0001 시나리오 이식성](adr/0001-scenario-portability.md)** · 스키마: [`schemas/scenario.schema.json`](schemas/scenario.schema.json) · 예제: [`examples/`](examples/)
+
 ### 운영
 - **[배포](11-deployment.md)** — 출장 패키지 만들기, Windows 후속 지원
 - **[문제 해결](12-troubleshooting.md)** — 자주 나오는 에러와 해결
