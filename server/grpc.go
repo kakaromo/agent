@@ -17,6 +17,7 @@ import (
 	"agent/monitor"
 	pb "agent/pb"
 	"agent/storage"
+	"agent/storage/sqlitedb"
 	"agent/trace"
 )
 
@@ -30,6 +31,30 @@ type DeviceAgentServer struct {
 	minioClient  *storage.MinioClient
 	macroMgr     *macro.Manager
 	apkMgr       *apkmgr.Manager
+	// db 는 standalone 에서만 주입된다(SetDB). 스케줄 자동 실행 시 app_macro step 의
+	// macroId → events hydrate 에 필요. office 모드에선 nil.
+	db *sqlitedb.DB
+}
+
+// SetDB — standalone 초기화 시 SQLite 핸들을 주입한다. 스케줄러의 scenario
+// 자동 dispatch(app_macro hydrate) 경로에서 사용. office 모드에선 호출되지 않아 db=nil.
+func (s *DeviceAgentServer) SetDB(db *sqlitedb.DB) {
+	s.db = db
+}
+
+// RunScenarioFromScheduleConfig — schedule.Runner 가 호출하는 scenario 자동 실행 진입점.
+// ScheduledJob.Config(JSON) 를 수동 경로(/scenario/run)와 동일한 변환으로 RunScenarioRequest 로
+// 만든 뒤 실행한다. schedule 패키지는 server 를 import 할 수 없어(cycle) 이 메서드로 위임한다.
+func (s *DeviceAgentServer) RunScenarioFromScheduleConfig(ctx context.Context, config string, deviceIDs []string, scenarioName, busyPolicy string) (string, error) {
+	req, err := ScenarioRequestFromScheduleConfig(ctx, s.db, config, deviceIDs, scenarioName, busyPolicy)
+	if err != nil {
+		return "", err
+	}
+	resp, err := s.RunScenario(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetJobId(), nil
 }
 
 func NewDeviceAgentServer(manager *adb.Manager, orchestrator *benchmark.Orchestrator, collector *monitor.Collector, traceMgr *trace.Manager, minioClient *storage.MinioClient, macroMgr *macro.Manager, apkMgr *apkmgr.Manager) *DeviceAgentServer {

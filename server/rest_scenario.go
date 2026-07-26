@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -33,28 +34,10 @@ func registerScenarioRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sq
 			return
 		}
 
-		req := &pb.RunScenarioRequest{}
-		unmarshalOpts := protojson.UnmarshalOptions{DiscardUnknown: true}
-		if err := unmarshalOpts.Unmarshal(raw, req); err != nil {
-			writeError(w, http.StatusBadRequest, "decode scenario: "+err.Error())
+		req, err := scenarioRequestFromRawBody(r.Context(), db, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
-		}
-		if req.BusyPolicy == "" {
-			req.BusyPolicy = "reject"
-		}
-
-		// frontend 가 보내는 tool 값은 짧은 이름 ("FIO") 인 반면 proto enum 정식 이름은
-		// "BENCHMARK_TOOL_FIO" 라 protojson 이 매칭 못해 Tool 이 UNSPECIFIED(0) 로 unmarshal 됨.
-		// raw body 에서 직접 step.tool 을 읽어 우리 parseBenchmarkTool 헬퍼로 정규화.
-		normalizeStepTools(raw, req)
-
-		// macroId → DB events 채우기 (db 있을 때만 = standalone).
-		// portal frontend 의 AgentScenarioBuilder 가 step 에 macroId 만 담는 경우가 흔함.
-		if db != nil {
-			if err := hydrateMacroSteps(r.Context(), db, raw, req); err != nil {
-				writeError(w, http.StatusBadRequest, "hydrate macro: "+err.Error())
-				return
-			}
 		}
 
 		resp, err := agent.RunScenario(r.Context(), req)
@@ -73,6 +56,83 @@ func registerScenarioRoutes(mux *http.ServeMux, agent *DeviceAgentServer, db *sq
 
 		writeJSON(w, http.StatusOK, map[string]any{"jobId": resp.GetJobId()})
 	})
+}
+
+// scenarioRequestFromRawBody — /scenario/run 이 받은 raw JSON body 를 RunScenarioRequest 로 변환.
+//
+// 수동 실행(REST)과 스케줄 자동 실행(schedule.Runner) 이 공유하는 단일 변환 경로:
+//  1. protojson unmarshal (camelCase + proto 필드명 일치 전제, DiscardUnknown)
+//  2. normalizeStepTools — 짧은 tool 이름("FIO") → proto enum 보정
+//  3. hydrateMacroSteps — app_macro step 의 macroId → DB events 채우기 (db != nil)
+//
+// db 가 nil 이면 macro hydrate 를 건너뛴다(office 모드).
+func scenarioRequestFromRawBody(ctx context.Context, db *sqlitedb.DB, raw []byte) (*pb.RunScenarioRequest, error) {
+	req := &pb.RunScenarioRequest{}
+	unmarshalOpts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := unmarshalOpts.Unmarshal(raw, req); err != nil {
+		return nil, fmt.Errorf("decode scenario: %w", err)
+	}
+	if req.BusyPolicy == "" {
+		req.BusyPolicy = "reject"
+	}
+	normalizeStepTools(raw, req)
+	if db != nil {
+		if err := hydrateMacroSteps(ctx, db, raw, req); err != nil {
+			return nil, fmt.Errorf("hydrate macro: %w", err)
+		}
+	}
+	return req, nil
+}
+
+// ScenarioRequestFromScheduleConfig — 스케줄 잡의 config(JSON 객체 문자열) 를 RunScenarioRequest 로 변환.
+//
+// ScheduledJob.Config 는 frontend 가 저장한 { stepsJson, loopsJson?, repeatCount?, deviceIds?, scenarioName?, busyPolicy? }
+// 형태의 JSON 객체다. stepsJson/loopsJson 은 각각 배열이 문자열로 이스케이프된 필드라, 이를 풀어
+// /scenario/run 과 동일한 shape({ steps, loops, repeat, ... }) 의 raw body 로 재조립한 뒤
+// scenarioRequestFromRawBody 를 태운다 — 수동/자동 경로가 완전히 같은 변환을 쓰게 한다.
+//
+// schedule 패키지는 server 를 import 할 수 없으므로(cycle), DeviceAgentServer 메서드로 노출해
+// schedule.JobRunner 인터페이스가 호출한다.
+func ScenarioRequestFromScheduleConfig(ctx context.Context, db *sqlitedb.DB, config string, deviceIDs []string, scenarioName, busyPolicy string) (*pb.RunScenarioRequest, error) {
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
+		return nil, fmt.Errorf("parse schedule config: %w", err)
+	}
+
+	// stepsJson / loopsJson (이스케이프된 배열 문자열) → 실제 배열로 풀기
+	assembled := map[string]any{}
+	if s, ok := cfg["stepsJson"].(string); ok && s != "" {
+		var steps []any
+		if err := json.Unmarshal([]byte(s), &steps); err != nil {
+			return nil, fmt.Errorf("parse stepsJson: %w", err)
+		}
+		assembled["steps"] = steps
+	}
+	if s, ok := cfg["loopsJson"].(string); ok && s != "" {
+		var loops []any
+		if err := json.Unmarshal([]byte(s), &loops); err != nil {
+			return nil, fmt.Errorf("parse loopsJson: %w", err)
+		}
+		assembled["loops"] = loops
+	}
+	if v, ok := cfg["repeatCount"].(float64); ok && v > 0 {
+		assembled["repeat"] = int32(v)
+	}
+	if len(deviceIDs) > 0 {
+		assembled["deviceIds"] = deviceIDs
+	}
+	if scenarioName != "" {
+		assembled["scenarioName"] = scenarioName
+	}
+	if busyPolicy != "" {
+		assembled["busyPolicy"] = busyPolicy
+	}
+
+	raw, err := json.Marshal(assembled)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal scenario config: %w", err)
+	}
+	return scenarioRequestFromRawBody(ctx, db, raw)
 }
 
 // normalizeStepTools — body 의 steps[i].tool 이 "FIO" 같은 짧은 이름이면 proto enum 으로 변환.

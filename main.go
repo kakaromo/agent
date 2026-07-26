@@ -206,6 +206,8 @@ func main() {
 		routerOpts.UIFS = uiFS()
 		routerOpts.EnableUI = true
 		routerOpts.DB = sqliteDB
+		// 스케줄 scenario 자동 dispatch 의 app_macro hydrate 를 위해 db 주입 (office 모드엔 미주입).
+		agentServer.SetDB(sqliteDB)
 		// Cron 러너 시작 — agent gRPC 서버를 JobRunner 로 주입.
 		scheduleRunner = schedule.New(sqliteDB, agentServer)
 		scheduleRunner.Start(ctx)
