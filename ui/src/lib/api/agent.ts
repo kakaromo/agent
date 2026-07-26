@@ -247,6 +247,47 @@ export function duplicateScenarioTemplate(id: number): Promise<ScenarioTemplate>
 	return post(`/agent/scenario-templates/${id}/duplicate`, {});
 }
 
+// ── Scenario Template export/import (이식 계층, ADR-0001) ──
+
+export interface ScenarioImportResult {
+	imported: ScenarioTemplate[];
+	skipped?: string[];
+	warnings?: string[];
+}
+
+// 브라우저 다운로드를 트리거한다. export 는 attachment 응답이라 fetch→blob→a[download] 로 저장.
+async function downloadFromApi(path: string, fallbackFilename: string): Promise<void> {
+	const res = await fetch(`/api${path}`);
+	if (!res.ok) throw new Error(`export 실패 (${res.status})`);
+	// 서버가 준 파일명(Content-Disposition) 우선, 없으면 fallback
+	let filename = fallbackFilename;
+	const cd = res.headers.get('Content-Disposition') || '';
+	const m = cd.match(/filename="?([^"]+)"?/);
+	if (m) filename = decodeURIComponent(m[1]);
+	const blob = await res.blob();
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+export function exportScenarioTemplate(id: number): Promise<void> {
+	return downloadFromApi(`/agent/scenario-templates/${id}/export`, 'scenario.scenario.json');
+}
+
+export function exportAllScenarioTemplates(): Promise<void> {
+	return downloadFromApi('/agent/scenario-templates/export-all', 'scenarios.scenariopack.json');
+}
+
+// import — 파일에서 읽은 JSON(단일 또는 배열)을 그대로 POST. 응답에 imported/skipped/warnings.
+export function importScenarioTemplates(payload: unknown): Promise<ScenarioImportResult> {
+	return post('/agent/scenario-templates/import', payload);
+}
+
 // ── Benchmark Presets ──
 
 export interface BenchmarkPreset {

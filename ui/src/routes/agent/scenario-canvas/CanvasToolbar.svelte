@@ -6,6 +6,9 @@
 		updateScenarioTemplate,
 		deleteScenarioTemplate,
 		duplicateScenarioTemplate,
+		exportScenarioTemplate,
+		exportAllScenarioTemplates,
+		importScenarioTemplates,
 		runScenario,
 		type ScenarioTemplate
 	} from '$lib/api/agent.js';
@@ -18,6 +21,8 @@
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import UploadIcon from '@lucide/svelte/icons/upload';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	interface Props {
@@ -55,6 +60,46 @@
 	async function loadTemplates() {
 		try { templates = await fetchScenarioTemplates(); }
 		catch { templates = []; }
+	}
+
+	// ── 이식(export/import) — ADR-0001 ──
+	let importInputEl = $state<HTMLInputElement | null>(null);
+
+	async function handleExport() {
+		if (selectedTemplateId == null) { toast.info('내보낼 템플릿을 먼저 선택하세요'); return; }
+		try { await exportScenarioTemplate(selectedTemplateId); }
+		catch (e) { toast.error(e instanceof Error ? e.message : '내보내기 실패'); }
+	}
+
+	async function handleExportAll() {
+		if (templates.length === 0) { toast.info('내보낼 시나리오가 없습니다'); return; }
+		try { await exportAllScenarioTemplates(); }
+		catch (e) { toast.error(e instanceof Error ? e.message : '전체 내보내기 실패'); }
+	}
+
+	async function handleImportFile(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		try {
+			const text = await file.text();
+			let payload: unknown;
+			try { payload = JSON.parse(text); }
+			catch { toast.error('JSON 파일을 읽을 수 없습니다'); return; }
+
+			const res = await importScenarioTemplates(payload);
+			const imported = res.imported?.length ?? 0;
+			const skipped = res.skipped?.length ?? 0;
+			if (imported > 0) toast.success(`${imported}개 시나리오를 불러왔습니다${skipped ? ` (중복 ${skipped}개 건너뜀)` : ''}`);
+			else if (skipped > 0) toast.info(`이미 있는 시나리오입니다 (${skipped}개 건너뜀)`);
+			else toast.info('불러온 시나리오가 없습니다');
+			(res.warnings ?? []).forEach((w) => toast.warning(w));
+			await loadTemplates();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : '가져오기 실패');
+		} finally {
+			input.value = '';
+		}
 	}
 
 	function handleTemplateSelect(e: Event) {
@@ -158,8 +203,14 @@
 	</select>
 	{#if selectedTemplateId != null}
 		<button onclick={() => duplicateScenarioTemplate(selectedTemplateId!).then(() => { loadTemplates(); toast.success('복제됨'); })} class="p-1 rounded hover:bg-muted" title="복제"><CopyIcon class="size-3" /></button>
+		<button onclick={handleExport} class="p-1 rounded hover:bg-muted" title="파일로 내보내기 (.scenario.json)"><DownloadIcon class="size-3" /></button>
 		<button onclick={() => requestDelete(selectedTemplateId!)} class="p-1 rounded hover:bg-muted text-red-500" title="삭제"><TrashIcon class="size-3" /></button>
 	{/if}
+	<button onclick={() => importInputEl?.click()} class="p-1 rounded hover:bg-muted" title="파일에서 가져오기 (.scenario.json / .scenariopack.json)"><UploadIcon class="size-3" /></button>
+	{#if templates.length > 0}
+		<button onclick={handleExportAll} class="p-1 rounded hover:bg-muted" title="전체 내보내기 (.scenariopack.json)"><DownloadIcon class="size-3 opacity-70" /></button>
+	{/if}
+	<input bind:this={importInputEl} type="file" accept=".json,application/json" class="hidden" onchange={handleImportFile} />
 
 	<div class="border-l h-5"></div>
 
