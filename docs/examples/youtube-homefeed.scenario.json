@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "kind": "scenario",
   "name": "유튜브 홈피드 소비",
-  "description": "홈피드 스크롤 + 영상 재생 구간의 UFS trace. READ 지배 워크로드(피드/영상 프리페치). warm start(clearMode=none).",
+  "description": "홈피드 스크롤 + 영상 재생 구간의 UFS trace. READ 지배 워크로드(피드/영상 프리페치). warm start(clearMode=none). 유튜브는 접근성 라벨을 text 가 아니라 content-desc 로 제공하므로 tap_element 는 elementContentDesc 로 매칭하고, 영상 제목이 매번 바뀌므로 좌표 폴백(x,y)을 함께 둔다. 영상이 자동재생되면 PIP 방지를 위해 MEDIA_STOP(86)으로 종료.",
   "repeatCount": 1,
   "steps": [
     {
@@ -17,10 +17,10 @@
         "sourceWidth": 1080,
         "sourceHeight": 2340,
         "events": [
-          { "type": "wait", "seconds": 3 },
-          { "type": "scroll_capture", "direction": "down", "maxScrolls": 8, "scrollPause": 1 },
-          { "type": "tap_element", "elementText": "동영상", "elementMatchMode": "contains", "x": 540, "y": 800 },
-          { "type": "wait", "seconds": 5 },
+          { "type": "wait", "seconds": 4 },
+          { "type": "scroll_capture", "direction": "down", "maxScrolls": 6, "scrollPause": 1 },
+          { "type": "tap_element", "elementContentDesc": "시청", "elementMatchMode": "contains", "x": 540, "y": 700 },
+          { "type": "wait", "seconds": 6 },
           { "type": "key", "keycode": 86 }
         ]
       }
