@@ -275,8 +275,11 @@ func handleScenarioImport(w http.ResponseWriter, r *http.Request, db *sqlitedb.D
 		}
 		created, err := db.CreateScenarioTemplate(r.Context(), tmpl)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "create template: "+err.Error())
-			return
+			// 배열 import 중 개별 실패는 warning 으로 모으고 계속 진행한다 —
+			// 이미 insert 된 앞 항목의 결과를 응답에서 잃지 않게. (트랜잭션 아님, 각 항목 독립)
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("%q: 저장 실패 — %v", exp.Name, err))
+			continue
 		}
 		result.Imported = append(result.Imported, scenarioTemplateToMap(created))
 	}
