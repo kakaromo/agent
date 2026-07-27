@@ -22,7 +22,7 @@
 		serverId: number | null;
 		jobId: string | null;
 		activeJobs: ActiveJob[];
-		onViewTrace?: (deviceId: string, jobIds: string[]) => void;
+		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]) => void;
 	}
 
 	let { open = $bindable(), serverId, jobId, activeJobs, onViewTrace }: Props = $props();
@@ -749,7 +749,7 @@
 					<button
 						onclick={() => {
 							const ids = selectedTraceIds.size > 0 ? [...selectedTraceIds] : traceJobIds;
-							onViewTrace(selectedResult?.deviceId ?? '', ids);
+							onViewTrace(selectedResult?.deviceId ?? '', ids, allTraceJobMappings);
 						}}
 						class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
 					>
@@ -819,7 +819,7 @@
 				<!-- 전체 trace 확인 CTA — 이 job 에 trace 가 있으면 기존 trace UI(패턴/QD/CPU/latency)로 바로 진입 -->
 				{#if allTraceJobMappings.length > 0 && onViewTrace}
 					<button
-						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId))}
+						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId), allTraceJobMappings)}
 						class="w-full flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-left hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
 					>
 						<ScanSearchIcon class="size-4 text-blue-600 shrink-0" />
