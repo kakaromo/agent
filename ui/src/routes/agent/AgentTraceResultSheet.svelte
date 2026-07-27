@@ -15,13 +15,52 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import type { ColumnDef } from '@tanstack/table-core';
 
+	// trace job → loop/step/repeat 매핑 (loop 필터용). 없으면 필터 UI 를 숨긴다.
+	interface TraceJobMapping {
+		traceJobId: string;
+		stepIndex?: number;
+		loopIndex?: number;
+		repeatIndex?: number;
+	}
+
 	interface Props {
 		open: boolean;
 		serverId: number | null;
 		jobIds: string[];
+		// 넘겨받은 jobIds 각각의 loop/step 정보. 있으면 "Loop N" 필터를 노출한다.
+		mappings?: TraceJobMapping[];
 	}
 
-	let { open = $bindable(), serverId, jobIds }: Props = $props();
+	let { open = $bindable(), serverId, jobIds, mappings = [] }: Props = $props();
+
+	// ── Loop 필터 ──
+	// selectedLoop: 0 = 전체, 그 외 = 해당 loopIndex 만.
+	let selectedLoop = $state(0);
+	// 사용 가능한 loop 목록 (오름차순, loopIndex>0 인 것만).
+	const loopOptions = $derived.by(() => {
+		const set = new Set<number>();
+		for (const m of mappings) {
+			if (m.loopIndex && m.loopIndex > 0) set.add(m.loopIndex);
+		}
+		return [...set].sort((a, b) => a - b);
+	});
+	// 실제 조회에 쓸 jobIds — loop 선택 시 해당 loop 의 traceJobId 만.
+	const activeJobIds = $derived.by(() => {
+		if (selectedLoop <= 0 || mappings.length === 0) return jobIds;
+		const ids = mappings.filter(m => m.loopIndex === selectedLoop).map(m => m.traceJobId);
+		return ids.length > 0 ? ids : jobIds;
+	});
+
+	// 다른 job 의 trace 를 열면 loop 선택을 초기화한다 (이전 job 의 Loop N 잔존 방지).
+	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
+	let lastFirstJob = $state('');
+	$effect(() => {
+		const first = jobIds[0] ?? '';
+		if (first !== lastFirstJob) {
+			lastFirstJob = first;
+			selectedLoop = 0;
+		}
+	});
 
 	// ── State ──
 	let loadingRaw = $state(false);
@@ -285,9 +324,11 @@
 		return cmdColorAssigned[cmd];
 	}
 
-	// ── Load on open ──
+	// ── Load on open / loop 필터 변경 시 재로딩 ──
+	// activeJobIds 를 참조하므로 selectedLoop 가 바뀌면 이 effect 가 다시 돈다.
 	$effect(() => {
-		if (open && serverId != null && jobIds.length > 0) {
+		const ids = activeJobIds; // 반응성 의존성 등록
+		if (open && serverId != null && ids.length > 0) {
 			loadRawData();
 			loadStats();
 		}
@@ -315,16 +356,16 @@
 	}
 
 	async function loadRawData(filter?: TraceFilter) {
-		if (serverId == null || jobIds.length === 0) return;
+		if (serverId == null || activeJobIds.length === 0) return;
 		loadingRaw = true;
 		try {
-			rawResult = await getTraceRawData(serverId, { jobIds, filter });
+			rawResult = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
 		finally { loadingRaw = false; }
 	}
 
 	async function loadStats(filter?: TraceFilter) {
-		if (serverId == null || jobIds.length === 0) return;
+		if (serverId == null || activeJobIds.length === 0) return;
 		loadingStats = true;
 		try {
 			// archived 모드 (Rust 정확 파서 결과) → Rust trace 서비스 경로로 조회
@@ -340,7 +381,7 @@
 				});
 				statsResult = res.stats as unknown as TraceStats;
 			} else {
-				const res = await getTraceResult(serverId, { jobIds, filter, latencyRangesMs: parseLatencyRanges() });
+				const res = await getTraceResult(serverId, { jobIds: activeJobIds, filter, latencyRangesMs: parseLatencyRanges() });
 				statsResult = res.stats;
 			}
 		} catch (e) {
@@ -489,7 +530,19 @@
 						Sampled: {rawResult.sampledEvents?.toLocaleString()}/{rawResult.totalEvents?.toLocaleString()}
 					</span>
 				{/if}
-				<span class="font-mono text-[10px] text-muted-foreground">{jobIds.length} job(s)</span>
+				<span class="font-mono text-[10px] text-muted-foreground">{activeJobIds.length}/{jobIds.length} job(s)</span>
+				{#if loopOptions.length > 1}
+					<div class="inline-flex items-center gap-0.5 rounded border p-0.5" title="반복(loop)별로 나눠 보기">
+						<button
+							class="px-1.5 py-0.5 rounded text-[10px] transition-colors {selectedLoop === 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'hover:bg-muted'}"
+							onclick={() => selectedLoop = 0}>전체</button>
+						{#each loopOptions as lp}
+							<button
+								class="px-1.5 py-0.5 rounded text-[10px] transition-colors {selectedLoop === lp ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'hover:bg-muted'}"
+								onclick={() => selectedLoop = lp}>Loop {lp}</button>
+						{/each}
+					</div>
+				{/if}
 				{#if jobIds.length === 1 && !reparsing}
 					<button
 						class="ml-auto mr-6 inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors"

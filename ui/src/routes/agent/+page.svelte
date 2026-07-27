@@ -66,6 +66,7 @@
 	// Trace result sheet
 	let traceSheetOpen = $state(false);
 	let traceJobIds = $state<string[]>([]);
+	let traceMappings = $state<{ traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]>([]);
 	let traceDeviceId = $state<string | null>(null);
 
 	// ── Storage Info (선택된 모든 디바이스의 df /data 정보) ──
@@ -549,10 +550,11 @@
 		resultDetailSheetOpen = true;
 	}
 
-	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[]) {
+	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]) {
 		viewingServerId = serverId;
 		traceDeviceId = deviceId;
 		traceJobIds = jobIds;
+		traceMappings = mappings ?? [];
 		traceSheetOpen = true;
 	}
 
@@ -726,13 +728,14 @@
 	serverId={viewingServerId}
 	jobId={viewingJobId}
 	{activeJobs}
-	onViewTrace={(deviceId, jobIds) => viewTraceResult(viewingServerId!, deviceId, jobIds)}
+	onViewTrace={(deviceId, jobIds, mappings) => viewTraceResult(viewingServerId!, deviceId, jobIds, mappings)}
 />
 
 <AgentTraceResultSheet
 	bind:open={traceSheetOpen}
 	serverId={viewingServerId}
 	jobIds={traceJobIds}
+	mappings={traceMappings}
 />
 
 <AgentScreenSheet
