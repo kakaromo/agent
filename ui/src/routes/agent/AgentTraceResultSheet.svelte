@@ -51,6 +51,17 @@
 		return ids.length > 0 ? ids : jobIds;
 	});
 
+	// 다른 job 의 trace 를 열면 loop 선택을 초기화한다 (이전 job 의 Loop N 잔존 방지).
+	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
+	let lastFirstJob = $state('');
+	$effect(() => {
+		const first = jobIds[0] ?? '';
+		if (first !== lastFirstJob) {
+			lastFirstJob = first;
+			selectedLoop = 0;
+		}
+	});
+
 	// ── State ──
 	let loadingRaw = $state(false);
 	let loadingStats = $state(false);
