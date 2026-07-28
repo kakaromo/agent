@@ -454,6 +454,218 @@ func queryCmdSizeCounts(db *sql.DB, glob, where string) ([]*pb.CmdSizeCount, err
 	return results, nil
 }
 
+// ==================== AI 해석용 다각도 집계 ====================
+//
+// LLM 이 trace 결과를 더 깊이 해석하도록, 기존 요약 하나 외에 여러 각도의 집계 slice 를 제공한다.
+// LLM 은 SQL 을 만들지 않고 여기서 DuckDB 로 뽑은 결과만 해석한다.
+//
+// 각 함수는 best-effort — 컬럼/파일 없음 등으로 실패해도 상위(buildTraceSummary)에서 해당 slice 만
+// 빠지고 나머지는 진행되도록 에러를 그대로 반환한다.
+
+// TailLatencyEvent — dtoc 기준 가장 느린 요청 1건.
+type TailLatencyEvent struct {
+	Time float64 `json:"time"`
+	Cmd  string  `json:"cmd"`
+	Size int64   `json:"size"`
+	Dtoc float64 `json:"dtoc"`
+	Qd   int64   `json:"qd"`
+}
+
+// TimeBinLatency — 전체 duration 을 여러 bin 으로 나눈 구간별 latency 추이 1개 bin.
+type TimeBinLatency struct {
+	Bin     int     `json:"bin"`
+	StartMs float64 `json:"startMs"`
+	EndMs   float64 `json:"endMs"`
+	Count   int64   `json:"count"`
+	AvgDtoc float64 `json:"avgDtoc"`
+	P99Dtoc float64 `json:"p99Dtoc"`
+}
+
+// ComputeAIExtras — AI 해석용 다각도 집계를 한 번에 계산해 map 으로 반환.
+//
+// tail top-N / 구간추이는 pb.TraceStats 에 대응 필드가 없어 proto 를 건드리지 않고 여기서 계산한다.
+// 반환 map 은 buildTraceSummary 가 LLM 요약 map 에 그대로 병합한다.
+//
+// best-effort: 개별 slice 계산이 실패하면 해당 키만 생략하고 나머지는 채운다.
+// 전부 실패하거나 파일이 없어도 빈 map + nil 을 반환해 상위 summary 조달을 죽이지 않는다.
+func ComputeAIExtras(infos []*TraceJobInfo, filter *pb.TraceFilter, tailN, timeBins int) (map[string]any, error) {
+	if tailN <= 0 {
+		tailN = 10
+	}
+	if timeBins <= 0 {
+		timeBins = 20
+	}
+	out := make(map[string]any)
+
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		return out, fmt.Errorf("open duckdb: %w", err)
+	}
+	defer db.Close()
+
+	glob := buildGlobList(infos)
+	lbaCol := detectLbaColumn(db, glob)
+	cmdCol := detectCmdColumn(db, glob)
+	timeCol := detectTimeColumn(db, glob) // UFSCUSTOM 등 time 컬럼 부재 대비
+	where := buildFilterWhere(filter, lbaCol, cmdCol)
+
+	// 1. tail latency top-N (dtoc 기준 가장 느린 요청)
+	if tail, err := queryTailLatency(db, glob, where, cmdCol, timeCol, tailN); err != nil {
+		slog.Warn("AI extras: tail latency 실패", "err", err)
+	} else if len(tail) > 0 {
+		out["tailLatencyTop"] = tail
+	}
+
+	// 2. 시간 구간별 latency 추이 (time 컬럼 없으면 skip)
+	if timeCol != "" {
+		if series, err := queryTimeSeriesLatency(db, glob, where, timeCol, timeBins); err != nil {
+			slog.Warn("AI extras: 시간 구간별 latency 추이 실패", "err", err)
+		} else if len(series) > 0 {
+			out["latencyOverTime"] = series
+		}
+	}
+
+	return out, nil
+}
+
+// detectTimeColumn — 시간축 컬럼명을 감지. 대부분 'time' 이지만 일부 스키마(UFSCUSTOM 등)는
+// 'start_time' 을 쓸 수 있다. 둘 다 없으면 빈 문자열 → 시간 기반 집계 skip.
+func detectTimeColumn(db *sql.DB, glob string) string {
+	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
+		WHERE column_name IN ('time', 'start_time')`, glob)
+	rows, err := db.Query(q)
+	if err != nil {
+		return "time"
+	}
+	defer rows.Close()
+
+	hasTime := false
+	hasStart := false
+	for rows.Next() {
+		var col string
+		rows.Scan(&col)
+		if col == "time" {
+			hasTime = true
+		}
+		if col == "start_time" {
+			hasStart = true
+		}
+	}
+	switch {
+	case hasTime && hasStart:
+		return "COALESCE(time, start_time)"
+	case hasTime:
+		return "time"
+	case hasStart:
+		return "start_time"
+	default:
+		return ""
+	}
+}
+
+// queryTailLatency — dtoc 기준 내림차순 상위 N 이벤트.
+// DuckDB top-N 최적화로 500만+ 이벤트도 가볍다.
+// timeCol 은 detectTimeColumn 결과(존재하는 컬럼만) — 없으면 "" 라 NULL 상수로 대체.
+// size/qd 는 UFSCUSTOM 혼입 시 NULL 일 수 있어 COALESCE 로 방어한다.
+func queryTailLatency(db *sql.DB, glob, where, cmdCol, timeCol string, n int) ([]TailLatencyEvent, error) {
+	timeExpr := "NULL"
+	if timeCol != "" {
+		timeExpr = timeCol
+	}
+	// dtoc > 0 인 요청만 (완료 latency 없는 이벤트 제외).
+	w := addCondition(where, "dtoc > 0")
+	q := fmt.Sprintf(`SELECT
+		%s AS t,
+		%s AS cmd,
+		COALESCE(size, 0) AS size,
+		dtoc,
+		COALESCE(qd, 0) AS qd
+	FROM read_parquet(%s) %s
+	ORDER BY dtoc DESC LIMIT %d`, timeExpr, cmdCol, glob, w, n)
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []TailLatencyEvent
+	for rows.Next() {
+		var e TailLatencyEvent
+		var t, dtoc sql.NullFloat64
+		var cmd sql.NullString
+		var size, qd sql.NullInt64
+		if err := rows.Scan(&t, &cmd, &size, &dtoc, &qd); err != nil {
+			return nil, err
+		}
+		e.Time = t.Float64
+		e.Cmd = cmd.String
+		e.Size = size.Int64
+		e.Dtoc = dtoc.Float64
+		e.Qd = qd.Int64
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// queryTimeSeriesLatency — 전체 duration 을 bins 개로 나눠 bin 별 이벤트 수 / avg / p99 dtoc.
+// "특정 구간에서 latency 튐" 을 LLM 이 짚을 수 있게 한다.
+//
+// GROUP BY floor((time-min)/binwidth) 단순 방식. timeCol 은 detectTimeColumn 이 감지한
+// 실존 컬럼(호출 측이 ""면 skip). dtoc > 0 인 요청만 집계한다.
+func queryTimeSeriesLatency(db *sql.DB, glob, where, timeCol string, bins int) ([]TimeBinLatency, error) {
+	// 시간 범위 먼저 파악.
+	rangeW := addCondition(where, timeCol+" IS NOT NULL")
+	rq := fmt.Sprintf(`SELECT min(%s), max(%s)
+		FROM read_parquet(%s) %s`, timeCol, timeCol, glob, rangeW)
+	var minT, maxT sql.NullFloat64
+	if err := db.QueryRow(rq).Scan(&minT, &maxT); err != nil {
+		return nil, err
+	}
+	if !minT.Valid || !maxT.Valid || maxT.Float64 <= minT.Float64 {
+		return nil, nil // 시간축 없음(UFSCUSTOM 단독 등) 또는 단일 시점 — 추이 무의미
+	}
+	span := maxT.Float64 - minT.Float64
+	binWidth := span / float64(bins)
+
+	// bin index = floor((t-min)/binWidth), 마지막 경계(t==max)는 bins-1 로 clamp.
+	w := addCondition(where, "dtoc > 0")
+	q := fmt.Sprintf(`SELECT
+		LEAST(CAST(floor((%s - %f) / %f) AS BIGINT), %d) AS bin,
+		count(*) AS cnt,
+		avg(dtoc) AS avg_dtoc,
+		percentile_cont(0.99) WITHIN GROUP (ORDER BY dtoc) AS p99_dtoc
+	FROM read_parquet(%s) %s
+	GROUP BY bin ORDER BY bin`,
+		timeCol, minT.Float64, binWidth, bins-1, glob, w)
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var series []TimeBinLatency
+	for rows.Next() {
+		var bin sql.NullInt64
+		var cnt sql.NullInt64
+		var avgD, p99D sql.NullFloat64
+		if err := rows.Scan(&bin, &cnt, &avgD, &p99D); err != nil {
+			return nil, err
+		}
+		b := int(bin.Int64)
+		series = append(series, TimeBinLatency{
+			Bin:     b,
+			StartMs: minT.Float64 + float64(b)*binWidth,
+			EndMs:   minT.Float64 + float64(b+1)*binWidth,
+			Count:   cnt.Int64,
+			AvgDtoc: avgD.Float64,
+			P99Dtoc: p99D.Float64,
+		})
+	}
+	return series, rows.Err()
+}
+
 // ==================== Helpers ====================
 
 func detectCmdColumn(db *sql.DB, glob string) string {

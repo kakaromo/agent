@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	pb "agent/pb"
+	"agent/trace"
 )
 
 // buildResultSummary — 잡 종료 시 agent 메모리의 결과를 fetch 해 DB 영구 저장용 summary JSON 으로 변환.
@@ -88,17 +90,29 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 	if s == nil {
 		return "", nil
 	}
-	// cmd top 5 (count 기준)
+	// cmd top 5 (count 기준) — AI 해석용으로 상위 cmd 의 dtoc p99/p999 + continuousRatio 상세 포함.
+	// per-cmd 백분위는 이미 pb.CmdStats 에 계산돼 있어(proto 무변경) 여기서 발췌만 한다.
 	cmds := make([]map[string]any, 0)
 	for i, c := range s.GetCmdStats() {
 		if i >= 5 {
 			break
 		}
-		cmds = append(cmds, map[string]any{
-			"cmd":   c.GetCmd(),
-			"count": c.GetCount(),
-			"ratio": c.GetRatio(),
-		})
+		entry := map[string]any{
+			"cmd":             c.GetCmd(),
+			"count":           c.GetCount(),
+			"ratio":           c.GetRatio(),
+			"continuousRatio": c.GetContinuousRatio(),
+			"totalSizeBytes":  c.GetTotalSizeBytes(),
+		}
+		if d := c.GetDtoc(); d != nil {
+			entry["dtoc"] = map[string]any{
+				"avg":  d.GetAvg(),
+				"p99":  d.GetP99(),
+				"p999": d.GetP999(),
+				"max":  d.GetMax(),
+			}
+		}
+		cmds = append(cmds, entry)
 	}
 	summary := map[string]any{
 		"jobId":             jobID,
@@ -116,6 +130,20 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 		"qd":                latencyStatsToMap(s.GetQd()), // QD 병렬성 해석용
 		"cmdTop":            cmds,
 	}
+
+	// AI 해석용 다각도 집계 병합 — tail latency top-N, 시간 구간별 latency 추이.
+	// pb.TraceStats 에 대응 필드가 없어 parquet 에 직접 접근해 계산한다(proto 무변경).
+	// best-effort: 실패해도 나머지 summary 는 그대로 넘긴다.
+	if infos, ierr := agent.collectTraceJobInfos([]string{jobID}); ierr != nil {
+		slog.Warn("trace summary: AI extras 대상 조회 실패", "jobId", jobID, "err", ierr)
+	} else if extras, eerr := trace.ComputeAIExtras(infos, nil, 10, 20); eerr != nil {
+		slog.Warn("trace summary: AI extras 계산 실패", "jobId", jobID, "err", eerr)
+	} else {
+		for k, v := range extras {
+			summary[k] = v
+		}
+	}
+
 	data, err := json.Marshal(summary)
 	if err != nil {
 		return "", err
