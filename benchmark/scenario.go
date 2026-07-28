@@ -657,6 +657,12 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		for k, v := range resp.Metrics {
 			metrics[k] = v
 		}
+		// 요소를 못 찾고 폴백 좌표도 없었으면 스텝 실패로 처리한다.
+		// (요소를 못 찾았는데 성공으로 넘어가는 silent failure 방지 — replayer 가 재탐색까지 한 뒤의 결과.)
+		if metrics["tap_element_not_found"] > 0 {
+			return "", nil, fmt.Errorf("tap_element: 요소를 찾을 수 없습니다 (resource_id=%q text=%q content_desc=%q). 재시도 후에도 화면에서 대상을 못 찾았습니다",
+				step.Params["element_resource_id"], step.Params["element_text"], step.Params["element_content_desc"])
+		}
 		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
 			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
 	case "tap":
