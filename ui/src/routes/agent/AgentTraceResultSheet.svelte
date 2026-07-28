@@ -6,9 +6,10 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -141,8 +142,51 @@
 		if (reparsePollTimer) { clearInterval(reparsePollTimer); reparsePollTimer = null; }
 	}
 
+	// ── AI 해석 ──
+	// reachable=true 일 때만 버튼 노출. 시트 수명과 같으니 로컬 state 로 관리.
+	let aiReachable = $state(false);
+	let aiRunning = $state(false);
+	let aiText = $state('');
+	let aiError = $state('');
+	let aiSource: EventSource | null = null;
+
+	function closeAiSource() {
+		if (aiSource) { aiSource.close(); aiSource = null; }
+	}
+
+	function startAiAnalyze() {
+		if (!serverId || activeJobIds.length === 0) return;
+		closeAiSource();
+		aiRunning = true;
+		aiText = '';
+		aiError = '';
+		// 첫 job 기준으로 해석 (서버가 jobId 로 통계 조달)
+		const es = createAiAnalyzeSource(serverId, activeJobIds[0], 'trace');
+		aiSource = es;
+
+		es.addEventListener('token', (e: MessageEvent) => {
+			try {
+				const d = JSON.parse(e.data);
+				if (typeof d?.text === 'string') aiText += d.text;
+			} catch { /* ignore */ }
+		});
+
+		es.addEventListener('done', () => {
+			closeAiSource();
+			aiRunning = false;
+		});
+
+		es.addEventListener('error', (e: MessageEvent) => {
+			let msg = 'AI 해석 실패';
+			try { const d = JSON.parse((e as MessageEvent).data); if (d?.error) msg = d.error; } catch { /* SSE 연결 에러엔 data 없음 */ }
+			closeAiSource();
+			aiRunning = false;
+			if (!aiText) aiError = msg;
+		});
+	}
+
 	// 시트 열릴 때 reparsing 상태 확인
-	onDestroy(() => stopReparsePoll());
+	onDestroy(() => { stopReparsePoll(); closeAiSource(); });
 
 	$effect(() => {
 		if (open && serverId && jobIds.length === 1) {
@@ -153,8 +197,13 @@
 				}
 			}).catch(() => {});
 			loadArchiveState();
+			// AI 도달 가능 여부 조회 (실패/비활성이면 조용히 숨김)
+			getAiStatus().then(s => { aiReachable = !!(s.enabled && s.reachable); }).catch(() => { aiReachable = false; });
 		}
-		if (!open) { stopReparsePoll(); reparsing = false; archiveExec = null; }
+		if (!open) {
+			stopReparsePoll(); reparsing = false; archiveExec = null;
+			closeAiSource(); aiRunning = false; aiText = ''; aiError = '';
+		}
 	});
 
 	const hasActiveFilter = $derived(
@@ -543,18 +592,34 @@
 						{/each}
 					</div>
 				{/if}
-				{#if jobIds.length === 1 && !reparsing}
-					<button
-						class="ml-auto mr-6 inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors"
-						onclick={handleReparse}
-					>
-						<RefreshCwIcon class="size-3" /> Reparse
-					</button>
-				{:else if reparsing}
-					<span class="ml-auto mr-6 inline-flex items-center gap-1 text-[10px] text-amber-600">
-						<LoaderIcon class="size-3 animate-spin" /> Reparsing...
-					</span>
-				{/if}
+				<div class="ml-auto mr-6 inline-flex items-center gap-1">
+					{#if aiReachable && activeJobIds.length > 0}
+						<button
+							class="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors disabled:opacity-50"
+							onclick={startAiAnalyze}
+							disabled={aiRunning}
+							title="AI 로 trace 통계를 자연어 해석"
+						>
+							{#if aiRunning}
+								<LoaderIcon class="size-3 animate-spin" /> 해석 중...
+							{:else}
+								<SparklesIcon class="size-3" /> AI 해석
+							{/if}
+						</button>
+					{/if}
+					{#if jobIds.length === 1 && !reparsing}
+						<button
+							class="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors"
+							onclick={handleReparse}
+						>
+							<RefreshCwIcon class="size-3" /> Reparse
+						</button>
+					{:else if reparsing}
+						<span class="inline-flex items-center gap-1 text-[10px] text-amber-600">
+							<LoaderIcon class="size-3 animate-spin" /> Reparsing...
+						</span>
+					{/if}
+				</div>
 				</Sheet.Title>
 			<Sheet.Description class="text-xs">
 				{#if jobIds.length <= 5}
@@ -723,6 +788,20 @@
 
 				<!-- Statistics Tab -->
 				<Tabs.Content value="stats" class="pt-2 space-y-3">
+					<!-- AI 해석 패널 (스트리밍) -->
+					{#if aiReachable && (aiRunning || aiText || aiError)}
+						<div class="border rounded-md bg-muted/20 p-2.5 space-y-1.5">
+							<div class="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+								<SparklesIcon class="size-3" /> AI 해석
+								{#if aiRunning}<LoaderIcon class="size-3 animate-spin" />{/if}
+							</div>
+							{#if aiError}
+								<div class="text-[11px] text-destructive">{aiError}</div>
+							{:else}
+								<div class="text-[11px] leading-relaxed whitespace-pre-wrap">{aiText}{#if aiRunning}<span class="inline-block w-1.5 h-3 -mb-0.5 bg-foreground/60 animate-pulse"></span>{/if}</div>
+							{/if}
+						</div>
+					{/if}
 					{#if loadingStats}
 						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
 					{:else if statsResult}

@@ -698,10 +698,10 @@
 		editingStep = null;
 	}
 
-	function handleLoadTemplate(t: ScenarioTemplate) {
+	// steps/loops(proto wire shape) → 캔버스 nodes/edges 주입 공통 로직.
+	// 템플릿 로드 / AI 자연어 생성이 공유한다.
+	function applyCanvas(steps: any[], loops: any[]) {
 		try {
-			const steps = JSON.parse(t.stepsJson);
-			const loops = t.loopsJson ? JSON.parse(t.loopsJson) : [];
 			const result = protoToCanvas(steps, loops);
 			nodes = result.nodes;
 			edges = result.edges;
@@ -734,6 +734,21 @@
 
 			requestAnimationFrame(() => updateExecOrder());
 		} catch { nodes = []; edges = []; }
+	}
+
+	function handleLoadTemplate(t: ScenarioTemplate) {
+		let steps: any[] = [];
+		let loops: any[] = [];
+		try {
+			steps = JSON.parse(t.stepsJson);
+			loops = t.loopsJson ? JSON.parse(t.loopsJson) : [];
+		} catch { nodes = []; edges = []; return; }
+		applyCanvas(steps, loops);
+	}
+
+	// AI 자연어 생성 결과 주입 — 템플릿 로드와 동일 경로.
+	function handleGenerate(steps: any[], loops: any[]) {
+		applyCanvas(steps, loops);
 	}
 
 	// ── Metric 정의 (조건 분기용) ──
@@ -876,6 +891,7 @@
 		onLoadTemplate={handleLoadTemplate}
 		onClearCanvas={handleClearCanvas}
 		onAutoLayout={autoLayout}
+		onGenerate={handleGenerate}
 		{loopMembers}
 	/>
 

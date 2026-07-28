@@ -798,3 +798,69 @@ export function openLocalFolder(target: 'archive' | 'trace' | 'archive-job', job
 export function createDevicesSource(serverId: number): EventSource {
 	return new EventSource(`/api/agent/devices/stream?serverId=${serverId}`);
 }
+
+// ── AI (로컬 ollama 기반) ──
+
+export interface AiStatus {
+	enabled: boolean;
+	reachable: boolean;
+	model: string;
+	endpoint: string;
+}
+
+// AI 활성/도달 가능 여부 조회. reachable=true 일 때만 AI 버튼 노출.
+export function getAiStatus(): Promise<AiStatus> {
+	return get('/agent/ai/status');
+}
+
+// AI 해석 SSE — 명명 이벤트: 'token'(data {text}), 'done'(data {}), 'error'(data {error}).
+// kind 는 'trace' 또는 'benchmark'. jobId 로 서버가 통계를 알아서 조달한다.
+export function createAiAnalyzeSource(
+	serverId: number,
+	jobId: string,
+	kind: 'trace' | 'benchmark'
+): EventSource {
+	const params = new URLSearchParams();
+	params.set('serverId', String(serverId));
+	params.set('jobId', jobId);
+	params.set('kind', kind);
+	return new EventSource(`/api/agent/ai/analyze/stream?${params.toString()}`);
+}
+
+// 시나리오 wire shape (ScenarioStep). params 는 문자열 맵.
+export interface AiScenarioStep {
+	type: string;
+	tool?: string;
+	params?: Record<string, string>;
+	macroId?: string;
+}
+
+export interface AiScenarioLoop {
+	startStep: number;
+	endStep: number;
+	count: number;
+}
+
+export interface GenerateScenarioResult {
+	steps: AiScenarioStep[];
+	loops: AiScenarioLoop[];
+	warnings: string[];
+}
+
+// 자연어 → 시나리오 생성. 백엔드 응답 필드명이 최종본과 다를 수 있어 방어적으로 파싱.
+// deviceId 를 넘기면 백엔드가 해당 기기의 설치앱/현재 화면을 반영해 더 정확히 생성한다
+// (없어도 일반 생성으로 fallback).
+export async function generateScenario(prompt: string, deviceId?: string): Promise<GenerateScenarioResult> {
+	const body: { prompt: string; deviceId?: string } = { prompt };
+	if (deviceId) body.deviceId = deviceId;
+	const raw = await post<{
+		steps?: AiScenarioStep[];
+		loops?: AiScenarioLoop[];
+		warnings?: string[];
+	}>('/agent/ai/scenario/generate', body);
+	return {
+		steps: Array.isArray(raw?.steps) ? raw.steps : [],
+		loops: Array.isArray(raw?.loops) ? raw.loops : [],
+		warnings: Array.isArray(raw?.warnings) ? raw.warnings : []
+	};
+}
