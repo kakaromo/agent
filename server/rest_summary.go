@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	pb "agent/pb"
 	"agent/trace"
@@ -46,17 +47,35 @@ func buildBenchmarkSummaryFrom(jobID string, resp *pb.GetBenchmarkResultResponse
 	for _, br := range resp.GetResults() {
 		m := br.GetMetrics()
 		// 핵심 키만 추출 (있으면).
-		core := map[string]any{}
-		for _, k := range []string{
+		//
+		// direct 벤치마크는 "read_iops" 처럼 prefix 없는 키를 쓰지만, 시나리오 안에서
+		// 실행된 벤치마크는 "r1_step0_read_iops" 처럼 r{repeat}_[loop{n}_]step{n}_ prefix 가
+		// 붙는다(scenario.go 참고). 따라서 정확 매칭 + 접미사("_<core>") 매칭을 함께 본다.
+		coreKeys := []string{
 			"read_iops", "write_iops",
 			"read_bw_kb", "write_bw_kb",
 			"read_clat_ns_mean", "write_clat_ns_mean",
 			"read_clat_ns_p99.000000", "write_clat_ns_p99.000000",
 			"read_clat_ns_p99.900000", "write_clat_ns_p99.900000",
 			"job_runtime_ms",
-		} {
+		}
+		core := map[string]any{}
+		for _, k := range coreKeys {
 			if v, ok := m[k]; ok {
-				core[k] = v
+				core[k] = v // direct 벤치마크: prefix 없는 정확 키
+			}
+		}
+		// 시나리오 벤치마크: prefix 붙은 키를 접미사로 매칭해 원래 키 이름 그대로 담는다.
+		// 여러 스텝(r1_step0_*, r1_step2_* 등)이 있으면 각각 별도 키로 보존된다.
+		for mk, mv := range m {
+			for _, ck := range coreKeys {
+				if _, taken := core[mk]; taken {
+					continue
+				}
+				if mk != ck && strings.HasSuffix(mk, "_"+ck) {
+					core[mk] = mv
+					break
+				}
 			}
 		}
 		devices = append(devices, map[string]any{
