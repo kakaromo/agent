@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"agent/adb"
+	"agent/config"
 	"agent/schedule"
 	"agent/storage/sqlitedb"
 )
@@ -26,6 +27,9 @@ type HTTPRouterOptions struct {
 	ArchiveBase string
 	// TraceBase — trace 잡 출력 디렉토리 (cfg.Server.TraceDir). fs/open 의 target=trace 가 사용.
 	TraceBase string
+	// AI — 로컬 ollama 기반 결과 해석. Enabled=true 일 때만 /api/agent/ai/* endpoint 활성화
+	// (사무실/standalone 무관, DB 없어도 라이브 잡 해석은 동작).
+	AI config.AIConfig
 }
 
 // NewHTTPRouter 는 cmux 의 HTTP 분기에 마운트할 단일 핸들러를 만든다.
@@ -72,6 +76,11 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 
 	// SSE 어댑터 — /api/agent/benchmark/progress, /api/agent/monitoring/stream, /api/agent/devices/stream
 	registerSSERoutes(mux, opts.Agent)
+
+	// AI 결과 해석 (로컬 ollama) — config [ai] enabled 일 때만. 미기동 시 status=reachable:false 로 UI 가 비활성.
+	if opts.AI.Enabled {
+		registerAIRoutes(mux, opts.Agent, opts.AI)
+	}
 
 	// Scenario REST — DB 가 있으면 macroId hydrate 가능 (standalone), 없으면 nil 전달
 	registerScenarioRoutes(mux, opts.Agent, opts.DB)

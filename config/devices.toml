@@ -19,6 +19,19 @@ enabled = true
 #   CLI: --archive-base /path/to/archive
 # archive_base = "/data/agent-archive"
 
+# AI 결과 해석 (로컬 ollama) — trace/benchmark 결과를 자연어로 해석.
+# enabled=true 시 /api/agent/ai/* endpoint 활성 (사무실/standalone 무관).
+# agent 는 ollama 를 HTTP 로만 호출 → CGO 불필요, Mac/Windows arm64·x64 동일 바이너리.
+# ollama 설치·모델 pull(ollama pull <model>)은 사용자 몫. 미기동/모델 없음은 자동 비활성(UI 버튼 숨김).
+# [ai]
+# enabled = true
+# endpoint = "http://127.0.0.1:11434"   # 노트북 로컬 ollama
+# model = "qwen2.5:3b"                  # Snapdragon X CPU 추론엔 3B 권장
+#
+# 원격 ollama(예: 사내 CPU 32코어/RAM 대용량 VM)를 쓰면 노트북 부담 없이 큰 모델 사용 가능:
+#   endpoint = "http://<VM_IP>:11434"   # VM 은 OLLAMA_HOST=0.0.0.0 으로 기동 필요 (사내망 한정)
+#   model = "qwen2.5:32b"               # RAM 여유 시 14b/32b/72b 고품질 해석
+
 [minio]
 endpoint = "localhost:9000"
 access_key = "admin"

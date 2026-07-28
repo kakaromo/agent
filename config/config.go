@@ -13,6 +13,22 @@ type Config struct {
 	Minio      MinioConfig      `toml:"minio"`
 	Standalone StandaloneConfig `toml:"standalone"`
 	Tools      ToolsConfig      `toml:"tools"`
+	AI         AIConfig         `toml:"ai"`
+}
+
+// AIConfig — 로컬 LLM(ollama) 기반 결과 해석 기능.
+//
+// Enabled=true 시 trace/benchmark 결과를 로컬 ollama 에 넘겨 자연어 해석을 받는
+// REST/SSE endpoint 가 활성화된다. agent 는 ollama 를 프로세스로 안지 않고 순수
+// HTTP 로만 호출하므로 CGO 불필요 — Mac/Windows arm64·x64 어디서든 동일 바이너리.
+//
+// ollama 미설치/미기동/모델 없음은 에러가 아니라 "정상 비활성" 상태로 다룬다
+// (/api/agent/ai/status 가 reachable=false 반환 → UI 는 버튼을 숨긴다).
+// 모델 pull(ollama pull <model>)은 사용자 몫이며, Endpoint 로 원격 ollama 도 지정 가능.
+type AIConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Endpoint string `toml:"endpoint"` // 기본 http://127.0.0.1:11434
+	Model    string `toml:"model"`    // 기본 qwen2.5:3b (Snapdragon X CPU 추론에 적합)
 }
 
 // ToolsConfig — `tools_dir` 안의 실제 바이너리 파일명 매핑.
@@ -98,6 +114,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Tools.Iotest == "" {
 		cfg.Tools.Iotest = "iotest"
+	}
+	if cfg.AI.Endpoint == "" {
+		cfg.AI.Endpoint = "http://127.0.0.1:11434"
+	}
+	if cfg.AI.Model == "" {
+		cfg.AI.Model = "qwen2.5:3b"
 	}
 	for _, p := range []struct {
 		key, val string
