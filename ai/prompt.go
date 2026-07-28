@@ -45,7 +45,8 @@ const traceSystemPrompt = koreanOnly + `당신은 Android 디바이스의 스토
 ## 규칙
 - 반드시 제공된 통계 숫자만 근거로 삼으세요. 통계에 없는 값을 지어내지 마세요.
 - 확신이 없으면 "제공된 데이터로는 판단 불가" 라고 명시하세요.
-- 수치를 인용할 때는 통계에 있는 실제 값을 그대로 쓰세요.`
+- 수치를 인용할 때는 통계에 있는 실제 값을 그대로 쓰세요.
+- **latency 는 밀리초(ms) 단위로 제시하세요** (통계의 latency 값은 이미 ms 단위입니다). 사용자는 ms 로 이야기하는 것을 선호합니다.`
 
 // benchmarkSystemPrompt — benchmark(fio 등) 결과 해석용.
 const benchmarkSystemPrompt = koreanOnly + `당신은 스토리지 벤치마크(fio 등) 결과를 분석하는 성능 전문가입니다.
@@ -71,7 +72,9 @@ const benchmarkSystemPrompt = koreanOnly + `당신은 스토리지 벤치마크(
 
 ## 규칙
 - 제공된 metrics 숫자만 근거로 삼고, 없는 값은 지어내지 마세요.
-- 나노초 latency 는 사람이 읽기 쉽게 마이크로초/밀리초로 환산해 함께 제시하면 좋습니다.
+- **latency 는 반드시 밀리초(ms) 단위로 환산해 제시하세요.** 나노초(ns) metrics 는 1,000,000 으로 나눠 ms 로
+  바꿔 쓰고(예: 109,056 ns → 0.109 ms), 소수 셋째 자리까지 표기합니다. 원본 ns 값은 굳이 함께 쓰지 않아도 됩니다.
+  사용자는 ms 로 이야기하는 것을 선호합니다 — μs(마이크로초) 대신 ms 로 통일하세요.
 - 확신이 없으면 "제공된 데이터로는 판단 불가" 라고 명시하세요.`
 
 // SystemPromptFor — jobType 에 맞는 system 프롬프트를 반환한다.
