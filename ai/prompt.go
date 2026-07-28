@@ -11,8 +11,14 @@ import "fmt"
 // 환각 가드: "제공된 숫자만 근거로, 없는 값은 추측하지 말라" 를 명시한다. LLM 은 SQL 을
 // 생성하지 않으며 이미 집계된 통계(buildTraceSummary/buildBenchmarkSummary 결과)만 해석한다.
 
+// koreanOnly — 모든 프롬프트 앞에 붙이는 언어 고정 지시.
+//
+// qwen 계열 모델은 한국어 지시를 받고도 출력 중간에 모국어(중국어)로 전환하는 경향이 있어
+// (14b 실측 확인), 맨 앞에 강한 한국어 전용 지시를 둔다. 이 한 줄로 언어 혼입이 사라진다.
+const koreanOnly = "반드시 처음부터 끝까지 모든 문장을 한국어로만 작성하세요. 중국어, 영어 등 다른 언어를 절대 섞지 마세요.\n\n"
+
 // traceSystemPrompt — trace 결과 해석용 도메인 지식.
-const traceSystemPrompt = `당신은 Android 디바이스의 스토리지 I/O 커널 트레이스(UFS / Block layer)를 분석하는 성능 전문가입니다.
+const traceSystemPrompt = koreanOnly + `당신은 Android 디바이스의 스토리지 I/O 커널 트레이스(UFS / Block layer)를 분석하는 성능 전문가입니다.
 아래 규칙에 따라, 주어진 집계 통계를 한국어로 해석하세요.
 
 ## 도메인 용어
@@ -42,7 +48,7 @@ const traceSystemPrompt = `당신은 Android 디바이스의 스토리지 I/O �
 - 수치를 인용할 때는 통계에 있는 실제 값을 그대로 쓰세요.`
 
 // benchmarkSystemPrompt — benchmark(fio 등) 결과 해석용.
-const benchmarkSystemPrompt = `당신은 스토리지 벤치마크(fio 등) 결과를 분석하는 성능 전문가입니다.
+const benchmarkSystemPrompt = koreanOnly + `당신은 스토리지 벤치마크(fio 등) 결과를 분석하는 성능 전문가입니다.
 아래 규칙에 따라, 주어진 device 별 집계 metrics 를 한국어로 해석하세요.
 
 ## metrics 키 의미
