@@ -58,10 +58,23 @@ type chatMessage struct {
 }
 
 // chatRequest — /api/chat 요청 body.
+//
+// Format 은 ollama structured output 용 필드다. JSON schema 객체를 넣으면 모델 응답이
+// 그 schema 에 맞는 JSON 으로 강제된다 (문자열 "json" 만 넣으면 free-form JSON). nil 이면
+// 필드 자체가 생략돼 기존 free-form 동작. Options 는 temperature 등 추론 파라미터.
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model    string          `json:"model"`
+	Messages []chatMessage   `json:"messages"`
+	Stream   bool            `json:"stream"`
+	Format   json.RawMessage `json:"format,omitempty"`
+	Options  map[string]any  `json:"options,omitempty"`
+}
+
+// chatResponse — stream=false 시 단일 응답 body.
+type chatResponse struct {
+	Message chatMessage `json:"message"`
+	Done    bool        `json:"done"`
+	Error   string      `json:"error"`
 }
 
 // chatStreamChunk — stream=true 시 NDJSON 한 줄. done=true 인 마지막 줄엔 message 가 비어있을 수 있다.
@@ -138,6 +151,65 @@ func (c *Client) Chat(ctx context.Context, system, user string, onToken func(str
 		return fmt.Errorf("스트림 읽기 실패: %w", err)
 	}
 	return nil
+}
+
+// ChatJSON 은 system+user 프롬프트로 ollama 에 non-stream 요청을 보내고, JSON schema 로
+// 응답 형식을 강제한 뒤 message.content(JSON 문자열)를 그대로 반환한다.
+//
+//   - schema 가 nil 이 아니면 /api/chat 의 format 에 JSON schema 를 넣어 structured output 을
+//     강제한다. schema 는 map[string]any 등 json.Marshal 가능한 값이어야 한다.
+//   - stream=false 이므로 응답은 단일 {message:{content:"...json..."}} body 다.
+//   - temperature 0 으로 고정 — schema 준수 JSON 생성은 결정적일수록 안정적이다.
+//   - ctx 취소 시 요청 중단. 모델 미존재/오류는 non-200 또는 body 의 error 필드로 온다.
+func (c *Client) ChatJSON(ctx context.Context, system, user string, schema any) (string, error) {
+	var format json.RawMessage
+	if schema != nil {
+		b, err := json.Marshal(schema)
+		if err != nil {
+			return "", fmt.Errorf("marshal schema: %w", err)
+		}
+		format = b
+	}
+
+	body, err := json.Marshal(chatRequest{
+		Model: c.Model,
+		Messages: []chatMessage{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
+		},
+		Stream:  false,
+		Format:  format,
+		Options: map[string]any{"temperature": 0},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Endpoint+"/api/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ollama 에 연결할 수 없습니다 (%s): %w", c.Endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg := readErrorBody(resp)
+		return "", fmt.Errorf("ollama 오류 (status %d): %s", resp.StatusCode, msg)
+	}
+
+	var out chatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("응답 파싱 실패: %w", err)
+	}
+	if out.Error != "" {
+		return "", fmt.Errorf("ollama 오류: %s", out.Error)
+	}
+	return out.Message.Content, nil
 }
 
 // readErrorBody — non-200 응답에서 ollama 의 {"error":"..."} 를 뽑아낸다. 실패 시 raw 일부 반환.

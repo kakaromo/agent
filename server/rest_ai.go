@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"agent/ai"
 	"agent/config"
+	pb "agent/pb"
 	"agent/storage/sqlitedb"
 )
 
@@ -62,6 +65,281 @@ func registerAIRoutes(mux *http.ServeMux, agent *DeviceAgentServer, aicfg config
 		kind := r.URL.Query().Get("kind") // "trace" | "benchmark" | "" (자동 판별)
 		handleAIAnalyzeSSE(w, r, agent, client, jobID, kind)
 	})
+
+	// POST /api/agent/ai/scenario/generate
+	//   body: { prompt: "자연어 요청", deviceContext?: "...", deviceId?: "..." }
+	//     - deviceId 가 오면 백엔드가 그 기기의 설치앱 + 현재 activity 를 자동 조달해 프롬프트에 주입.
+	//   resp: { steps: [{type, tool, params:{string:string}}...], loops: [{startStep,endStep,count}...], warnings?: [...] }
+	mux.HandleFunc("/api/agent/ai/scenario/generate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		handleAIScenarioGenerate(w, r, agent, client)
+	})
+}
+
+// aiGenReq — /ai/scenario/generate 요청 body.
+type aiGenReq struct {
+	Prompt        string `json:"prompt"`
+	DeviceContext string `json:"deviceContext"` // 수동 힌트 (선택)
+	DeviceId      string `json:"deviceId"`      // 오면 백엔드가 설치앱 + 현재 activity 자동 조달
+}
+
+// aiScenarioStep — 생성/검증된 시나리오 step. wire shape({type, tool?, params:{string:string}}) 와 일치.
+type aiScenarioStep struct {
+	Type   string            `json:"type"`
+	Tool   string            `json:"tool"`
+	Params map[string]string `json:"params"`
+}
+
+// aiScenarioLoop — 반복 구간. 모든 값 문자열 (step 인덱스/횟수).
+type aiScenarioLoop struct {
+	StartStep string `json:"startStep"`
+	EndStep   string `json:"endStep"`
+	Count     string `json:"count"`
+}
+
+// aiGenRaw — ollama 가 schema 로 뱉는 원 JSON. params 값은 string 강제되나 방어적으로 any 로 받아 정규화.
+type aiGenRaw struct {
+	Steps []struct {
+		Type   string         `json:"type"`
+		Tool   string         `json:"tool"`
+		Params map[string]any `json:"params"`
+	} `json:"steps"`
+	Loops []struct {
+		StartStep any `json:"startStep"`
+		EndStep   any `json:"endStep"`
+		Count     any `json:"count"`
+	} `json:"loops"`
+}
+
+// handleAIScenarioGenerate — 자연어 → 시나리오 step 배열. ChatJSON(schema 강제) + 최소 검증.
+// 파싱/검증 실패 시 1회 재시도(실패 사유를 프롬프트에 피드백). 무한 루프 없음.
+//
+// deviceId 가 오면 그 기기의 설치앱 + 현재 activity 를 자동 조달해 deviceContext 에 합성한다
+// (launch_app 이 실존 package, tap_element 가 현재 화면 맥락을 쓰도록). 조달은 best-effort —
+// 미연결/실패해도 컨텍스트 없이 일반 생성으로 계속한다.
+func handleAIScenarioGenerate(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer, client *ai.Client) {
+	var body aiGenReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "decode: "+err.Error())
+		return
+	}
+	if body.Prompt == "" {
+		writeError(w, http.StatusBadRequest, "prompt required")
+		return
+	}
+
+	// deviceId 로 실제 기기 컨텍스트 조달 (best-effort). 수동 deviceContext 와 합쳐 프롬프트에 넣는다.
+	deviceContext := body.DeviceContext
+	if body.DeviceId != "" && agent != nil {
+		if auto := buildDeviceScenarioContext(r.Context(), agent, body.DeviceId); auto != "" {
+			if deviceContext == "" {
+				deviceContext = auto
+			} else {
+				deviceContext = deviceContext + "\n\n" + auto
+			}
+		}
+	}
+
+	schema := ai.ScenarioSchema()
+	user := ai.BuildScenarioUserPrompt(body.Prompt, deviceContext)
+
+	var (
+		steps    []aiScenarioStep
+		loops    []aiScenarioLoop
+		warnings []string
+		feedback string
+		lastErr  error
+	)
+
+	// 최대 2회: 첫 시도 + 파싱/전량 실패 시 피드백 재시도.
+	for attempt := 0; attempt < 2; attempt++ {
+		system := ai.ScenarioSystemPrompt(feedback)
+		content, err := client.ChatJSON(r.Context(), system, user, schema)
+		if err != nil {
+			// ollama 미기동/모델 없음/취소 — 즉시 에러 반환 (재시도 무의미).
+			writeError(w, http.StatusBadGateway, "ollama 생성 실패: "+err.Error())
+			return
+		}
+
+		s, l, warns, perr := parseAndValidateScenario(content)
+		if perr != nil {
+			lastErr = perr
+			feedback = perr.Error()
+			continue // 재시도
+		}
+		if len(s) == 0 {
+			// JSON 은 유효하나 살아남은 step 이 없음 → 피드백 후 재시도.
+			lastErr = fmt.Errorf("유효한 step 이 하나도 없습니다")
+			feedback = "생성한 step 이 모두 유효하지 않았습니다. schema 의 type enum 과 필수 params 를 지켜 다시 만드세요."
+			continue
+		}
+		steps, loops, warnings = s, l, warns
+		lastErr = nil
+		break
+	}
+
+	if lastErr != nil {
+		writeError(w, http.StatusUnprocessableEntity, "시나리오 생성 실패: "+lastErr.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"steps": steps,
+		"loops": loops,
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// parseAndValidateScenario — ollama content(JSON 문자열)를 파싱하고 step 별 최소 검증.
+//
+// 검증 실패한 step 은 버리고 warnings 에 사유를 담아 나머지는 살린다(관대 처리).
+// JSON 자체가 깨졌으면 error 반환 → 상위에서 재시도.
+func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoop, []string, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, nil, nil, fmt.Errorf("빈 응답")
+	}
+
+	var raw aiGenRaw
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil, nil, nil, fmt.Errorf("JSON 파싱 실패: %v", err)
+	}
+
+	// 유효 type 집합 (실행부 switch 와 동일 소스).
+	validType := make(map[string]bool, len(ai.ScenarioStepTypes))
+	for _, t := range ai.ScenarioStepTypes {
+		validType[t] = true
+	}
+
+	var (
+		steps    []aiScenarioStep
+		warnings []string
+	)
+	for i, rs := range raw.Steps {
+		typ := strings.TrimSpace(rs.Type)
+		if typ == "" {
+			warnings = append(warnings, fmt.Sprintf("step %d: type 누락 — 제외", i))
+			continue
+		}
+		if !validType[typ] {
+			warnings = append(warnings, fmt.Sprintf("step %d: 알 수 없는 type '%s' — 제외", i, typ))
+			continue
+		}
+
+		// params 를 전부 string 으로 정규화 (schema 로 강제되나 방어적).
+		params := make(map[string]string, len(rs.Params))
+		for k, v := range rs.Params {
+			params[k] = anyToString(v)
+		}
+
+		step := aiScenarioStep{Type: typ, Tool: strings.TrimSpace(rs.Tool), Params: params}
+
+		// type 별 최소 검증 — 필수 param 없으면 제외.
+		if reason := validateStepParams(step); reason != "" {
+			warnings = append(warnings, fmt.Sprintf("step %d (%s): %s — 제외", i, typ, reason))
+			continue
+		}
+
+		// app_macro 함정: AI 는 실존 macroId 를 모른다. 살리되 수동 지정 경고.
+		if typ == "app_macro" {
+			warnings = append(warnings, fmt.Sprintf("step %d: app_macro 는 기록된 매크로를 수동 지정해야 합니다 (AI 가 macroId 를 채울 수 없음)", i))
+		}
+
+		steps = append(steps, step)
+	}
+
+	// loops 정규화 — 모든 값 문자열. count<=0 이거나 인덱스 파싱 실패면 제외.
+	var loops []aiScenarioLoop
+	for i, rl := range raw.Loops {
+		start := anyToString(rl.StartStep)
+		end := anyToString(rl.EndStep)
+		count := anyToString(rl.Count)
+		si, e1 := strconv.Atoi(start)
+		ei, e2 := strconv.Atoi(end)
+		ci, e3 := strconv.Atoi(count)
+		if e1 != nil || e2 != nil || e3 != nil {
+			warnings = append(warnings, fmt.Sprintf("loop %d: 숫자가 아닌 값 — 제외", i))
+			continue
+		}
+		if ci <= 0 || si < 0 || ei < si || si >= len(steps) {
+			warnings = append(warnings, fmt.Sprintf("loop %d: 범위/횟수 유효하지 않음 (start=%d end=%d count=%d) — 제외", i, si, ei, ci))
+			continue
+		}
+		loops = append(loops, aiScenarioLoop{StartStep: start, EndStep: end, Count: count})
+	}
+
+	return steps, loops, warnings, nil
+}
+
+// validateStepParams — type 별 필수 param 최소 검증. 빈 문자열 반환이면 통과, 아니면 제외 사유.
+func validateStepParams(s aiScenarioStep) string {
+	p := s.Params
+	switch s.Type {
+	case "tap":
+		if p["x"] == "" || p["y"] == "" {
+			return "x/y 좌표 필요"
+		}
+	case "launch_app", "stop_app", "uninstall_apk":
+		if p["package_name"] == "" {
+			return "package_name 필요"
+		}
+	case "install_apk":
+		if p["apk_filename"] == "" {
+			return "apk_filename 필요"
+		}
+	case "text":
+		if p["input_text"] == "" {
+			return "input_text 필요"
+		}
+	case "shell":
+		if p["cmd"] == "" {
+			return "cmd 필요"
+		}
+	case "key":
+		if p["keycode"] == "" {
+			return "keycode 필요"
+		}
+	case "benchmark":
+		if s.Tool == "" {
+			return "benchmark 는 tool(fio 등) 필요"
+		}
+	case "tap_element":
+		if p["element_resource_id"] == "" && p["element_text"] == "" &&
+			p["element_content_desc"] == "" && p["x"] == "" && p["y"] == "" {
+			return "요소 식별자(resource_id/text/content_desc) 또는 좌표 필요"
+		}
+	}
+	return ""
+}
+
+// anyToString — schema 로 string 이 강제되나, 모델이 숫자/불리언을 낼 경우 대비한 안전 변환.
+func anyToString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		// 정수면 소수점 없이.
+		if x == float64(int64(x)) {
+			return strconv.FormatInt(int64(x), 10)
+		}
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case nil:
+		return ""
+	default:
+		b, _ := json.Marshal(x)
+		return string(b)
+	}
 }
 
 // handleAIAnalyzeSSE — jobId 로 통계 요약을 얻어 ollama 에 스트리밍 해석을 요청, 토큰을 SSE 로 push.
@@ -197,6 +475,82 @@ func resolveAISummary(ctx context.Context, agent *DeviceAgentServer, jobID, kind
 	}
 	// 라이브 실패 → DB 저장본(만료 잡) fallback.
 	return jobType, dbSummary
+}
+
+// maxScenarioAppList — 프롬프트 폭증 방지용 설치앱 표시 상한.
+const maxScenarioAppList = 40
+
+// buildDeviceScenarioContext — deviceId 로 그 기기의 설치앱 + 현재 activity 를 조달해
+// 시나리오 프롬프트용 컨텍스트 문자열로 합성한다. best-effort — 조달 실패한 항목은 빼고 진행,
+// 전부 실패하면 빈 문자열 반환(호출 측이 컨텍스트 없이 계속).
+//
+// 설치앱은 시스템 패키지(com.android.*, com.qualcomm.*, android 등)를 걸러 사용자앱 위주로,
+// 상위 maxScenarioAppList 개까지만 넣고 잘렸으면 그 사실을 명시한다.
+func buildDeviceScenarioContext(ctx context.Context, agent *DeviceAgentServer, deviceID string) string {
+	var lines []string
+
+	// 현재 포그라운드 activity.
+	if act, err := agent.GetCurrentActivity(ctx, deviceID); err == nil && act != nil {
+		if act.Component != "" {
+			lines = append(lines, "현재 화면(activity): "+act.Component)
+		} else if act.Package != "" {
+			lines = append(lines, "현재 화면(package): "+act.Package)
+		}
+	}
+
+	// 설치앱 목록 (사용자앱 위주로 필터 + 상한).
+	if resp, err := agent.ListInstalledApps(ctx, &pb.ListInstalledAppsRequest{DeviceId: deviceID}); err == nil && resp != nil {
+		var pkgs []string
+		for _, app := range resp.GetApps() {
+			pkg := app.GetPackageName()
+			if pkg == "" || isSystemPackage(pkg) {
+				continue
+			}
+			pkgs = append(pkgs, pkg)
+		}
+		if len(pkgs) > 0 {
+			truncated := false
+			if len(pkgs) > maxScenarioAppList {
+				pkgs = pkgs[:maxScenarioAppList]
+				truncated = true
+			}
+			label := "이 디바이스에 설치된 앱(package): " + strings.Join(pkgs, ", ")
+			if truncated {
+				label += fmt.Sprintf(" (일부만 표시 — 상위 %d개)", maxScenarioAppList)
+			}
+			lines = append(lines, label)
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isSystemPackage — launch_app 대상이 되기 어려운 시스템/벤더 패키지 판별.
+// 프롬프트에서 제외해 사용자앱 위주로 노출한다.
+func isSystemPackage(pkg string) bool {
+	if pkg == "android" {
+		return true
+	}
+	systemPrefixes := []string{
+		"com.android.",
+		"com.google.android.gms",
+		"com.google.android.gsf",
+		"com.qualcomm.",
+		"com.samsung.android.",
+		"com.sec.android.",
+		"com.mediatek.",
+		"vendor.",
+		"org.codeaurora.",
+	}
+	for _, p := range systemPrefixes {
+		if strings.HasPrefix(pkg, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeAIKind — 외부에서 온 kind 를 내부 jobType 으로 정규화.
