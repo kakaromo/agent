@@ -171,26 +171,35 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 
 	// Determine final state
 	job.mu.Lock()
-	completed, failed := 0, 0
+	completed, failed, cancelled := 0, 0, 0
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
 		case pb.JobState_JOB_STATE_COMPLETED:
 			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+		case pb.JobState_JOB_STATE_CANCELLED:
+			cancelled++
 		}
 	}
 	total := len(job.DeviceStatuses)
-	if failed == total {
+	switch {
+	case cancelled > 0:
+		// 하나라도 취소됐으면 job 은 취소로 본다 (cancel 은 사용자 명시 의도 — COMPLETED 로 덮지 않는다).
+		job.State = pb.JobState_JOB_STATE_CANCELLED
+	case failed == total:
 		job.State = pb.JobState_JOB_STATE_FAILED
-	} else if failed > 0 {
+	case failed > 0:
 		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
-	} else {
+	default:
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
+	finalState := job.State
 	job.mu.Unlock()
 
-	slog.Info("scenario finished", "job_id", job.ID, "state", job.State)
+	slog.Info("scenario finished", "job_id", job.ID, "state", finalState)
+	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영한다 (cancel 시 running 잔존 버그 방지).
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
 }
 
 func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, deviceID string, steps []expandedStep) {
@@ -301,6 +310,15 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING,
 				msg+" completed", stepProgress)
 		}
+	}
+
+	// 루프 완주 후에도 cancel 여부를 최종 확인한다. 마지막 스텝이 cancel 로 깨어나 정상 리턴한 경우
+	// (예: scroll pause 가 sleepCtx 로 중단됨) 스텝 경계 체크를 지나쳐 여기 도달할 수 있으므로,
+	// COMPLETED 로 기록하기 전에 ctx 취소를 반영해 CANCELLED 로 마무리한다.
+	if ctx.Err() != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+		o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+		return
 	}
 
 	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())
@@ -451,7 +469,12 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		if sec <= 0 {
 			sec = 1
 		}
-		time.Sleep(time.Duration(sec) * time.Second)
+		// ctx 취소를 존중하는 대기 — cancel 시 즉시 깨어난다(순수 time.Sleep 은 sec 를 다 채워 cancel 을 무시).
+		select {
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		case <-time.After(time.Duration(sec) * time.Second):
+		}
 		return "", nil, nil
 	case "trace_start":
 		if o.traceMgr == nil {
@@ -962,26 +985,32 @@ func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceI
 
 	// Determine final state (same as linear mode)
 	job.mu.Lock()
-	completed, failed := 0, 0
+	completed, failed, cancelled := 0, 0, 0
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
 		case pb.JobState_JOB_STATE_COMPLETED:
 			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+		case pb.JobState_JOB_STATE_CANCELLED:
+			cancelled++
 		}
 	}
 	total := len(job.DeviceStatuses)
-	if failed == total {
+	if cancelled > 0 {
+		job.State = pb.JobState_JOB_STATE_CANCELLED
+	} else if failed == total {
 		job.State = pb.JobState_JOB_STATE_FAILED
 	} else if failed > 0 {
 		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
 	} else {
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
+	finalState := job.State
 	job.mu.Unlock()
 
-	slog.Info("scenario DAG finished", "job_id", job.ID, "state", job.State)
+	slog.Info("scenario DAG finished", "job_id", job.ID, "state", finalState)
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
 }
 
 func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, deviceID string,
@@ -1167,6 +1196,13 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 			currentStep = nextStep
 		}
+	}
+
+	// DAG 완주 후에도 cancel 여부 최종 확인 (선형 경로와 동일 — cancel 로 깨어난 스텝이 정상 리턴한 경우 대비).
+	if ctx.Err() != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+		o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+		return
 	}
 
 	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())

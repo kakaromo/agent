@@ -126,11 +126,13 @@ func handleProgressSSE(w http.ResponseWriter, r *http.Request, agent *DeviceAgen
 		case progress, ok := <-ch:
 			if !ok {
 				// 채널 close = 잡 종료. complete 이벤트 발행 후 리턴.
+				// 주의: 여기서 OnState 를 "completed" 로 강제하지 않는다. 채널 close 는 "종료"일 뿐
+				// 완료를 뜻하지 않으며(cancel/fail 도 채널을 닫는다), 최종 state 는 orchestrator 의
+				// finishHook(SetJobFinishHook)이 실제 job.State 로 정확히 DB 에 기록한다.
+				// SSE 가 "completed" 로 덮으면 cancel 이 completed 로 오기록되는 race 가 발생한다.
 				emit("complete", "{}")
 				if rec := currentRecorder(); rec != nil {
-					// portal 동작: onCompleted 시 jobExecutionService.updateState(jobId, "completed", null)
-					rec.OnState(ctx, jobID, "completed", "")
-					// 결과 metrics 를 DB 에 영구 저장 (agent 재시작 후에도 조회 가능).
+					// 결과 metrics 만 DB 에 영구 저장 (agent 재시작 후에도 조회 가능). state 는 finishHook 담당.
 					rec.OnResult(ctx, agent, jobID, inferJobTypeFromAgent(agent, jobID))
 				}
 				return

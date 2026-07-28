@@ -58,7 +58,9 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 		if ev.T > lastT && i > 0 {
 			delay := time.Duration(ev.T-lastT) * time.Millisecond
 			if delay > 0 && delay < 30*time.Minute {
-				time.Sleep(delay)
+				if !sleepCtx(ctx, delay) {
+					return &pb.ReplayMacroResponse{Success: false, Message: "cancelled", OcrResults: ocrResults, Metrics: metrics}, nil
+				}
 			}
 		}
 		lastT = ev.T
@@ -140,7 +142,9 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 			if sec <= 0 {
 				sec = 1
 			}
-			time.Sleep(time.Duration(sec) * time.Second)
+			if !sleepCtx(ctx, time.Duration(sec)*time.Second) {
+				return &pb.ReplayMacroResponse{Success: false, Message: "cancelled", OcrResults: ocrResults, Metrics: metrics}, nil
+			}
 
 		case "wait_until":
 			if err := r.waitUntil(ctx, ev); err != nil {
@@ -378,8 +382,27 @@ func (r *Replayer) doScroll(ctx context.Context, ev *pb.MacroEvent) {
 		}
 		r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d %d", centerX, startY, centerX, endY, dur))
 		if i < count-1 {
-			time.Sleep(pause)
+			// ctx 취소를 존중하는 대기 — cancel 시 즉시 깨어난다(순수 time.Sleep 은 pause 를 다 채워 cancel 을 무시).
+			if !sleepCtx(ctx, pause) {
+				return
+			}
 		}
+	}
+}
+
+// sleepCtx 는 d 만큼 대기하되 ctx 취소 시 즉시 중단한다.
+// 완료까지 잤으면 true, ctx 취소로 중단됐으면 false 를 반환한다.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
@@ -459,7 +482,9 @@ func (r *Replayer) scrollCapture(ctx context.Context, ev *pb.MacroEvent) map[str
 			startY, endY = endY, startY
 		}
 		r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d 300", centerX, startY, centerX, endY))
-		time.Sleep(scrollPause)
+		if !sleepCtx(ctx, scrollPause) {
+			break
+		}
 	}
 
 	results["full_text"] = allText.String()

@@ -46,11 +46,22 @@ func currentRecorder() JobExecutionRecorder {
 
 // installJobExecutionHook — DB 있을 때 호출. portal 의 jobExecutionService 역할 단방향 등록.
 // archiveBase 가 비어있지 않으면 잡 종료 시 benchmark 결과 JSON 을 디스크에도 자동 저장한다.
-func installJobExecutionHook(_ *DeviceAgentServer, db *sqlitedb.DB, archiveBase string) {
+func installJobExecutionHook(agent *DeviceAgentServer, db *sqlitedb.DB, archiveBase string) {
 	if db == nil {
 		return
 	}
-	recorderRef.Store(JobExecutionRecorder(&dbRecorder{db: db, archiveBase: archiveBase}))
+	rec := &dbRecorder{db: db, archiveBase: archiveBase}
+	recorderRef.Store(JobExecutionRecorder(rec))
+
+	// job 종료 시 DB state 를 직접 갱신한다 (SSE 구독 여부와 무관 — cancel 시 running 잔존 버그 방지).
+	// SSE 경로(sse.go)는 UI 가 progress 를 구독할 때만 동작하므로, 그와 별개로 항상 반영되도록 orchestrator hook 을 건다.
+	if agent != nil && agent.orchestrator != nil {
+		agent.orchestrator.SetJobFinishHook(func(jobID, state, errMsg string) {
+			ctx := context.Background()
+			rec.OnState(ctx, jobID, state, errMsg)
+			rec.OnResult(ctx, agent, jobID, inferJobTypeFromAgent(agent, jobID))
+		})
+	}
 }
 
 // dbRecorder — SQLite 백엔드 구현.

@@ -105,6 +105,10 @@ type ApkController interface {
 	Uninstall(ctx context.Context, req *pb.UninstallApkRequest) (*pb.UninstallApkResponse, error)
 }
 
+// JobFinishHook — job 이 terminal 상태로 종료될 때 호출된다(SSE 구독 여부와 무관).
+// server 레이어가 DB 영속화를 붙이는 용도. state 는 "completed"/"failed"/"cancelled"/"partially_failed".
+type JobFinishHook func(jobID, state, errMsg string)
+
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
 	mu          sync.RWMutex
@@ -116,6 +120,40 @@ type Orchestrator struct {
 	macroMgr    MacroController
 	apkMgr      ApkController
 	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
+	finishHook  JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
+}
+
+// SetJobFinishHook — job 종료 시 호출될 콜백 등록. standalone 에서 DB 영속화 연결용.
+func (o *Orchestrator) SetJobFinishHook(h JobFinishHook) {
+	o.mu.Lock()
+	o.finishHook = h
+	o.mu.Unlock()
+}
+
+// fireFinishHook — job 종료 시 등록된 hook 을 안전하게 호출한다.
+func (o *Orchestrator) fireFinishHook(jobID, state, errMsg string) {
+	o.mu.RLock()
+	h := o.finishHook
+	o.mu.RUnlock()
+	if h != nil {
+		h(jobID, state, errMsg)
+	}
+}
+
+// jobStateHookString — pb.JobState 를 DB/REST 호환 소문자 문자열로 변환 (server.jobStateString 과 동일 매핑).
+func jobStateHookString(s pb.JobState) string {
+	switch s {
+	case pb.JobState_JOB_STATE_COMPLETED:
+		return "completed"
+	case pb.JobState_JOB_STATE_FAILED:
+		return "failed"
+	case pb.JobState_JOB_STATE_PARTIALLY_FAILED:
+		return "partially_failed"
+	case pb.JobState_JOB_STATE_CANCELLED:
+		return "cancelled"
+	default:
+		return "completed"
+	}
 }
 
 func NewOrchestrator(manager *adb.Manager, toolsDir string) *Orchestrator {
@@ -299,9 +337,12 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 	} else {
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
+	finalState := job.State
 	job.mu.Unlock()
 
-	slog.Info("job finished", "job_id", job.ID, "state", job.State, "completed", completed, "failed", failed, "cancelled", cancelled)
+	slog.Info("job finished", "job_id", job.ID, "state", finalState, "completed", completed, "failed", failed, "cancelled", cancelled)
+	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영 (scenario 경로와 동일).
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
 }
 
 func (o *Orchestrator) runOnDeviceWithRetry(ctx context.Context, job *Job, deviceID string) {
