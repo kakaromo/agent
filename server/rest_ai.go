@@ -478,7 +478,9 @@ func resolveAISummary(ctx context.Context, agent *DeviceAgentServer, jobID, kind
 }
 
 // maxScenarioAppList — 프롬프트 폭증 방지용 설치앱 표시 상한.
-const maxScenarioAppList = 40
+// 프롬프트에 넣을 설치앱 최대 개수. 삼성 기기는 런처 앱이 60여 개라 40 이면 시계·노트 등
+// 실사용 앱이 잘려 AI 가 패키지명을 못 찾는다. 14b 컨텍스트 여유 안에서 넉넉히 잡는다.
+const maxScenarioAppList = 80
 
 // buildDeviceScenarioContext — deviceId 로 그 기기의 설치앱 + 현재 activity 를 조달해
 // 시나리오 프롬프트용 컨텍스트 문자열로 합성한다. best-effort — 조달 실패한 항목은 빼고 진행,
@@ -530,18 +532,20 @@ func buildDeviceScenarioContext(ctx context.Context, agent *DeviceAgentServer, d
 
 // isSystemPackage — launch_app 대상이 되기 어려운 시스템/벤더 패키지 판별.
 // 프롬프트에서 제외해 사용자앱 위주로 노출한다.
+// isSystemPackage — AI 컨텍스트에 넣지 않을 순수 OS 인프라 패키지 판별.
+//
+// 주의: ListInstalledApps 는 LAUNCHER 인텐트를 가진 "런처에 뜨는 앱"만 반환하므로
+// (설정/시계/노트/계산기처럼 사용자가 실제 여는 앱 포함), 제조사 prefix(com.samsung.*,
+// com.sec.*, com.qualcomm.* 등)를 통짜로 거르면 안 된다 — 삼성 기기의 시계·노트·계산기가
+// 전부 제외되어 AI 가 패키지명을 못 찾고 지어낸다. 여기서는 명백한 백그라운드 인프라만 제외한다.
 func isSystemPackage(pkg string) bool {
 	if pkg == "android" {
 		return true
 	}
 	systemPrefixes := []string{
-		"com.android.",
-		"com.google.android.gms",
+		"com.google.android.gms", // Play services (런처에 뜨더라도 사용자 대상 아님)
 		"com.google.android.gsf",
-		"com.qualcomm.",
-		"com.samsung.android.",
-		"com.sec.android.",
-		"com.mediatek.",
+		"com.qualcomm.qti.",
 		"vendor.",
 		"org.codeaurora.",
 	}
