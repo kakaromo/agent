@@ -679,8 +679,11 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			return "", nil, fmt.Errorf("tap_element: 요소를 찾을 수 없습니다 (resource_id=%q text=%q content_desc=%q). 재시도 후에도 화면에서 대상을 못 찾았습니다",
 				step.Params["element_resource_id"], step.Params["element_text"], step.Params["element_content_desc"])
 		}
-		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
-			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
+		// content_desc 도 남긴다 — AI 생성 시나리오는 이 필드를 주로 쓰므로
+		// 빠뜨리면 raw output 에 "id=|text=" 만 찍혀 무엇을 탭했는지 알 수 없다.
+		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|desc=%s|success=%t",
+			step.Params["element_resource_id"], step.Params["element_text"],
+			step.Params["element_content_desc"], resp.Success), metrics, nil
 	case "tap":
 		// 절대 좌표 탭. 커스텀뷰(요소 미노출) 화면 — 삼성 노트 AI 메뉴, 게임 등 —
 		// tap_element 로 못 잡는 버튼을 좌표로 직접 누른다. 스케일링 없이 raw 좌표 그대로.
