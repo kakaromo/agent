@@ -330,6 +330,14 @@ func (m *Manager) GetDevice(deviceID string) (*ManagedDevice, error) {
 	defer m.mu.RUnlock()
 	md, ok := m.devices[deviceID]
 	if !ok {
+		// USB 연결 기기는 deviceID 가 시리얼이 아니라 USB 경로("2-1.1.2")다.
+		// 사용자가 `adb devices` 에서 본 시리얼로 호출하면 여기서 실패하는데,
+		// 어떤 ID 를 써야 하는지 알려주지 않으면 원인을 짐작할 수 없다.
+		for id, other := range m.devices {
+			if other.Serial == deviceID {
+				return nil, fmt.Errorf("device not found: %s (시리얼로 호출했습니다. deviceId=%q 를 사용하세요)", deviceID, id)
+			}
+		}
 		return nil, fmt.Errorf("device not found: %s", deviceID)
 	}
 	return md, nil
