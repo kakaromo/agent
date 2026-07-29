@@ -172,12 +172,16 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 	// Determine final state
 	job.mu.Lock()
 	completed, failed, cancelled := 0, 0, 0
+	var failMsg string // 실패/취소 device 의 첫 에러 메시지 (DB error_message 로 전달)
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
 		case pb.JobState_JOB_STATE_COMPLETED:
 			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+			if failMsg == "" {
+				failMsg = ds.Message
+			}
 		case pb.JobState_JOB_STATE_CANCELLED:
 			cancelled++
 		}
@@ -199,7 +203,8 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 
 	slog.Info("scenario finished", "job_id", job.ID, "state", finalState)
 	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영한다 (cancel 시 running 잔존 버그 방지).
-	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
+	// 실패면 어느 스텝이 왜 실패했는지 error_message 로 함께 저장한다.
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
 }
 
 func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, deviceID string, steps []expandedStep) {
@@ -992,12 +997,16 @@ func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceI
 	// Determine final state (same as linear mode)
 	job.mu.Lock()
 	completed, failed, cancelled := 0, 0, 0
+	var failMsg string
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
 		case pb.JobState_JOB_STATE_COMPLETED:
 			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+			if failMsg == "" {
+				failMsg = ds.Message
+			}
 		case pb.JobState_JOB_STATE_CANCELLED:
 			cancelled++
 		}
@@ -1016,7 +1025,7 @@ func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceI
 	job.mu.Unlock()
 
 	slog.Info("scenario DAG finished", "job_id", job.ID, "state", finalState)
-	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
 }
 
 func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, deviceID string,
