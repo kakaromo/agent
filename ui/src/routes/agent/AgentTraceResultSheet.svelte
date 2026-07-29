@@ -156,6 +156,8 @@
 
 	function startAiAnalyze() {
 		if (!serverId || activeJobIds.length === 0) return;
+		// AI 해석 패널은 Statistics 탭에 있으므로, 어느 탭에서 눌러도 결과가 보이게 탭을 전환한다.
+		mainTab = 'stats';
 		closeAiSource();
 		aiRunning = true;
 		aiText = '';
