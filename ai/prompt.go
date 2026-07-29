@@ -153,6 +153,11 @@ const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동
 
 ## 사용 가능한 step type 과 주요 params
 - launch_app: 앱 실행. params: package_name(필수, 예 "com.google.android.youtube"), clear_mode("force_stop"|"clear"|"cache"|"none"), wait_seconds("3"), wait_activity(선택)
+  **clear_mode 는 기본적으로 "force_stop" 을 쓰세요.** 앱이 이미 실행 중이면 이전 화면(검색 결과 등)이
+  그대로 남아, 뒤따르는 tap_element 가 "검색" 같은 첫 화면 요소를 찾지 못해 실패합니다.
+  같은 시나리오를 반복해도 같은 결과가 나오려면 앱을 초기 상태에서 시작해야 합니다.
+  "이어서/현재 화면에서" 처럼 사용자가 명시적으로 현재 상태 유지를 요구할 때만 "none" 을 쓰세요.
+  **wait_seconds 는 항상 넣으세요**("3" 권장). 앱 로딩 전에 탭하면 요소를 못 찾습니다.
 - stop_app: 앱 종료. params: package_name(필수)
 - scroll: 피드 스크롤(워크로드 재현). params: direction("up"|"down"), count(스크롤 횟수 "10"), pause(각 스크롤 사이 대기 "초", 예 "1"=1초 — 밀리초 아님에 주의), duration(스와이프 동작 시간 밀리초, 예 "300")
   - **"N번 스크롤하며 각 사이 P초 대기"는 반드시 scroll 하나로 { count:"N", pause:"P" } 로 표현하세요.** scroll count=1 을 loop 로 N번 반복하면 스크롤 사이 대기(pause)가 적용되지 않습니다. 반복은 count 로, 사이 대기는 pause 로 지정합니다.
@@ -219,7 +224,7 @@ startStep/endStep 은 0-based step 인덱스, count 는 반복 횟수. 모두 �
 출력: (trace 는 워크로드를 감싼다 — start 를 앞, stop 을 뒤에 쌍으로)
 {
   "steps": [
-    { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "none", "wait_seconds": "3" } },
+    { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "force_stop", "wait_seconds": "3" } },
     { "type": "trace_start", "tool": "", "params": { "trace_type": "ufs", "window_seconds": "1" } },
     { "type": "scroll", "tool": "", "params": { "direction": "down", "count": "20", "pause": "1", "duration": "300" } },
     { "type": "trace_stop", "tool": "", "params": { "trace_type": "ufs" } }
@@ -232,7 +237,7 @@ startStep/endStep 은 0-based step 인덱스, count 는 반복 횟수. 모두 �
       "뒤로가기"/"홈" 같은 키 동작은 key step 으로, keycode 를 반드시 채운다)
 {
   "steps": [
-    { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "none", "wait_seconds": "3" } },
+    { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "force_stop", "wait_seconds": "3" } },
     { "type": "tap_element", "tool": "", "params": { "element_content_desc": "검색" } },
     { "type": "sleep", "tool": "", "params": { "seconds": "1" } },
     { "type": "text", "tool": "", "params": { "input_text": "lofi", "submit": "true" } },
