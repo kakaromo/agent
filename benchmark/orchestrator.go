@@ -566,9 +566,12 @@ func (o *Orchestrator) SubscribeJobProgress(jobID string) (chan *pb.JobProgress,
 		ch <- p
 	}
 	// If job already finished, close immediately after replay
+	// CANCELLED 도 터미널 상태다. 빠지면 취소로 끝난 잡에 재구독 시 채널이 닫히지
+	// 않고 subscriber 로 등록돼 complete 이벤트를 못 받아 카드가 running 으로 hang 된다.
 	finished := job.State == pb.JobState_JOB_STATE_COMPLETED ||
 		job.State == pb.JobState_JOB_STATE_FAILED ||
-		job.State == pb.JobState_JOB_STATE_PARTIALLY_FAILED
+		job.State == pb.JobState_JOB_STATE_PARTIALLY_FAILED ||
+		job.State == pb.JobState_JOB_STATE_CANCELLED
 	if finished {
 		close(ch)
 	} else {

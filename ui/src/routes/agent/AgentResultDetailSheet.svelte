@@ -746,6 +746,7 @@
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'running': case 'pushing_tools': case 'collecting': return 'bg-blue-100 text-blue-800';
 			case 'failed': return 'bg-red-100 text-red-800';
+			case 'partially_failed': return 'bg-orange-100 text-orange-800';
 			case 'cancelled': return 'bg-orange-100 text-orange-800';
 			default: return 'bg-gray-100 text-gray-800';
 		}
@@ -863,6 +864,8 @@
 							<span class="text-[10px] text-green-600 font-normal">완료</span>
 						{:else if jobStatus?.state === 'failed' || jobStatus?.state === 'partially_failed'}
 							<span class="text-[10px] text-red-600 font-normal">실패</span>
+						{:else if jobStatus?.state === 'cancelled'}
+							<span class="text-[10px] text-orange-600 font-normal">취소됨</span>
 						{/if}
 						<span class="ml-auto text-[9px] text-muted-foreground font-normal">{executionConfig.steps.length} steps</span>
 					</button>
