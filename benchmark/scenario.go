@@ -269,9 +269,12 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 			// 실행 중인 스텝이 취소로 중단된 경우는 실패가 아니라 취소로 기록한다.
 			// (스텝 경계의 ctx.Err() 체크는 실행 중 취소를 잡지 못하고 이 분기가 먼저 잡는다)
 			if ctx.Err() != nil {
+				// 메시지에 step 번호를 남긴다 — UI 가 어느 스텝에서 중단됐는지
+				// 파싱해 그 스텝만 취소로 표시할 수 있어야 한다.
+				cancelMsg := fmt.Sprintf("%s cancelled", msg)
 				slog.Info("scenario step cancelled", "job_id", job.ID, "device", deviceID, "step", es.stepIndex, "type", es.step.Type)
-				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", progress)
-				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, cancelMsg, progress)
+				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, cancelMsg, traceJobMappings...)
 				return
 			}
 			errMsg := fmt.Sprintf("%s failed: %s", msg, err.Error())
@@ -1166,9 +1169,11 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			if execErr != nil {
 				// 실행 중 취소는 실패가 아니라 취소로 기록 (선형 모드와 동일)
 				if ctx.Err() != nil {
+					// step 번호를 남겨 UI 가 중단 지점을 식별할 수 있게 한다
+					cancelMsg := fmt.Sprintf("step %d (%s) cancelled", currentStep, step.Type)
 					slog.Info("scenario step cancelled", "job_id", job.ID, "device", deviceID, "step", currentStep, "type", step.Type)
-					o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
-					o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+					o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, cancelMsg, 0)
+					o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, cancelMsg, traceJobMappings...)
 					return
 				}
 				errMsg := fmt.Sprintf("step %d (%s) failed: %s", currentStep, step.Type, execErr.Error())
