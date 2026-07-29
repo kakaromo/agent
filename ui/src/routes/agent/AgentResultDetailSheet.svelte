@@ -244,20 +244,48 @@
 		}
 	}
 
+	/**
+	 * agent 재시작으로 메모리에서 만료된 잡의 상태를 DB 값으로 되살린다.
+	 *
+	 * GetJobStatus 는 만료 시 404 + {error, state:"failed"} 를 주고 client.ts 가 이를
+	 * 정상 데이터로 통과시킨다(portal 호환). 하지만 그 "failed" 는 "조회 불가"라는 뜻일 뿐이며,
+	 * 실제 종료 상태는 job_executions 에 영구 저장돼 있다. 구분하지 않으면 agent 재시작 후
+	 * 과거 성공 잡이 모두 '실패'로 표시된다.
+	 *
+	 * 만료 응답은 error 필드가 있고 deviceStatuses 가 비어 있어 정상 응답과 구별된다.
+	 */
+	async function resolveExpiredStatus(res: JobStatus): Promise<JobStatus> {
+		const expired = !!(res as any).error && !(res.deviceStatuses?.length);
+		if (!expired || !jobId) return res;
+		try {
+			const exec = await fetchExecutionByJobId(jobId);
+			if (!exec?.state) return res;
+			return {
+				...res,
+				state: exec.state,
+				deviceStatuses: exec.errorMessage
+					? [{ deviceId: '', state: exec.state, message: exec.errorMessage, progressPercent: 0 } as any]
+					: []
+			} as JobStatus;
+		} catch {
+			return res; // DB 에도 없으면 원래 응답(failed) 유지
+		}
+	}
+
 	async function loadDetail() {
 		if (serverId == null || jobId == null) return;
 		loading = true; jobStatus = null; result = null; selectedDevice = null; stopPolling();
 		try {
 			const res = await getJobStatus(serverId, jobId);
-			jobStatus = res;
-			if (isTerminal(res.state)) {
+			jobStatus = await resolveExpiredStatus(res);
+			if (isTerminal(jobStatus!.state)) {
 				try {
 					result = await getBenchmarkResult(serverId, jobId);
 					if (result.results.length > 0) selectedDevice = result.results[0].deviceId;
 				} catch {}
 			} else { startPolling(); }
 		} catch {
-			// Job not found (404) — 실패 상태로 표시
+			// Job not found — DB 에도 없으면 실패로 표시
 			jobStatus = { jobId: jobId ?? '', state: 'failed', totalDevices: 0, completedDevices: 0, failedDevices: 0, deviceStatuses: [] } as any;
 		}
 		finally { loading = false; }

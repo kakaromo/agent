@@ -39,6 +39,15 @@
 
 	const nodeTypes = { step: StepNode, condition: ConditionNode };
 
+	// 스텝 수에 따라 캔버스 높이를 늘린다. 고정 350px + fitView 조합이면 스텝이 많을 때
+	// (예: 11 스텝 크롬 서핑 시나리오) 노드가 판독 불가 크기로 축소된다.
+	// 노드 간격이 100px 이므로 그에 맞춰 늘리고, 화면을 다 잡아먹지 않게 상한을 둔다.
+	let canvasHeight = $derived.by(() => {
+		const n = nodes.filter(x => x.type === 'step' || x.type === 'condition').length;
+		if (n === 0) return 350;
+		return Math.min(760, Math.max(350, n * 78));
+	});
+
 	let nodes = $state<Node[]>([]);
 	let edges = $state<Edge[]>([]);
 
@@ -197,7 +206,7 @@
 	});
 </script>
 
-<div class="border-2 border-blue-200 rounded-lg bg-blue-50/30 overflow-hidden relative" style="height: 350px;">
+<div class="border-2 border-blue-200 rounded-lg bg-blue-50/30 overflow-hidden relative" style="height: {canvasHeight}px;">
 	<!-- 헤더 뱃지 -->
 	<div class="absolute top-2 left-2 z-10 flex items-center gap-2">
 		{#if repeatInfo}
