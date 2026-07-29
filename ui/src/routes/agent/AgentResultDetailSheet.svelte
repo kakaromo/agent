@@ -875,6 +875,8 @@
 								stepsJson={JSON.stringify(executionConfig.steps)}
 								loopsJson={executionConfig.loops ? JSON.stringify(executionConfig.loops) : undefined}
 								activeJob={activeJob ?? null}
+								finishedState={jobStatus?.state ?? null}
+								finishedMessages={jobStatus?.deviceStatuses?.map(d => d.message).filter(Boolean) ?? []}
 							/>
 						</div>
 					{/if}

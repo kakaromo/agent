@@ -277,11 +277,12 @@
 		const haltStatus = job.state === 'cancelled' ? 'cancelled' : 'failed';
 		const stepNodeIds = nodes.filter(n => n.type === 'step' || n.type === 'condition').map(n => n.id);
 
-		// 1) 명시적 실패 이벤트에서 실패 스텝 인덱스 추출 (`... failed: ...`)
+		// 1) 명시적 중단 이벤트에서 중단 스텝 인덱스 추출
+		//    (`... failed: ...` 또는 `... cancelled`)
 		let failedIndex: number | null = null;
 		for (let i = events.length - 1; i >= 0; i--) {
 			const msg = events[i].message ?? '';
-			if (/failed\s*:/i.test(msg)) {
+			if (/failed\s*:/i.test(msg) || /\bcancelled\b/i.test(msg)) {
 				const m = msg.match(/[Ss]tep\s*(\d+)/);
 				if (m) { failedIndex = parseInt(m[1]); break; }
 			}
