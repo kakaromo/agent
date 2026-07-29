@@ -173,6 +173,9 @@ const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동
 - iotest: params: config
 - trace_start: 커널 트레이스 시작. params: trace_type("ufs"|"block"|"both"), window_seconds("1")
 - trace_stop: 트레이스 중지. params: trace_type
+  **중요**: trace 는 측정 대상을 감싸는 구조입니다. "~하면서 트레이스", "~할 때 trace 수집" 요청이면
+  trace_start 를 측정 대상 **앞**에, trace_stop 을 **뒤**에 반드시 쌍으로 넣으세요.
+  (앱 스크롤이든 벤치마크든 동일. trace_start 만 넣거나 워크로드 뒤에 두면 아무것도 측정되지 않습니다.)
 - install_apk: params: apk_filename(필수), grant_permissions("true"|"false")
 - uninstall_apk: params: package_name(필수), keep_data("true"|"false")
 - cleanup: params: path 또는 delete_files_from_steps
@@ -212,14 +215,29 @@ startStep/endStep 은 0-based step 인덱스, count 는 반복 횟수. 모두 �
   "loops": [ { "startStep": "1", "endStep": "1", "count": "3" } ]
 }
 
-요청: "유튜브에서 lofi 를 검색"
-출력: (검색은 아이콘 탭 → 입력 순서. 홈에 입력창이 없으므로 바로 입력하지 않음)
+요청: "유튜브를 20번 스크롤하면서 ufs 트레이스 수집"
+출력: (trace 는 워크로드를 감싼다 — start 를 앞, stop 을 뒤에 쌍으로)
+{
+  "steps": [
+    { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "none", "wait_seconds": "3" } },
+    { "type": "trace_start", "tool": "", "params": { "trace_type": "ufs", "window_seconds": "1" } },
+    { "type": "scroll", "tool": "", "params": { "direction": "down", "count": "20", "pause": "1", "duration": "300" } },
+    { "type": "trace_stop", "tool": "", "params": { "trace_type": "ufs" } }
+  ],
+  "loops": []
+}
+
+요청: "유튜브에서 lofi 를 검색하고 결과를 3번 스크롤한 뒤 뒤로가기"
+출력: (검색은 아이콘 탭 → 입력 순서. 홈에 입력창이 없으므로 바로 입력하지 않음.
+      "뒤로가기"/"홈" 같은 키 동작은 key step 으로, keycode 를 반드시 채운다)
 {
   "steps": [
     { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "none", "wait_seconds": "3" } },
     { "type": "tap_element", "tool": "", "params": { "element_content_desc": "검색" } },
     { "type": "sleep", "tool": "", "params": { "seconds": "1" } },
-    { "type": "text", "tool": "", "params": { "input_text": "lofi", "submit": "true" } }
+    { "type": "text", "tool": "", "params": { "input_text": "lofi", "submit": "true" } },
+    { "type": "scroll", "tool": "", "params": { "direction": "down", "count": "3", "pause": "1", "duration": "300" } },
+    { "type": "key", "tool": "", "params": { "keycode": "4" } }
   ],
   "loops": []
 }`
