@@ -676,8 +676,19 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		// 요소를 못 찾고 폴백 좌표도 없었으면 스텝 실패로 처리한다.
 		// (요소를 못 찾았는데 성공으로 넘어가는 silent failure 방지 — replayer 가 재탐색까지 한 뒤의 결과.)
 		if metrics["tap_element_not_found"] > 0 {
-			return "", nil, fmt.Errorf("tap_element: 요소를 찾을 수 없습니다 (resource_id=%q text=%q content_desc=%q). 재시도 후에도 화면에서 대상을 못 찾았습니다",
-				step.Params["element_resource_id"], step.Params["element_text"], step.Params["element_content_desc"])
+			// 현재 포커스 화면을 함께 알려준다. 권한 다이얼로그(permissioncontroller) 나
+			// 다른 앱이 화면을 가려 실패하는 경우가 흔한데, 요소 이름만 보여주면
+			// 사용자가 원인을 짐작할 수 없다.
+			focusHint := ""
+			if md != nil && md.Device != nil {
+				if focus, err := md.Device.Shell(ctx, "dumpsys window | grep mCurrentFocus"); err == nil {
+					if f := strings.TrimSpace(focus); f != "" {
+						focusHint = fmt.Sprintf(" 현재 화면: %s", f)
+					}
+				}
+			}
+			return "", nil, fmt.Errorf("tap_element: 요소를 찾을 수 없습니다 (resource_id=%q text=%q content_desc=%q). 재시도 후에도 화면에서 대상을 못 찾았습니다.%s",
+				step.Params["element_resource_id"], step.Params["element_text"], step.Params["element_content_desc"], focusHint)
 		}
 		// content_desc 도 남긴다 — AI 생성 시나리오는 이 필드를 주로 쓰므로
 		// 빠뜨리면 raw output 에 "id=|text=" 만 찍혀 무엇을 탭했는지 알 수 없다.
