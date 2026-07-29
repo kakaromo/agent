@@ -147,8 +147,10 @@
 		currentJobId = targetJob.jobId;
 
 		requestAnimationFrame(() => {
-			if (targetJob.state === 'completed' || targetJob.state === 'failed') {
-				markAllNodes(targetJob.state);
+			if (targetJob.state === 'completed') {
+				markAllNodes('completed');
+			} else if (targetJob.state === 'failed') {
+				markFailedNodes(targetJob);
 			} else {
 				updateNodeStates(targetJob);
 			}
@@ -249,6 +251,51 @@
 		nodes = nodes.map(n => {
 			if (n.type !== 'step' && n.type !== 'condition') return n;
 			return { ...n, data: { ...n.data, execStatus: status, execLoopCurrent: undefined, execLoopTotal: undefined } };
+		});
+	}
+
+	/**
+	 * job 이 FAILED 로 끝났을 때, 실패한 스텝만 빨강으로 칠하고 그 앞 스텝은 completed,
+	 * 그 뒤 스텝은 미실행(status 없음)으로 구분한다.
+	 * markAllNodes('failed') 처럼 전부 빨강으로 칠하거나, 진행 인덱스만 보고 전부 completed 로
+	 * 오인하던 버그를 방지한다.
+	 *
+	 * 실패 이벤트 메시지는 `step N ... failed: ...` (N 은 0-based stepIndex, backend scenario.go).
+	 * 해당 이벤트를 못 찾으면 마지막 진행 스텝을 실패 스텝으로 간주한다.
+	 */
+	function markFailedNodes(job: ActiveJob) {
+		const events = job.events ?? [];
+		const stepNodeIds = nodes.filter(n => n.type === 'step' || n.type === 'condition').map(n => n.id);
+
+		// 1) 명시적 실패 이벤트에서 실패 스텝 인덱스 추출 (`... failed: ...`)
+		let failedIndex: number | null = null;
+		for (let i = events.length - 1; i >= 0; i--) {
+			const msg = events[i].message ?? '';
+			if (/failed\s*:/i.test(msg)) {
+				const m = msg.match(/[Ss]tep\s*(\d+)/);
+				if (m) { failedIndex = parseInt(m[1]); break; }
+			}
+		}
+
+		// 2) 실패 이벤트를 못 찾으면 마지막으로 진행 중이던 스텝을 실패로 간주
+		if (failedIndex == null) {
+			for (let i = events.length - 1; i >= 0; i--) {
+				const p = parseProgress(events[i].message ?? '');
+				if (p && p.stepIndex != null) { failedIndex = p.stepIndex; break; }
+			}
+		}
+
+		// 진행 정보가 전혀 없으면 안전하게 전부 실패로 표기 (기존 동작)
+		if (failedIndex == null) { markAllNodes('failed'); return; }
+
+		nodes = nodes.map(n => {
+			if (n.type !== 'step' && n.type !== 'condition') return n;
+			const idx = stepNodeIds.indexOf(n.id);
+			let execStatus: string | undefined;
+			if (idx < failedIndex!) execStatus = 'completed';
+			else if (idx === failedIndex) execStatus = 'failed';
+			// idx > failedIndex → 미실행 (execStatus undefined)
+			return { ...n, data: { ...n.data, execStatus, execLoopCurrent: undefined, execLoopTotal: undefined } };
 		});
 	}
 

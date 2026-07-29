@@ -73,6 +73,19 @@
 	let storageMetricsMap = $state<Map<string, DeviceMetricsData>>(new Map());
 	let storageEventSource: EventSource | null = null;
 
+	// SSE 'complete' 이벤트는 "스트림 종료"만 의미하고 성공/실패를 구분하지 않는다.
+	// (백엔드 server/sse.go 는 채널 close 시 job.State 와 무관하게 항상 'complete' 발행)
+	// 따라서 마지막 progress 이벤트의 state 를 보고 실제 terminal 상태를 판정한다.
+	// 이렇게 하지 않으면 시나리오가 FAILED 로 끝나도 UI 가 completed(전부 초록)로 오인한다.
+	function terminalStateFromEvents(events: JobProgress[]): 'completed' | 'failed' {
+		for (let i = events.length - 1; i >= 0; i--) {
+			const s = events[i]?.state;
+			if (s === 'failed' || s === 'partially_failed' || s === 'cancelled') return 'failed';
+			if (s === 'completed') return 'completed';
+		}
+		return 'completed';
+	}
+
 	function connectStorageSSE() {
 		closeStorageSSE();
 		if (selectedServerId == null || selectedDeviceIds.size === 0) return;
@@ -257,11 +270,12 @@
 
 			es.addEventListener('complete', () => {
 				es.close();
+				const finalState = terminalStateFromEvents(activeJobs.find(j => j.jobId === record.jobId)?.events ?? []);
 				activeJobs = activeJobs.map(j =>
-					j.jobId === record.jobId ? { ...j, state: 'completed', eventSource: undefined } : j
+					j.jobId === record.jobId ? { ...j, state: finalState, eventSource: undefined } : j
 				);
 				jobHistory = jobHistory.map(j =>
-					j.jobId === record.jobId ? { ...j, state: 'completed' } : j
+					j.jobId === record.jobId ? { ...j, state: finalState } : j
 				);
 				saveHistory();
 			});
@@ -332,8 +346,9 @@
 				});
 				es.addEventListener('complete', () => {
 					es.close();
+					const finalState = terminalStateFromEvents(activeJobs.find(j => j.jobId === exec.jobId)?.events ?? []);
 					activeJobs = activeJobs.map(j =>
-						j.jobId === exec.jobId ? { ...j, state: 'completed', eventSource: undefined } : j
+						j.jobId === exec.jobId ? { ...j, state: finalState, eventSource: undefined } : j
 					);
 				});
 				es.addEventListener('error', () => {
@@ -462,11 +477,12 @@
 
 		es.addEventListener('complete', () => {
 			es.close();
+			const finalState = terminalStateFromEvents(activeJobs.find(j => j.jobId === job.jobId)?.events ?? []);
 			activeJobs = activeJobs.map(j =>
-				j.jobId === job.jobId ? { ...j, state: 'completed', eventSource: undefined } : j
+				j.jobId === job.jobId ? { ...j, state: finalState, eventSource: undefined } : j
 			);
 			jobHistory = jobHistory.map(j =>
-				j.jobId === job.jobId ? { ...j, state: 'completed' } : j
+				j.jobId === job.jobId ? { ...j, state: finalState } : j
 			);
 			if (activeTraceJobId === job.jobId) activeTraceJobId = null;
 			// macro 모드로 열린 화면 자동 닫기
