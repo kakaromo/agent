@@ -274,7 +274,44 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 		loops = append(loops, aiScenarioLoop{StartStep: start, EndStep: end, Count: count})
 	}
 
+	steps, warnings = fixUnclosedTrace(steps, warnings)
+
 	return steps, loops, warnings, nil
+}
+
+// fixUnclosedTrace — trace_start 만 있고 trace_stop 이 없으면 끝에 보정 추가한다.
+//
+// 트레이스가 중지되지 않으면 수집이 계속 돌아 다음 잡까지 방해하고(“trace already
+// active”) 결과 parquet 도 생성되지 않는다. 모델이 어떻게 실수해도 여기서 잡히도록
+// 프롬프트가 아니라 검증 계층에서 보정한다.
+// trace_type 은 짝이 없는 trace_start 의 것을 그대로 물려준다.
+func fixUnclosedTrace(steps []aiScenarioStep, warnings []string) ([]aiScenarioStep, []string) {
+	// trace_type 별로 start 수 - stop 수 를 세어 닫히지 않은 것을 찾는다.
+	open := make(map[string]int)
+	var order []string // 등장 순서 유지 (재현 가능한 출력)
+	for _, s := range steps {
+		switch s.Type {
+		case "trace_start":
+			t := s.Params["trace_type"]
+			if open[t] == 0 {
+				order = append(order, t)
+			}
+			open[t]++
+		case "trace_stop":
+			open[s.Params["trace_type"]]--
+		}
+	}
+	for _, t := range order {
+		for open[t] > 0 {
+			steps = append(steps, aiScenarioStep{
+				Type:   "trace_stop",
+				Params: map[string]string{"trace_type": t},
+			})
+			open[t]--
+			warnings = append(warnings, fmt.Sprintf("trace_stop(%s) 누락 — 마지막에 자동 추가했습니다", t))
+		}
+	}
+	return steps, warnings
 }
 
 // validateStepParams — type 별 필수 param 최소 검증. 빈 문자열 반환이면 통과, 아니면 제외 사유.

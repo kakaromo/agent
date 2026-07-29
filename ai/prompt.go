@@ -158,7 +158,10 @@ const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동
   같은 시나리오를 반복해도 같은 결과가 나오려면 앱을 초기 상태에서 시작해야 합니다.
   "이어서/현재 화면에서" 처럼 사용자가 명시적으로 현재 상태 유지를 요구할 때만 "none" 을 쓰세요.
   **wait_seconds 는 항상 넣으세요**("3" 권장). 앱 로딩 전에 탭하면 요소를 못 찾습니다.
-- stop_app: 앱 종료. params: package_name(필수)
+- stop_app: 앱 종료(강제종료 / force stop / 앱 죽이기 / 종료 후 재실행). params: package_name(필수)
+  "강제종료"는 **stop_app** 입니다. 앱을 지우는 uninstall_apk 와 혼동하지 마세요.
+  "종료하고 다시 켜기"(cold start) 는 stop_app → launch_app, 또는 launch_app 의
+  clear_mode="force_stop" 하나로도 됩니다.
 - scroll: 피드 스크롤(워크로드 재현). params: direction("up"|"down"), count(스크롤 횟수 "10"), pause(각 스크롤 사이 대기 "초", 예 "1"=1초 — 밀리초 아님에 주의), duration(스와이프 동작 시간 밀리초, 예 "300")
   - **"N번 스크롤하며 각 사이 P초 대기"는 반드시 scroll 하나로 { count:"N", pause:"P" } 로 표현하세요.** scroll count=1 을 loop 로 N번 반복하면 스크롤 사이 대기(pause)가 적용되지 않습니다. 반복은 count 로, 사이 대기는 pause 로 지정합니다.
 - tap: 절대 좌표 탭. params: x(필수), y(필수) — 둘 다 픽셀 좌표 문자열
@@ -181,8 +184,15 @@ const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동
   **중요**: trace 는 측정 대상을 감싸는 구조입니다. "~하면서 트레이스", "~할 때 trace 수집" 요청이면
   trace_start 를 측정 대상 **앞**에, trace_stop 을 **뒤**에 반드시 쌍으로 넣으세요.
   (앱 스크롤이든 벤치마크든 동일. trace_start 만 넣거나 워크로드 뒤에 두면 아무것도 측정되지 않습니다.)
+  **trace_start 를 넣었으면 trace_stop 을 반드시 넣으세요** — 빠지면 트레이스가 중지되지 않아
+  다음 작업까지 방해합니다. 반복(loops)과 함께 쓸 때도 마찬가지이며, 이때 loops 범위는
+  trace_start/trace_stop 을 제외한 **워크로드 스텝만** 감싸야 합니다
+  (예: steps=[trace_start, launch_app, stop_app, trace_stop] 이면 loops 는 startStep=1, endStep=2).
 - install_apk: params: apk_filename(필수), grant_permissions("true"|"false")
 - uninstall_apk: params: package_name(필수), keep_data("true"|"false")
+  **주의: 앱을 삭제하는 파괴적 동작입니다.** 사용자가 "삭제/제거/언인스톨" 을 명시적으로
+  요구하지 않았다면 절대 넣지 마세요. "종료", "강제종료", "끄기" 는 stop_app 입니다.
+  cleanup(파일 삭제) 도 마찬가지로 명시 요청이 없으면 넣지 마세요.
 - cleanup: params: path 또는 delete_files_from_steps
 - app_macro: **직접 생성하지 마세요.** 기록된 매크로 참조가 필요한데 그 ID 를 알 수 없습니다.
   탭/텍스트/스크롤이 필요하면 tap / tap_element / text / scroll / launch_app 같은 직접 step 으로 표현하세요.
