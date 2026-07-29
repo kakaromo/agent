@@ -10,7 +10,9 @@ export interface ActiveJob {
 	deviceIds: string[];
 	createdAt: number;
 	events: JobProgress[];
-	state: 'running' | 'completed' | 'failed';
+	// 터미널 상태를 접지 않고 그대로 보존한다 (cancelled 를 failed 로 접으면
+	// 사용자가 취소한 잡이 '실패'로 표시된다).
+	state: 'running' | 'completed' | 'failed' | 'partially_failed' | 'cancelled';
 	eventSource?: EventSource;
 }
 

@@ -77,10 +77,12 @@
 	// (백엔드 server/sse.go 는 채널 close 시 job.State 와 무관하게 항상 'complete' 발행)
 	// 따라서 마지막 progress 이벤트의 state 를 보고 실제 terminal 상태를 판정한다.
 	// 이렇게 하지 않으면 시나리오가 FAILED 로 끝나도 UI 가 completed(전부 초록)로 오인한다.
-	function terminalStateFromEvents(events: JobProgress[]): 'completed' | 'failed' {
+	// 터미널 상태는 접지 않고 그대로 보존한다 — cancelled 를 failed 로 접으면
+	// 사용자가 직접 취소한 잡이 '실패'로 표시된다.
+	function terminalStateFromEvents(events: JobProgress[]): ActiveJob['state'] {
 		for (let i = events.length - 1; i >= 0; i--) {
 			const s = events[i]?.state;
-			if (s === 'failed' || s === 'partially_failed' || s === 'cancelled') return 'failed';
+			if (s === 'failed' || s === 'partially_failed' || s === 'cancelled') return s;
 			if (s === 'completed') return 'completed';
 		}
 		return 'completed';

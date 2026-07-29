@@ -7,7 +7,7 @@ export interface StepNodeData {
 	label: string;
 	stepType: string;
 	execOrder?: number;  // 실행 순서 (1-based)
-	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'skipped';
+	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 	execLoopCurrent?: number;
 	execLoopTotal?: number;
 	execProgress?: number;
@@ -37,7 +37,7 @@ export interface ConditionNodeData {
 	rules: ConditionRule[];   // 복합 조건
 	logic: string;            // "and" | "or"
 	execOrder?: number;
-	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'skipped';
+	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 }
 
 export interface LoopGroupData {

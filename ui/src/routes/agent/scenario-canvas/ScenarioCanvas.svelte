@@ -132,9 +132,9 @@
 			return;
 		}
 
-		// running job 우선, 없으면 방금 완료/실패된 job
+		// running job 우선, 없으면 방금 종료된(완료/실패/부분실패/취소) job
 		const runningJob = activeJobs.find(j => j.state === 'running' && j.type === 'scenario');
-		const finishedJob = !runningJob ? activeJobs.find(j => (j.state === 'completed' || j.state === 'failed') && j.type === 'scenario' && j.jobId === currentJobId) : null;
+		const finishedJob = !runningJob ? activeJobs.find(j => isTerminal(j.state) && j.type === 'scenario' && j.jobId === currentJobId) : null;
 
 		const targetJob = runningJob ?? finishedJob;
 		if (!targetJob) return;
@@ -149,13 +149,20 @@
 		requestAnimationFrame(() => {
 			if (targetJob.state === 'completed') {
 				markAllNodes('completed');
-			} else if (targetJob.state === 'failed') {
+			} else if (isTerminal(targetJob.state)) {
+				// failed / partially_failed / cancelled — 중단된 스텝만 표시하고
+				// 그 뒤 스텝은 미실행으로 남긴다.
 				markFailedNodes(targetJob);
 			} else {
 				updateNodeStates(targetJob);
 			}
 		});
 	});
+
+	function isTerminal(state: string): boolean {
+		return state === 'completed' || state === 'failed'
+			|| state === 'partially_failed' || state === 'cancelled';
+	}
 
 	function updateNodeStates(job: ActiveJob) {
 		const events = job.events;
@@ -246,8 +253,9 @@
 		return [...map.values()];
 	}
 
+	// finalState 는 노드 execStatus 로 그대로 쓰인다 ('completed' | 'failed' | 'cancelled').
 	function markAllNodes(finalState: string) {
-		const status = finalState === 'completed' ? 'completed' : 'failed';
+		const status = finalState;
 		nodes = nodes.map(n => {
 			if (n.type !== 'step' && n.type !== 'condition') return n;
 			return { ...n, data: { ...n.data, execStatus: status, execLoopCurrent: undefined, execLoopTotal: undefined } };
@@ -255,16 +263,18 @@
 	}
 
 	/**
-	 * job 이 FAILED 로 끝났을 때, 실패한 스텝만 빨강으로 칠하고 그 앞 스텝은 completed,
-	 * 그 뒤 스텝은 미실행(status 없음)으로 구분한다.
+	 * job 이 비정상 종료(failed / partially_failed / cancelled)했을 때, 중단된 스텝만
+	 * 해당 상태로 칠하고 그 앞 스텝은 completed, 그 뒤 스텝은 미실행(status 없음)으로 구분한다.
 	 * markAllNodes('failed') 처럼 전부 빨강으로 칠하거나, 진행 인덱스만 보고 전부 completed 로
 	 * 오인하던 버그를 방지한다.
 	 *
 	 * 실패 이벤트 메시지는 `step N ... failed: ...` (N 은 0-based stepIndex, backend scenario.go).
-	 * 해당 이벤트를 못 찾으면 마지막 진행 스텝을 실패 스텝으로 간주한다.
+	 * 해당 이벤트를 못 찾으면 마지막 진행 스텝을 중단 스텝으로 간주한다.
 	 */
 	function markFailedNodes(job: ActiveJob) {
 		const events = job.events ?? [];
+		// 취소는 실패가 아니므로 중단 스텝을 cancelled 로 구분해 칠한다.
+		const haltStatus = job.state === 'cancelled' ? 'cancelled' : 'failed';
 		const stepNodeIds = nodes.filter(n => n.type === 'step' || n.type === 'condition').map(n => n.id);
 
 		// 1) 명시적 실패 이벤트에서 실패 스텝 인덱스 추출 (`... failed: ...`)
@@ -277,7 +287,8 @@
 			}
 		}
 
-		// 2) 실패 이벤트를 못 찾으면 마지막으로 진행 중이던 스텝을 실패로 간주
+		// 2) 실패 이벤트를 못 찾으면 마지막으로 진행 중이던 스텝을 중단 스텝으로 간주
+		//    (취소는 애초에 'failed:' 메시지가 없으므로 대부분 이 경로를 탄다)
 		if (failedIndex == null) {
 			for (let i = events.length - 1; i >= 0; i--) {
 				const p = parseProgress(events[i].message ?? '');
@@ -285,15 +296,15 @@
 			}
 		}
 
-		// 진행 정보가 전혀 없으면 안전하게 전부 실패로 표기 (기존 동작)
-		if (failedIndex == null) { markAllNodes('failed'); return; }
+		// 진행 정보가 전혀 없으면 안전하게 전부 해당 상태로 표기 (기존 동작)
+		if (failedIndex == null) { markAllNodes(haltStatus); return; }
 
 		nodes = nodes.map(n => {
 			if (n.type !== 'step' && n.type !== 'condition') return n;
 			const idx = stepNodeIds.indexOf(n.id);
 			let execStatus: string | undefined;
 			if (idx < failedIndex!) execStatus = 'completed';
-			else if (idx === failedIndex) execStatus = 'failed';
+			else if (idx === failedIndex) execStatus = haltStatus;
 			// idx > failedIndex → 미실행 (execStatus undefined)
 			return { ...n, data: { ...n.data, execStatus, execLoopCurrent: undefined, execLoopTotal: undefined } };
 		});

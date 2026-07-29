@@ -5,6 +5,7 @@
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import XCircleIcon from '@lucide/svelte/icons/x-circle';
+	import BanIcon from '@lucide/svelte/icons/ban';
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import IOTestProgressView from '../iotest/IOTestProgressView.svelte';
@@ -25,6 +26,7 @@
 			case 'running': return 'bg-blue-50 border-blue-500 ring-2 ring-blue-300/50 shadow-blue-200 shadow-lg';
 			case 'completed': return 'bg-green-50 border-green-500';
 			case 'failed': return 'bg-red-50 border-red-500';
+			case 'cancelled': return 'bg-orange-50 border-orange-400';
 			case 'skipped': return 'bg-gray-100 border-gray-300 opacity-50';
 			default: return 'bg-background border-border';
 		}
@@ -53,6 +55,8 @@
 			<CheckCircleIcon class="size-3 text-green-600 ml-auto" />
 		{:else if execStatus === 'failed'}
 			<XCircleIcon class="size-3 text-red-600 ml-auto" />
+		{:else if execStatus === 'cancelled'}
+			<BanIcon class="size-3 text-orange-500 ml-auto" />
 		{:else}
 			<!-- Action buttons (hover only) -->
 			<div class="ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

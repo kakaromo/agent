@@ -81,6 +81,19 @@
 					break;
 				}
 			}
+
+			// job 이 failed 인데 진행 인덱스를 못 뽑았으면, 명시적 실패 이벤트
+			// (`step N ... failed: ...`)에서 실패 스텝 인덱스를 뽑는다.
+			// 이렇게 하지 않으면 아래 fallback 이 모든 스텝을 failed 로 칠한다(ScenarioCanvas 와 동일 버그).
+			if (parsedStepIndex == null && (activeJob.state === 'failed' || activeJob.state === 'cancelled')) {
+				for (let i = events.length - 1; i >= 0; i--) {
+					const msg = events[i].message ?? '';
+					if (/failed\s*:/i.test(msg)) {
+						const m = msg.match(/[Ss]tep\s*(\d+)/);
+						if (m) { parsedStepIndex = parseInt(m[1]); break; }
+					}
+				}
+			}
 		}
 
 		nodes = nodes.map(n => {
@@ -114,8 +127,10 @@
 				}
 			} else if (activeJob!.state === 'completed') {
 				execStatus = 'completed';
-			} else if (activeJob!.state === 'failed') {
+			} else if (activeJob!.state === 'failed' || activeJob!.state === 'partially_failed') {
 				execStatus = 'failed';
+			} else if (activeJob!.state === 'cancelled') {
+				execStatus = 'cancelled';
 			} else if (activeJob!.state === 'running' && idx === 0) {
 				execStatus = 'running';
 			}

@@ -35,6 +35,7 @@
 			case 'running': return 'bg-blue-50 border-blue-500 ring-2 ring-blue-300/50 shadow-blue-200 shadow-lg';
 			case 'completed': return 'bg-green-50 border-green-500';
 			case 'failed': return 'bg-red-50 border-red-500';
+			case 'cancelled': return 'bg-orange-50 border-orange-400';
 			default: return 'bg-amber-50 border-amber-400';
 		}
 	});
