@@ -128,6 +128,61 @@ func TestGeneratedUIContractIsFresh(t *testing.T) {
 	}
 }
 
+// TestMatchModeEnumMatchesImplementation — element_match_mode enum 이 실제 구현과 같은지.
+//
+// 계약을 구현보다 **좁게** 쓰면 멀쩡한 시나리오가 거부된다 (실제로 저장된 시나리오의
+// "suffix" 가 거부돼 발견됐다). macro/uihierarchy.go 의 matchPattern switch 를 읽어 대조한다.
+func TestMatchModeEnumMatchesImplementation(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "macro", "uihierarchy.go"))
+	if err != nil {
+		t.Fatalf("uihierarchy.go 를 읽을 수 없습니다: %v", err)
+	}
+
+	body := string(src)
+	idx := strings.Index(body, "func matchPattern(")
+	if idx < 0 {
+		t.Fatal("matchPattern 함수를 찾을 수 없습니다 — 이름이 바뀌었다면 이 테스트도 갱신하세요.")
+	}
+	end := strings.Index(body[idx:], "\n}\n")
+	if end < 0 {
+		t.Fatal("matchPattern 본문 끝을 찾을 수 없습니다")
+	}
+	fnBody := body[idx : idx+end]
+
+	impl := map[string]bool{"exact": true} // default 분기
+	for _, m := range regexp.MustCompile(`case "([a-z]+)":`).FindAllStringSubmatch(fnBody, -1) {
+		impl[m[1]] = true
+	}
+
+	var spec StepSpec
+	for _, s := range Specs {
+		if s.Type == "tap_element" {
+			spec = s
+		}
+	}
+	var declared []string
+	for _, p := range spec.Params {
+		if p.Name == "element_match_mode" {
+			declared = p.Enum
+		}
+	}
+	if len(declared) == 0 {
+		t.Fatal("element_match_mode enum 이 선언돼 있지 않습니다")
+	}
+
+	for _, d := range declared {
+		if !impl[d] {
+			t.Errorf("계약에 %q 가 있는데 matchPattern 은 지원하지 않습니다", d)
+		}
+	}
+	for m := range impl {
+		if !contains(declared, m) {
+			t.Errorf("matchPattern 이 %q 를 지원하는데 계약 enum 에 없습니다 — "+
+				"이 모드를 쓰는 시나리오가 거부됩니다", m)
+		}
+	}
+}
+
 // TestValidateParams — 필수/enum/anyOf 제약.
 func TestValidateParams(t *testing.T) {
 	tests := []struct {
@@ -153,6 +208,11 @@ func TestValidateParams(t *testing.T) {
 		{"tap_element 식별자 없음", "tap_element", "", map[string]string{}, false},
 		{"tap_element content_desc", "tap_element", "", map[string]string{"element_content_desc": "검색"}, true},
 		{"tap_element 좌표 폴백", "tap_element", "", map[string]string{"x": "10", "y": "20"}, true},
+
+		// 저장된 실제 시나리오가 쓰던 모드 — 계약을 구현보다 좁게 썼다가 거부됐던 회귀.
+		{"tap_element suffix 모드", "tap_element", "", map[string]string{"element_content_desc": "동영상 재생", "element_match_mode": "suffix"}, true},
+		{"tap_element regex 모드", "tap_element", "", map[string]string{"element_text": "재생$", "element_match_mode": "regex"}, true},
+		{"tap_element 없는 모드", "tap_element", "", map[string]string{"element_text": "x", "element_match_mode": "fuzzy"}, false},
 
 		{"trace_start 타입 오타", "trace_start", "", map[string]string{"trace_type": "usf"}, false},
 		{"trace_start 정상", "trace_start", "", map[string]string{"trace_type": "ufs"}, true},

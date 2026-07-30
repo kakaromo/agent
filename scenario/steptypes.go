@@ -174,7 +174,10 @@ var Specs = []StepSpec{
 			{Name: "element_resource_id", Desc: "리소스 ID"},
 			{Name: "element_text", Desc: "화면에 보이는 글자"},
 			{Name: "element_content_desc", Desc: "접근성 라벨"},
-			{Name: "element_match_mode", Enum: []string{"exact", "contains"}, Desc: "매칭 방식"},
+			// macro/uihierarchy.go 의 matchPattern 이 실제로 지원하는 6가지.
+			// (처음에 exact/contains 만 적었다가 저장된 시나리오의 "suffix" 가 거부돼 발견 —
+			//  계약을 구현보다 좁게 쓰면 멀쩡한 시나리오를 막는다.)
+			{Name: "element_match_mode", Enum: []string{"exact", "contains", "prefix", "suffix", "regex"}, Desc: "매칭 방식 (미지정 시 exact)"},
 			{Name: "element_container_id", Desc: "탐색 범위를 좁힐 컨테이너"},
 			{Name: "element_index", Desc: "여러 개 매칭 시 N번째"},
 			{Name: "x", Desc: "폴백 좌표 X"},

@@ -170,7 +170,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "element_resource_id", required: false, desc: "리소스 ID" },
 			{ name: "element_text", required: false, desc: "화면에 보이는 글자" },
 			{ name: "element_content_desc", required: false, desc: "접근성 라벨" },
-			{ name: "element_match_mode", required: false, enum: ["exact", "contains"], desc: "매칭 방식" },
+			{ name: "element_match_mode", required: false, enum: ["exact", "contains", "prefix", "suffix", "regex"], desc: "매칭 방식 (미지정 시 exact)" },
 			{ name: "element_container_id", required: false, desc: "탐색 범위를 좁힐 컨테이너" },
 			{ name: "element_index", required: false, desc: "여러 개 매칭 시 N번째" },
 			{ name: "x", required: false, desc: "폴백 좌표 X" },

@@ -13,6 +13,7 @@ import (
 
 	"agent/adb"
 	pb "agent/pb"
+	"agent/scenario"
 
 	"github.com/google/uuid"
 )
@@ -108,6 +109,16 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		return "", fmt.Errorf("no steps defined")
 	}
 
+	// 실행 전 계약 검증 (드라이런).
+	//
+	// 예전엔 AI 생성 경로에만 검증이 있어서, 캔버스에서 손으로 만들거나 JSON 으로
+	// import 한 시나리오는 무검증으로 실행됐다. 그래서 launch_app 에 package_name 이
+	// 없거나 clear_mode 오타가 있어도 잡을 만들어 디바이스까지 간 뒤에야 실패했다.
+	// 여기서 미리 잡으면 원인이 분명한 에러 하나로 끝난다.
+	if issues := validateScenarioSteps(req.Steps); len(issues) > 0 {
+		return "", fmt.Errorf("시나리오 검증 실패:\n%s", strings.Join(issues, "\n"))
+	}
+
 	policy := req.BusyPolicy
 	for _, id := range deviceIDs {
 		if err := o.checkDeviceBusy(id, policy); err != nil {
@@ -145,6 +156,52 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		go o.executeScenario(jobCtx, job, deviceIDs, expanded, policy)
 	}
 	return jobID, nil
+}
+
+// validateScenarioSteps — 실행 전 step 계약 검증 (드라이런).
+//
+// 계약은 scenario.Specs 가 소유한다. 여기서는 실행 경로 특유의 예외만 다룬다:
+//   - app_macro: params 가 아니라 step.Macro 로 전달된다 (계약 밖)
+//   - stop_app: package_name 이 비면 실행부가 경고 후 skip 한다 (관대한 처리를 유지)
+//   - condition: DAG 제어 노드라 일반 step 계약 대상이 아니다
+//
+// 반환값은 사람이 읽는 위반 목록. 비어 있으면 통과.
+func validateScenarioSteps(steps []*pb.ScenarioStep) []string {
+	var issues []string
+	for i, s := range steps {
+		if s == nil {
+			continue
+		}
+		typ := strings.TrimSpace(s.Type)
+		if typ == "" {
+			issues = append(issues, fmt.Sprintf("step %d: type 이 비어 있습니다", i))
+			continue
+		}
+		if scenario.IsControlOnly(typ) {
+			continue
+		}
+		if typ == "app_macro" {
+			// 매크로 본문은 params 가 아니라 Macro 필드로 온다.
+			if s.Macro == nil {
+				issues = append(issues, fmt.Sprintf("step %d (app_macro): 매크로 설정이 없습니다", i))
+			}
+			continue
+		}
+		if typ == "stop_app" && strings.TrimSpace(s.Params["package_name"]) == "" {
+			// 실행부가 skip 으로 처리하는 관대한 케이스 — 실행을 막지 않는다.
+			continue
+		}
+		// Tool 은 proto enum — 계약은 문자열을 받으므로 이름으로 변환한다.
+		// UNSPECIFIED(0) 는 빈 문자열이 되어 "tool 필요" 검증에 걸린다.
+		toolName := ""
+		if s.Tool != pb.BenchmarkTool_BENCHMARK_TOOL_UNSPECIFIED {
+			toolName = defaultToolNameFor(s.Tool)
+		}
+		if reason := scenario.ValidateParams(typ, toolName, s.Params); reason != "" {
+			issues = append(issues, fmt.Sprintf("step %d (%s): %s", i, typ, reason))
+		}
+	}
+	return issues
 }
 
 func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs []string, steps []expandedStep, policy string) {
