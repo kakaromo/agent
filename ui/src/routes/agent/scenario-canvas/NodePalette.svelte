@@ -96,12 +96,14 @@
 			class="flex items-center gap-1 px-1.5 py-1 rounded border cursor-grab hover:bg-muted/50 active:cursor-grabbing transition-colors"
 		>
 			<st.icon class="size-2.5 shrink-0 {colors.text}" />
-			<div class="min-w-0">
-				<div class="text-[9px] font-medium truncate">
-					{st.label}{#if st.destructive}<span
-							class="ml-0.5 text-red-600"
-							title="파괴적 동작 — 앱/파일이 삭제됩니다">⚠</span
-						>{/if}
+			<div class="min-w-0 flex-1">
+				<!-- 경고 표시는 truncate 밖에 둔다 — 안에 넣으면 라벨이 잘릴 때 같이
+				     사라져서, 정작 가장 위험한 Uninstall APK 에서 안 보인다. -->
+				<div class="flex items-center gap-0.5">
+					<span class="text-[9px] font-medium truncate">{st.label}</span>
+					{#if st.destructive}
+						<span class="text-[9px] text-red-600 shrink-0" title="파괴적 동작 — 앱/파일이 삭제됩니다">⚠</span>
+					{/if}
 				</div>
 				<div class="text-[8px] text-muted-foreground truncate">{st.desc}</div>
 			</div>
