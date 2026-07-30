@@ -679,8 +679,12 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			// 현재 포커스 화면을 함께 알려준다. 권한 다이얼로그(permissioncontroller) 나
 			// 다른 앱이 화면을 가려 실패하는 경우가 흔한데, 요소 이름만 보여주면
 			// 사용자가 원인을 짐작할 수 없다.
+			//
+			// ctx 가 이미 취소된 경우(사용자가 잡을 취소)는 조회하지 않는다.
+			// 취소는 상위 err 분기에서 CANCELLED 로 처리되므로 이 힌트가 쓰이지 않는데,
+			// 취소된 ctx 로 adb 를 호출하면 취소 응답만 늦어진다.
 			focusHint := ""
-			if md != nil && md.Device != nil {
+			if ctx.Err() == nil && md != nil && md.Device != nil {
 				if focus, err := md.Device.Shell(ctx, "dumpsys window | grep mCurrentFocus"); err == nil {
 					if f := strings.TrimSpace(focus); f != "" {
 						focusHint = fmt.Sprintf(" 현재 화면: %s", f)
