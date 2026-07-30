@@ -14,6 +14,7 @@ import (
 	"agent/ai"
 	"agent/config"
 	pb "agent/pb"
+	"agent/scenario"
 	"agent/storage/sqlitedb"
 )
 
@@ -211,7 +212,7 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 		return nil, nil, nil, fmt.Errorf("JSON 파싱 실패: %v", err)
 	}
 
-	// 유효 type 집합 (실행부 switch 와 동일 소스).
+	// 유효 type 집합 (scenario.Specs = 실행부 switch 와 동일 소스).
 	validType := make(map[string]bool, len(ai.ScenarioStepTypes))
 	for _, t := range ai.ScenarioStepTypes {
 		validType[t] = true
@@ -318,45 +319,12 @@ func warnUnclosedTrace(steps []aiScenarioStep, warnings []string) []string {
 	return warnings
 }
 
-// validateStepParams — type 별 필수 param 최소 검증. 빈 문자열 반환이면 통과, 아니면 제외 사유.
+// validateStepParams — type 별 param 검증. 빈 문자열 반환이면 통과, 아니면 제외 사유.
+//
+// 계약은 scenario.Specs 가 소유한다 (scenario/steptypes.go). 여기서 위임하므로
+// 필수 param 뿐 아니라 enum 위반(clear_mode="forcestop" 같은 오타)도 함께 잡힌다.
 func validateStepParams(s aiScenarioStep) string {
-	p := s.Params
-	switch s.Type {
-	case "tap":
-		if p["x"] == "" || p["y"] == "" {
-			return "x/y 좌표 필요"
-		}
-	case "launch_app", "stop_app", "uninstall_apk":
-		if p["package_name"] == "" {
-			return "package_name 필요"
-		}
-	case "install_apk":
-		if p["apk_filename"] == "" {
-			return "apk_filename 필요"
-		}
-	case "text":
-		if p["input_text"] == "" {
-			return "input_text 필요"
-		}
-	case "shell":
-		if p["cmd"] == "" {
-			return "cmd 필요"
-		}
-	case "key":
-		if p["keycode"] == "" {
-			return "keycode 필요"
-		}
-	case "benchmark":
-		if s.Tool == "" {
-			return "benchmark 는 tool(fio 등) 필요"
-		}
-	case "tap_element":
-		if p["element_resource_id"] == "" && p["element_text"] == "" &&
-			p["element_content_desc"] == "" && p["x"] == "" && p["y"] == "" {
-			return "요소 식별자(resource_id/text/content_desc) 또는 좌표 필요"
-		}
-	}
-	return ""
+	return scenario.ValidateParams(s.Type, s.Tool, s.Params)
 }
 
 // anyToString — schema 로 string 이 강제되나, 모델이 숫자/불리언을 낼 경우 대비한 안전 변환.

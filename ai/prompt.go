@@ -1,6 +1,10 @@
 package ai
 
-import "fmt"
+import (
+	"fmt"
+
+	"agent/scenario"
+)
 
 // 도메인 특화 프롬프트.
 //
@@ -114,34 +118,18 @@ func BuildUserPrompt(jobType, summaryJSON string) string {
 // 자연어 → 시나리오 step 생성
 // ══════════════════════════════════════════════════════════════
 
-// ScenarioStepTypes — 실행부(benchmark/scenario.go 의 switch step.Type)가 인식하는
-// 유효 step 타입 목록. schema 의 type enum 과 rest_ai 검증이 공유하는 단일 진실 소스.
-// condition 은 DAG 전용이라 자연어 생성 대상에서 제외한다.
-var ScenarioStepTypes = []string{
-	"benchmark",
-	"iotest",
-	"shell",
-	"cleanup",
-	"sleep",
-	"trace_start",
-	"trace_stop",
-	"app_macro",
-	"install_apk",
-	"uninstall_apk",
-	"tap_element",
-	"tap",
-	"text",
-	"scroll",
-	"key",
-	"stop_app",
-	"launch_app",
-}
+// ScenarioStepTypes — 자연어 생성이 쓸 수 있는 step 타입 목록.
+//
+// 계약의 단일 진실 소스는 scenario.Specs 다 (scenario/steptypes.go).
+// 여기서 파생시키므로 실행부에 step 을 추가하고 Specs 를 갱신하면 프롬프트·schema·
+// 검증·UI 가 함께 따라온다. 어긋나면 scenario/steptypes_test.go 가 실패한다.
+var ScenarioStepTypes = scenario.AITypes()
 
 // scenarioSystemPrompt — 자연어 요청을 시나리오 step 배열로 변환하는 도메인 지식.
 //
 // 핵심 제약(정합성): 각 step 은 {type, tool?, params}. params 의 모든 값은 문자열(숫자도 "540").
 // schema 로도 강제하지만 프롬프트에서도 명시해 이중으로 유도한다.
-const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동화 시나리오를 작성하는 전문가입니다.
+const scenarioPromptHead = koreanOnly + `당신은 Android 디바이스 자동화 시나리오를 작성하는 전문가입니다.
 사용자의 자연어 요청을 읽고, 디바이스에서 순서대로 실행할 step 배열(JSON)로 변환하세요.
 
 ## 절대 규칙 (정합성)
@@ -152,50 +140,13 @@ const scenarioSystemPrompt = koreanOnly + `당신은 Android 디바이스 자동
 - 잘 모르면 단순하게 만드세요. 확실하지 않은 step 은 넣지 마세요.
 
 ## 사용 가능한 step type 과 주요 params
-- launch_app: 앱 실행. params: package_name(필수, 예 "com.google.android.youtube"), clear_mode("force_stop"|"clear"|"cache"|"none"), wait_seconds("3"), wait_activity(선택)
-  **clear_mode 는 기본적으로 "force_stop" 을 쓰세요.** 앱이 이미 실행 중이면 이전 화면(검색 결과 등)이
-  그대로 남아, 뒤따르는 tap_element 가 "검색" 같은 첫 화면 요소를 찾지 못해 실패합니다.
-  같은 시나리오를 반복해도 같은 결과가 나오려면 앱을 초기 상태에서 시작해야 합니다.
-  "이어서/현재 화면에서" 처럼 사용자가 명시적으로 현재 상태 유지를 요구할 때만 "none" 을 쓰세요.
-  **wait_seconds 는 항상 넣으세요**("3" 권장). 앱 로딩 전에 탭하면 요소를 못 찾습니다.
-- stop_app: 앱 종료(강제종료 / force stop / 앱 죽이기 / 종료 후 재실행). params: package_name(필수)
-  "강제종료"는 **stop_app** 입니다. 앱을 지우는 uninstall_apk 와 혼동하지 마세요.
-  "종료하고 다시 켜기"(cold start) 는 stop_app → launch_app, 또는 launch_app 의
-  clear_mode="force_stop" 하나로도 됩니다.
-- scroll: 피드 스크롤(워크로드 재현). params: direction("up"|"down"), count(스크롤 횟수 "10"), pause(각 스크롤 사이 대기 "초", 예 "1"=1초 — 밀리초 아님에 주의), duration(스와이프 동작 시간 밀리초, 예 "300")
-  - **"N번 스크롤하며 각 사이 P초 대기"는 반드시 scroll 하나로 { count:"N", pause:"P" } 로 표현하세요.** scroll count=1 을 loop 로 N번 반복하면 스크롤 사이 대기(pause)가 적용되지 않습니다. 반복은 count 로, 사이 대기는 pause 로 지정합니다.
-- tap: 절대 좌표 탭. params: x(필수), y(필수) — 둘 다 픽셀 좌표 문자열
-- tap_element: 요소 기반 탭. params: element_resource_id, element_text, element_content_desc, element_match_mode, element_container_id, element_index, x, y (알고 있는 것만)
-  - 정확한 resource_id 를 모르면 지어내지 말고 element_content_desc(접근성 라벨) 나 element_text(화면에 보이는 글자) 로 지정하세요. 이쪽이 앱 버전에 덜 민감합니다.
-- text: 텍스트 입력. params: input_text(필수), submit("true"|"false"). **입력창이 이미 활성(포커스)된 상태여야 합니다** — 필요하면 먼저 tap_element 로 입력창/검색을 눌러 진입하세요.
+%s
 
 ### 검색 패턴 (중요)
 대부분의 앱에서 "검색"은 한 번에 안 됩니다. 홈 화면엔 검색 입력창이 없고 검색 "아이콘"만 있는 경우가 많습니다. 반드시 2~3단계로 나누세요:
   1) 검색 아이콘/버튼 탭 — tap_element 로 element_content_desc="검색"(또는 "Search") 지정해 검색 화면 진입
   2) text 로 검색어 입력 (submit="true" 면 입력 후 엔터로 검색 실행)
 바로 입력창(예: search_edit_text)을 탭하려 하지 마세요 — 검색 화면 진입 전에는 존재하지 않습니다.
-- key: 키 이벤트. params: keycode(필수, 예 "4"=BACK, "3"=HOME, "66"=ENTER)
-- sleep: 대기. params: seconds(필수, 예 "30")
-- shell: adb shell 명령. params: cmd(필수)
-- benchmark: 스토리지 벤치마크. step.tool 에 "fio"/"iozone"/"tiotest" 지정. params: rw("read"|"write"|"randread"|"randwrite"), bs("4k"), size("1G") 등
-- iotest: params: config
-- trace_start: 커널 트레이스 시작. params: trace_type("ufs"|"block"|"both"), window_seconds("1")
-- trace_stop: 트레이스 중지. params: trace_type
-  **중요**: trace 는 측정 대상을 감싸는 구조입니다. "~하면서 트레이스", "~할 때 trace 수집" 요청이면
-  trace_start 를 측정 대상 **앞**에, trace_stop 을 **뒤**에 반드시 쌍으로 넣으세요.
-  (앱 스크롤이든 벤치마크든 동일. trace_start 만 넣거나 워크로드 뒤에 두면 아무것도 측정되지 않습니다.)
-  **trace_start 를 넣었으면 trace_stop 을 반드시 넣으세요** — 빠지면 트레이스가 중지되지 않아
-  다음 작업까지 방해합니다. 반복(loops)과 함께 쓸 때도 마찬가지이며, 이때 loops 범위는
-  trace_start/trace_stop 을 제외한 **워크로드 스텝만** 감싸야 합니다
-  (예: steps=[trace_start, launch_app, stop_app, trace_stop] 이면 loops 는 startStep=1, endStep=2).
-- install_apk: params: apk_filename(필수), grant_permissions("true"|"false")
-- uninstall_apk: params: package_name(필수), keep_data("true"|"false")
-  **주의: 앱을 삭제하는 파괴적 동작입니다.** 사용자가 "삭제/제거/언인스톨" 을 명시적으로
-  요구하지 않았다면 절대 넣지 마세요. "종료", "강제종료", "끄기" 는 stop_app 입니다.
-  cleanup(파일 삭제) 도 마찬가지로 명시 요청이 없으면 넣지 마세요.
-- cleanup: params: path 또는 delete_files_from_steps
-- app_macro: **직접 생성하지 마세요.** 기록된 매크로 참조가 필요한데 그 ID 를 알 수 없습니다.
-  탭/텍스트/스크롤이 필요하면 tap / tap_element / text / scroll / launch_app 같은 직접 step 으로 표현하세요.
 
 ## 자주 쓰는 패키지명 (모르면 shell 로 확인하지 말고 사용자에게 맡기되, 흔한 것은 사용)
 - 유튜브: com.google.android.youtube
@@ -256,6 +207,12 @@ startStep/endStep 은 0-based step 인덱스, count 는 반복 횟수. 모두 �
   ],
   "loops": []
 }`
+
+// scenarioSystemPrompt — step 계약(scenario.Specs)을 주입해 완성한 system 프롬프트.
+//
+// step 설명은 손으로 쓰지 않고 Specs 에서 생성한다. 예전엔 프롬프트의 설명과 실행부
+// 동작이 따로 놀아서(clear_mode 기본값 등) 실기기에서만 드러나는 버그가 됐다.
+var scenarioSystemPrompt = fmt.Sprintf(scenarioPromptHead, scenario.PromptStepReference())
 
 // ScenarioSystemPrompt — 시나리오 생성 system 프롬프트를 반환한다.
 // retryFeedback 이 비어있지 않으면(재시도) 직전 실패 사유를 프롬프트 끝에 덧붙여 교정을 유도한다.
