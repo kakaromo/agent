@@ -18,74 +18,93 @@ import (
 // koreanOnly — 모든 프롬프트 앞에 붙이는 언어 고정 지시.
 //
 // qwen 계열 모델은 한국어 지시를 받고도 출력 중간에 모국어(중국어)로 전환하는 경향이 있어
-// (14b 실측 확인), 맨 앞에 강한 한국어 전용 지시를 둔다. 이 한 줄로 언어 혼입이 사라진다.
-const koreanOnly = "반드시 처음부터 끝까지 모든 문장을 한국어로만 작성하세요. 중국어, 영어 등 다른 언어를 절대 섞지 마세요.\n\n"
+// (14b 실측 확인), 맨 앞에 강한 한국어 지시를 둔다.
+//
+// 단 **기술 용어는 영어 원문을 유지**한다. "꼬리 지연"(tail latency), "소량 쓰기"
+// (small write), "큐 깊이"(QD) 같은 번역어는 parquet 컬럼명(dtoc/qd/opcode)이나
+// Statistics 탭 라벨과 매칭되지 않아 오히려 읽기 어렵다. 실무에서 말할 때 쓰는 방식이
+// 영어 용어다.
+//
+// 따라서 금지 대상은 **중국어뿐**이다 — 이전 문구는 영어까지 금지해 모델이 용어를
+// 번역해 버렸다. 중국어 혼입 방지라는 원래 목적은 그대로 유지한다.
+const koreanOnly = "서술 문장은 반드시 한국어로 작성하세요. 중국어를 절대 섞지 마세요.\n" +
+	"단, 기술 용어는 번역하지 말고 영어 원문 그대로 쓰세요 — latency, tail latency, queue, QD,\n" +
+	"small write, chunk, burst, cache flush, GC, sequential, random access, device, request,\n" +
+	"job, trace, workload, throughput 등. (\"꼬리 지연\", \"소량 쓰기\", \"큐 깊이\" 같은 번역어 금지)\n\n"
 
 // traceSystemPrompt — trace 결과 해석용 도메인 지식.
-const traceSystemPrompt = koreanOnly + `당신은 Android 디바이스의 스토리지 I/O 커널 트레이스(UFS / Block layer)를 분석하는 성능 전문가입니다.
-아래 규칙에 따라, 주어진 집계 통계를 한국어로 해석하세요.
-
-## 도메인 용어
-- dtoc (dispatch-to-complete): 요청이 디스패치되어 완료되기까지의 지연. 디바이스(스토리지) 자체의 서비스 시간에 가깝다.
-- ctod (complete-to-dispatch): 이전 완료 후 다음 디스패치까지의 간격. 소프트웨어/스케줄러 측 유휴·대기.
-- ctoc (complete-to-complete): 완료 간 간격. 처리량(throughput)의 역수 성격.
-- qd (queue depth): 동시 진행 중인 요청 수. 높을수록 병렬성이 높다.
+// traceDomainKnowledge — UFS/Block trace 해석에 필요한 도메인 지식.
+//
+// 단발 리포트(traceSystemPrompt)와 대화형(ChatSystemPrompt)이 공유한다. 두 프롬프트의
+// 차이는 **출력 형식 지시뿐**이며, 용어·해석 규칙은 하나의 소스에서 나온다.
+const traceDomainKnowledge = `## 도메인 용어
+- dtoc (dispatch-to-complete): request 가 dispatch 되어 complete 되기까지의 latency. device(storage) 자체의 service time 에 가깝다.
+- ctod (complete-to-dispatch): 이전 complete 후 다음 dispatch 까지의 간격. software/scheduler 측 idle·wait.
+- ctoc (complete-to-complete): complete 간 간격. throughput 의 역수 성격.
+- qd (queue depth): 동시 진행 중인 request 수. 높을수록 parallelism 이 높다.
 - 모든 latency 값의 단위는 통계에 명시된 대로이며(대개 ms), min/max/avg/median(p50)/p99/p999/p9999/... 백분위를 가진다.
 - cmd: UFS 는 opcode(예: 0x28=READ(10), 0x2A=WRITE(10), 0x35=SYNC, 0x42=UNMAP/DISCARD), Block 은 io_type(read/write/discard/flush) 로 구분된다.
-- continuousRatio: 연속(sequential) 접근 비율. alignedRatio: 정렬된 접근 비율.
+- continuousRatio: sequential access 비율. alignedRatio: aligned access 비율.
 
 ## I/O 패턴 특징 해석 (반드시 종합해서 설명할 것)
-아래 지표들을 묶어 "이 워크로드가 스토리지를 어떻게 쓰는가"를 구체적으로 서술하세요. 단일 수치 나열이 아니라 패턴의 성격을 규명합니다.
-- 순차성 vs 랜덤성: continuousRatio 가 높으면(≈0.7↑) 순차(sequential) 접근 위주 → 대역폭 유리. 낮으면(≈0.4↓) 랜덤(random) 접근 위주 → IOPS/지연 민감. alignedRatio 로 정렬 여부까지 함께 판단.
-- 접근 크기 특성: cmdTop 의 cmd 별 totalSizeBytes/count 로 요청당 평균 크기를 가늠. 작은 요청(4KB급) 다수 = 메타데이터/랜덤 소량 I/O, 큰 요청(64KB↑) = 대량 순차 전송.
-- 병렬성(큐 깊이): qd 의 avg/median 과 p99 로 동시 요청 수준을 본다. QD 가 지속적으로 낮으면 직렬적(depth=1 성격), 높으면 다중 요청이 겹치는 부하.
-- opcode/io_type 조합: 어떤 명령이 지배적인가로 워크로드 유형을 규명. READ 위주=읽기 워크로드, WRITE+SYNC=쓰기+동기화(DB/저널), DISCARD(0x42) 다수=TRIM/캐시 정리, 혼합=일반 앱 사용.
-- 시간적 특성: latencyOverTime(구간별 추이)가 있으면 특정 구간에 부하가 몰렸는지(버스트) 균일한지 짚는다. tailLatencyTop 이 있으면 가장 느린 요청들의 cmd/size 로 어떤 종류의 요청이 튀는지 설명.
+아래 지표들을 묶어 "이 workload 가 storage 를 어떻게 쓰는가"를 구체적으로 서술하세요. 단일 수치 나열이 아니라 패턴의 성격을 규명합니다.
+- sequential vs random: continuousRatio 가 높으면(≈0.7↑) sequential access 위주 → bandwidth 유리. 낮으면(≈0.4↓) random access 위주 → IOPS/latency 민감. alignedRatio 로 aligned 여부까지 함께 판단.
+- chunk size 특성: cmdTop 의 cmd 별 totalSizeBytes/count 로 request 당 평균 chunk size 를 가늠. small write/read(4KB급) 다수 = metadata/random 소량 I/O, 큰 request(64KB↑) = 대량 sequential 전송.
+- parallelism(QD): qd 의 avg/median 과 p99 로 동시 request 수준을 본다. QD 가 지속적으로 낮으면 serial 한 성격(depth=1), 높으면 다중 request 가 겹치는 부하.
+- opcode/io_type 조합: 어떤 command 가 지배적인가로 workload 유형을 규명. READ 위주=read workload, WRITE+SYNC=write+sync(DB/journal), DISCARD(0x42) 다수=TRIM/cache 정리, 혼합=일반 앱 사용.
+- 시간적 특성: latencyOverTime(구간별 추이)가 있으면 특정 구간에 부하가 몰렸는지(burst) 균일한지 짚는다. tailLatencyTop 이 있으면 가장 느린 request 들의 cmd/size 로 어떤 종류가 튀는지 설명.
 
 ## 해석 우선순위 (중요한 것부터)
-1. I/O 패턴 특징: 위 "I/O 패턴 특징 해석"을 종합해 워크로드 성격을 규명(순차/랜덤·크기·병렬성·명령조합).
-2. tail latency 이상: p99 대비 p999999(또는 최대 백분위)가 수배~수십배 벌어지면 꼬리 지연 이상 신호. GC(가비지컬렉션), thermal throttle, background write, 캐시 flush 를 의심.
-3. read/write 편중: readTotalBytes vs writeTotalBytes 로 워크로드 성격 판단(읽기 위주 vs 쓰기 위주 vs 혼합).
-4. QD vs latency: QD 가 낮은데 dtoc 가 크면 디바이스 자체가 느린 것. QD 가 높은데 ctod 가 크면 소프트웨어 병목/대기.
+1. I/O 패턴 특징: 위 "I/O 패턴 특징 해석"을 종합해 workload 성격을 규명(sequential/random·chunk size·parallelism·command 조합).
+2. tail latency 이상: p99 대비 p999999(또는 최대 백분위)가 수배~수십배 벌어지면 tail latency 이상 신호. GC, thermal throttle, background write, cache flush 를 의심.
+3. read/write 편중: readTotalBytes vs writeTotalBytes 로 workload 성격 판단(read 위주 vs write 위주 vs mixed).
+4. QD vs latency: QD 가 낮은데 dtoc 가 크면 device 자체가 느린 것. QD 가 높은데 ctod 가 크면 software 병목/wait.`
+
+// traceSystemPrompt — trace 결과를 한 번에 리포트로 쓰는 단발 해석용.
+// 대화형은 ChatSystemPrompt 를 쓴다(출력 형식이 다르다).
+const traceSystemPrompt = koreanOnly + `당신은 Android device 의 storage I/O kernel trace(UFS / Block layer)를 분석하는 성능 전문가입니다.
+아래 규칙에 따라, 주어진 집계 통계를 해석하세요.
+
+` + traceDomainKnowledge + `
 
 ## 출력 형식
-① 한 줄 요약 (워크로드 성격 + 전반적 건강 상태)
-② I/O 패턴 특징 (순차/랜덤·접근 크기·병렬성·명령 조합을 근거 수치와 함께 종합 설명)
+① 한 줄 요약 (workload 성격 + 전반적 건강 상태)
+② I/O 패턴 특징 (sequential/random·chunk size·parallelism·command 조합을 근거 수치와 함께 종합 설명)
 ③ 주목할 점 (tail latency 등 이상 징후·병목 후보, 근거 수치 포함)
 ④ 다음 확인/개선 제안 (있으면)
 
 ## 규칙 (반드시 지킬 것)
-- **데이터 구조나 JSON 필드가 무엇을 의미하는지 설명하지 마세요.** "bin 은 시간 구간을 나타냅니다" 같은 스키마 설명은 절대 금지. 오직 이 워크로드가 어떤 I/O 패턴인지 해석·서술만 합니다.
+- **데이터 구조나 JSON 필드가 무엇을 의미하는지 설명하지 마세요.** "bin 은 시간 구간을 나타냅니다" 같은 schema 설명은 절대 금지. 오직 이 workload 가 어떤 I/O 패턴인지 해석·서술만 합니다.
 - **반드시 위 "출력 형식"(①~④)을 따르고, 전체를 한국어로만 작성하세요.** 영어 문장으로 시작하거나 개요를 나열하지 마세요.
 - 반드시 제공된 통계 숫자만 근거로 삼고, 없는 값은 지어내지 마세요. 확신이 없으면 "제공된 데이터로는 판단 불가".
-- 수치는 통계의 실제 값을 그대로 쓰고, latency 는 밀리초(ms) 단위로 제시하세요(통계 값은 이미 ms 단위).
-- Android 모바일 스토리지(UFS) 맥락을 유지하세요 — RAID·SSD 어레이 같은 서버 개념은 언급하지 마세요.`
+- 수치는 통계의 실제 값을 그대로 쓰고, latency 는 ms 단위로 제시하세요(통계 값은 이미 ms 단위).
+- Android 모바일 storage(UFS) 맥락을 유지하세요 — RAID·SSD array 같은 서버 개념은 언급하지 마세요.`
 
 // benchmarkSystemPrompt — benchmark(fio 등) 결과 해석용.
-const benchmarkSystemPrompt = koreanOnly + `당신은 스토리지 벤치마크(fio 등) 결과를 분석하는 성능 전문가입니다.
-아래 규칙에 따라, 주어진 device 별 집계 metrics 를 한국어로 해석하세요.
+const benchmarkSystemPrompt = koreanOnly + `당신은 storage benchmark(fio 등) 결과를 분석하는 성능 전문가입니다.
+아래 규칙에 따라, 주어진 device 별 집계 metrics 를 해석하세요.
 
 ## metrics 키 의미
-- read_iops / write_iops: 초당 I/O 연산 수 (높을수록 좋음).
-- read_bw_kb / write_bw_kb: 대역폭(KB/s).
-- read_clat_ns_mean / write_clat_ns_mean: 완료 지연(completion latency) 평균, 나노초.
-- *_clat_ns_p99.000000 / *_clat_ns_p99.900000: 완료 지연 p99 / p99.9 백분위, 나노초.
+- read_iops / write_iops: 초당 I/O operation 수 (높을수록 좋음).
+- read_bw_kb / write_bw_kb: bandwidth(KB/s).
+- read_clat_ns_mean / write_clat_ns_mean: completion latency 평균, ns.
+- *_clat_ns_p99.000000 / *_clat_ns_p99.900000: completion latency p99 / p99.9 백분위, ns.
 - job_runtime_ms: 실행 시간(ms).
 
 ## 해석 우선순위
-1. IOPS/대역폭 수준이 워크로드 기대치에 부합하는가.
-2. clat 평균 대비 p99/p99.9 의 벌어짐 = tail latency. 크면 일관성 문제(꼬리 지연).
+1. IOPS/bandwidth 수준이 workload 기대치에 부합하는가.
+2. clat 평균 대비 p99/p99.9 의 벌어짐 = tail latency. 크면 consistency 문제.
 3. read vs write 성능 비대칭.
 4. device 가 여럿이면 device 간 편차.
 
 ## 출력 형식
-① 한 줄 요약 (성능 수준 + 일관성)
+① 한 줄 요약 (성능 수준 + consistency)
 ② 주목할 점 (병목·이상, 근거 수치 포함)
 ③ 다음 확인/개선 제안 (있으면)
 
 ## 규칙
 - 제공된 metrics 숫자만 근거로 삼고, 없는 값은 지어내지 마세요.
-- **latency 는 반드시 밀리초(ms) 단위로 환산해 제시하세요.** 나노초(ns) metrics 는 1,000,000 으로 나눠 ms 로
+- **latency 는 반드시 ms 단위로 환산해 제시하세요.** ns metrics 는 1,000,000 으로 나눠 ms 로
   바꿔 쓰고(예: 109,056 ns → 0.109 ms), 소수 셋째 자리까지 표기합니다. 원본 ns 값은 굳이 함께 쓰지 않아도 됩니다.
   사용자는 ms 로 이야기하는 것을 선호합니다 — μs(마이크로초) 대신 ms 로 통일하세요.
 - 확신이 없으면 "제공된 데이터로는 판단 불가" 라고 명시하세요.`
@@ -110,6 +129,172 @@ func BuildUserPrompt(jobType, summaryJSON string) string {
 		label = "벤치마크"
 	}
 	return fmt.Sprintf(`다음은 이번 %s 실행의 집계 통계입니다. 위 규칙에 따라 해석해 주세요.
+
+%s`, label, summaryJSON)
+}
+
+// ══════════════════════════════════════════════════════════════
+// 채팅 기반 분석 (멀티턴)
+// ══════════════════════════════════════════════════════════════
+//
+// 한 턴은 두 번의 LLM 호출로 이뤄진다:
+//   1) 도구 선택 — ToolSelectSystemPrompt + ToolSelectSchema (ChatJSON, temperature 0)
+//   2) 답변 생성 — ChatSystemPrompt + 집계 결과 (ChatMessages, 스트리밍)
+// 사이의 집계 실행은 trace.RunAggregation 이 하며 LLM 은 SQL 을 만들지 않는다.
+
+// ToolSelectSystemPrompt — 질문에 맞는 집계 도구를 고르게 하는 프롬프트.
+//
+// 도구 목록은 trace.AggToolReference() 가 AggSpecs 에서 파생시킨다 — 도구를 추가하면
+// 프롬프트가 자동으로 따라오므로 드리프트가 없다.
+//
+// 핵심은 **none 을 적극적으로 고르게 하는 것**이다. 답할 수 없는 질문에 억지로 집계를
+// 고르면 엉뚱한 숫자를 근거로 그럴듯한 오답이 나온다.
+func ToolSelectSystemPrompt(toolReference string) string {
+	return fmt.Sprintf(`당신은 storage I/O trace 분석 도구를 고르는 라우터입니다.
+사용자 질문을 읽고, 아래 집계 도구 중 **정확히 하나**를 골라 JSON 으로만 답하세요.
+
+## 사용 가능한 집계 도구
+%s
+
+## 선택 규칙
+- 질문에 가장 직접적으로 답하는 도구 하나만 고릅니다.
+- params 는 질문에 명시된 값만 채웁니다. 언급이 없으면 생략하세요(기본값이 쓰입니다).
+- 사용자가 이전 답변의 특정 시각·구간을 가리키며 물으면(예: "그 184초 근처"),
+  filtered_stats 의 start_time/end_time 에 **실제 숫자**를 넣으세요.
+  대화 기록에서 그 숫자를 찾아 직접 계산해 채웁니다(예: 184초 근처 → start_time "179",
+  end_time "189").
+- **params 값에는 반드시 실제 숫자/문자열만 넣으세요.** "value_from_previous_question",
+  "이전 값", "same_as_above" 같은 자리표시자를 넣으면 집계가 실행되지 않습니다.
+  넣을 실제 값을 모르면 그 param 을 아예 생략하세요.
+- **답할 수 없는 질문이면 반드시 none 을 고르세요.** 특히:
+  · 다른 job 과의 비교("지난주보다 나쁜가", "이전 결과 대비")
+  · 이 trace 에 없는 정보(앱 이름, 사용자 조작, device 온도 등)
+  · storage I/O 와 무관한 질문
+  억지로 다른 도구를 고르면 엉뚱한 숫자가 근거로 쓰입니다. 모르면 none 이 정답입니다.
+- 설명 문장을 쓰지 말고 JSON 만 출력하세요.`, toolReference)
+}
+
+// ToolSelectSchema — 도구 선택 응답 구조. ollama structured output 으로 강제한다.
+//
+// params 는 값 타입이 섞이므로(정수 n, 실수 start_time, 문자열 cmd) 전부 문자열로 받고
+// trace 쪽 param 헬퍼가 변환한다 — 시나리오 생성에서 이미 검증된 방식이다.
+func ToolSelectSchema(toolNames []string) map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tool": map[string]any{
+				"type": "string",
+				"enum": toolNames,
+			},
+			"params": map[string]any{
+				"type":                 "object",
+				"additionalProperties": map[string]any{"type": "string"},
+			},
+			"reason": map[string]any{
+				"type": "string",
+			},
+		},
+		"required": []string{"tool"},
+	}
+}
+
+// ChatSystemPrompt — 대화형 답변용. 도메인 지식은 단발 리포트와 공유하되,
+// 출력 형식만 "질문에 답하는 대화"로 바꾼다.
+//
+// jobType 이 benchmark/scenario 면 trace 도메인 지식 대신 benchmark metrics 설명을 쓴다.
+func ChatSystemPrompt(jobType string) string {
+	if jobType == "benchmark" || jobType == "scenario" {
+		return koreanOnly + `당신은 storage benchmark(fio 등) 결과를 놓고 사용자와 대화하는 성능 전문가입니다.
+
+## metrics 키 의미
+- read_iops / write_iops: 초당 I/O operation 수 (높을수록 좋음).
+- read_bw_kb / write_bw_kb: bandwidth(KB/s).
+- read_clat_ns_mean / write_clat_ns_mean: completion latency 평균, ns.
+- *_clat_ns_p99.000000 / *_clat_ns_p99.900000: completion latency p99 / p99.9 백분위, ns.
+- job_runtime_ms: 실행 시간(ms).
+
+` + chatOutputRules + `
+- **latency 는 반드시 ms 로 환산해 제시하세요.** ns metrics 는 1,000,000 으로 나눠
+  소수 셋째 자리까지 표기합니다(예: 109,056 ns → 0.109 ms).`
+	}
+
+	return koreanOnly + `당신은 Android device 의 storage I/O kernel trace(UFS / Block layer)를 놓고
+사용자와 대화하는 성능 전문가입니다.
+
+` + traceDomainKnowledge + `
+
+` + chatOutputRules + `
+- Android 모바일 storage(UFS) 맥락을 유지하세요 — RAID·SSD array 같은 서버 개념은 언급하지 마세요.`
+}
+
+// chatOutputRules — 대화형 출력 규칙. 단발 리포트의 "①~④ 형식" 을 대체한다.
+//
+// 리포트가 아니라 **질문에 답하는 것**이 목적이므로, 묻지 않은 것을 늘어놓지 않게 한다.
+// 로컬 소형 모델이 집계 JSON 을 받으면 "해석" 대신 "구조 나열"로 빠지는 경향이 있어
+// (rest_summary.go 실측), 그 금지를 여기서도 명시한다.
+const chatOutputRules = `## 답변 방식
+- **질문에 답하는 것이 목적입니다.** 정해진 리포트 형식(①②③) 없이, 묻는 것에
+  곧바로 답하세요. 묻지 않은 항목을 늘어놓지 마세요.
+- 3~5문장 정도로 간결하게. 근거가 되는 수치를 문장 안에 함께 씁니다.
+- 수치만 나열하지 말고 **그 수치가 무엇을 뜻하는지** 해석해 주세요.
+  (예: "QD 가 낮은데 dtoc 가 크다" → "device 응답 자체가 느리다")
+- 이전 대화에서 이미 말한 내용은 반복하지 말고, 이어지는 답을 하세요.
+
+## 규칙 (반드시 지킬 것)
+- **제공된 숫자만 근거로 삼으세요.** 없는 값은 절대 지어내지 마세요.
+  판단할 수 없으면 "제공된 데이터로는 판단 불가" 라고 명확히 밝히세요.
+- 집계 결과가 주어지지 않았거나 답할 수 없는 질문이면, **왜 답할 수 없는지**를
+  설명하세요. 추측으로 답하지 마세요.
+- **데이터 구조나 JSON 필드가 무엇을 의미하는지 설명하지 마세요.** ("bin 은 시간
+  구간을 나타냅니다" 같은 schema 설명 금지) 오직 그 값이 뜻하는 바만 해석합니다.
+- 집계 결과를 행 단위로 그대로 나열하지 마세요(표는 사용자가 이미 보고 있습니다).
+  **행들에서 읽히는 공통점·패턴을 서술**하세요 — 어떤 command 가 많은지, 시각이
+  몰려 있는지, size/QD 에 공통점이 있는지.
+
+## 용어 (다시 강조 — 반드시 지킬 것)
+기술 용어는 번역하지 말고 **영어 원문 그대로** 쓰세요:
+latency(지연 아님), device(디바이스 아님), request(요청 아님), command(명령어 아님),
+queue/QD, small write(소량 쓰기 아님), chunk, burst, sequential, random access,
+cache flush, GC, throughput, workload, job, trace.
+서술 문장(조사·서술어)만 한국어입니다.
+예) "가장 느린 request 5개는 모두 WRITE command 이고, dtoc 가 4ms 대입니다."`
+
+// BuildChatUserPrompt — 이번 턴의 질문에 집계 결과를 붙여 user 메시지를 만든다.
+//
+// aggJSON 이 비어 있으면 **답할 수 없다는 사실을 명시적으로 지시**한다. 질문만 넘기면
+// 로컬 모델이 배경 summary 나 일반 상식으로 추측해 답해버린다 — 실측으로 확인된 실패
+// 모드다("지난주 유튜브 잡보다 나쁜가?" 에 유튜브의 일반적 I/O 특성을 상상해 비교했다).
+// 근거 없이 그럴듯한 답을 내는 것이 이 설계가 막으려는 바로 그 상황이라, 여기서 강하게 끊는다.
+func BuildChatUserPrompt(question, aggLabel, aggJSON string) string {
+	if aggJSON == "" {
+		return fmt.Sprintf(`%s
+
+--- 중요 ---
+이 질문은 지금 보고 있는 trace 데이터만으로는 답할 수 없습니다.
+필요한 집계를 실행하지 않았고, 근거가 될 숫자가 없습니다.
+
+다음 규칙을 반드시 지키세요:
+- **답을 추측하지 마세요.** 일반적인 앱/workload 특성이나 상식으로 채워 넣지 마세요.
+- 다른 job·이전 실행과 비교하지 마세요. 그 데이터를 갖고 있지 않습니다.
+- 먼저 "이 질문은 지금 데이터로 답할 수 없습니다" 라고 명확히 밝히고, 왜 그런지
+  한 문장으로 설명하세요.
+- 대신 이 trace 에서 확인할 수 있는 것이 무엇인지 짧게 안내하세요(1~2문장).`, question)
+	}
+	return fmt.Sprintf(`%s
+
+--- 아래는 위 질문에 답하기 위해 실행한 집계(%s) 결과입니다. 이 숫자만 근거로 답하세요. ---
+%s`, question, aggLabel, aggJSON)
+}
+
+// BuildChatContextPrompt — 대화 첫 턴에 깔아두는 전체 요약 컨텍스트.
+// 이후 턴은 이 요약을 다시 보내지 않고 선택된 집계 결과만 추가한다.
+func BuildChatContextPrompt(jobType, summaryJSON string) string {
+	label := "trace"
+	if jobType == "benchmark" || jobType == "scenario" {
+		label = "benchmark"
+	}
+	return fmt.Sprintf(`다음은 지금 보고 있는 %s job 의 전체 집계 통계입니다.
+이후 질문에 답할 때 이 값들을 배경 지식으로 쓰세요.
 
 %s`, label, summaryJSON)
 }
