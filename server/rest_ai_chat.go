@@ -230,16 +230,33 @@ func buildChatMessages(jobType, summaryJSON string, history []aiChatMessage, que
 	}
 
 	// 이번 질문 + 이번 턴 집계 결과.
+	//
+	// overview(또는 benchmark job)는 별도 집계 없이 위에 깔아둔 전체 summary 로 답한다.
+	// 이때 거절 프롬프트를 쓰면 안 된다 — 근거가 이미 주어져 있다.
 	aggLabel, aggJSON := aggForPrompt(agg)
-	msgs = append(msgs, ai.Message{Role: "user", Content: ai.BuildChatUserPrompt(question, aggLabel, aggJSON)})
+	useSummary := agg == nil || agg.Tool == trace.AggOverview
+	var content string
+	switch {
+	case aggJSON != "":
+		content = ai.BuildChatUserPrompt(question, aggLabel, aggJSON)
+	case useSummary:
+		content = ai.BuildChatSummaryPrompt(question)
+	default:
+		// none — 답할 수 없음을 명시.
+		content = ai.BuildChatUserPrompt(question, "", "")
+	}
+	msgs = append(msgs, ai.Message{Role: "user", Content: content})
 
 	return capChars(msgs, maxChatChars)
 }
 
 // aggForPrompt — 집계 결과를 프롬프트에 넣을 (라벨, JSON) 로 만든다.
-// none 이거나 결과가 없으면 빈 문자열 → 질문만 넘어가고, 모델이 답할 수 없는 이유를 설명한다.
+//
+// 빈 문자열을 반환하면 호출자가 "답할 수 없다" 경로를 탄다. 따라서 **overview 는 여기
+// 오면 안 된다** — overview 는 "따로 집계할 필요 없이 배경 summary 로 답하라"는 뜻이라
+// 근거가 이미 있다. 이 구분을 놓치면 "전반적으로 해석해줘" 에 답을 거부한다(실측).
 func aggForPrompt(agg *trace.AggResult) (string, string) {
-	if agg == nil || agg.Tool == trace.AggNone {
+	if agg == nil || agg.Tool == trace.AggNone || agg.Tool == trace.AggOverview {
 		return "", ""
 	}
 	if agg.Note != "" && len(agg.Data) == 0 {

@@ -220,3 +220,51 @@ func TestChatSystemPromptByJobType(t *testing.T) {
 		}
 	}
 }
+
+// overview 는 "배경 summary 로 답하라"는 뜻이지 "답할 수 없다"가 아니다.
+// 이 구분을 놓치면 "전반적으로 해석해줘" 에 답을 거부한다(UI 실측으로 발견).
+func TestOverviewUsesSummaryNotRefusal(t *testing.T) {
+	agg := &trace.AggResult{Tool: trace.AggOverview}
+	msgs := buildChatMessages("trace", `{"totalEvents":4520,"readTotalBytes":19400000}`,
+		[]aiChatMessage{msg("user", "이 결과를 전반적으로 해석해줘.")},
+		"이 결과를 전반적으로 해석해줘.", agg)
+
+	last := msgs[len(msgs)-1].Content
+	if strings.Contains(last, "답할 수 없습니다") {
+		t.Error("overview 인데 거절 프롬프트가 붙었다 — 배경 summary 로 답해야 한다")
+	}
+	if !strings.Contains(last, "전체 집계 통계") {
+		t.Errorf("배경 summary 로 답하라는 지시가 없다: %q", last)
+	}
+	// 배경 summary 자체는 앞쪽에 깔려 있어야 한다.
+	joined := ""
+	for _, m := range msgs {
+		joined += m.Content
+	}
+	if !strings.Contains(joined, "4520") {
+		t.Error("배경 summary 가 프롬프트에 없다")
+	}
+}
+
+// none 은 반대로 거절 지시가 반드시 붙어야 한다.
+func TestNoneGetsRefusalPrompt(t *testing.T) {
+	agg := &trace.AggResult{Tool: trace.AggNone}
+	msgs := buildChatMessages("trace", `{"totalEvents":4520}`,
+		[]aiChatMessage{msg("user", "지난주 잡보다 나쁜가?")}, "지난주 잡보다 나쁜가?", agg)
+
+	last := msgs[len(msgs)-1].Content
+	if !strings.Contains(last, "답할 수 없습니다") {
+		t.Errorf("none 인데 거절 지시가 없다 — 추측 답변이 나온다: %q", last)
+	}
+}
+
+// benchmark job 은 집계 선택 자체를 안 하므로 agg=nil 로 들어온다 → summary 경로.
+func TestBenchmarkNilAggUsesSummary(t *testing.T) {
+	msgs := buildChatMessages("benchmark", `{"devices":[{"metrics":{"read_iops":417000}}]}`,
+		[]aiChatMessage{msg("user", "성능 어때?")}, "성능 어때?", nil)
+
+	last := msgs[len(msgs)-1].Content
+	if strings.Contains(last, "답할 수 없습니다") {
+		t.Error("benchmark job 이 거절 경로를 탔다")
+	}
+}

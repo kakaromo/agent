@@ -27,10 +27,35 @@ import (
 //
 // 따라서 금지 대상은 **중국어뿐**이다 — 이전 문구는 영어까지 금지해 모델이 용어를
 // 번역해 버렸다. 중국어 혼입 방지라는 원래 목적은 그대로 유지한다.
-const koreanOnly = "서술 문장은 반드시 한국어로 작성하세요. 중국어를 절대 섞지 마세요.\n" +
-	"단, 기술 용어는 번역하지 말고 영어 원문 그대로 쓰세요 — latency, tail latency, queue, QD,\n" +
-	"small write, chunk, burst, cache flush, GC, sequential, random access, device, request,\n" +
-	"job, trace, workload, throughput 등. (\"꼬리 지연\", \"소량 쓰기\", \"큐 깊이\" 같은 번역어 금지)\n\n"
+const koreanOnly = `서술 문장은 한국어로 쓰되, 기술 용어는 영어 원문 그대로 씁니다.
+중국어는 절대 섞지 마세요.
+
+## 반드시 이렇게 바꿔 쓰세요 (왼쪽 금지 → 오른쪽 사용)
+요청 → request          |  명령어 → command       |  디바이스 → device
+지연/지연 시간 → latency |  꼬리 지연 → tail latency |  큐/대기열 → queue
+큐 깊이 → QD            |  병렬성/병렬 처리 → parallelism
+랜덤 → random           |  순차 → sequential      |  랜덤 접근 → random access
+크기 → size             |  소량 쓰기 → small write |  덩어리 → chunk
+읽기 → read             |  쓰기 → write           |  작업/부하 → workload
+처리량 → throughput      |  대역폭 → bandwidth      |  캐시 비우기 → cache flush
+정렬 → aligned          |  버스트/몰림 → burst     |  응답 시간 → response time
+
+## 예시
+나쁨: "가장 느린 5개의 요청은 모두 쓰기 명령어이며, 지연 시간이 2.6ms 입니다."
+좋음: "가장 느린 5개 request 는 모두 write command 이며, latency 가 2.6ms 입니다."
+
+나쁨: "이 작업은 주로 랜덤 I/O를 수행하며 큐 깊이가 낮습니다."
+좋음: "이 workload 는 주로 random I/O 를 수행하며 QD 가 낮습니다."
+
+조사와 서술어("~는", "~입니다", "~로 보입니다")만 한국어입니다.
+
+## 한국어 풀이를 덧붙이지 마세요
+영어 용어 옆에 괄호로 한국어를 병기하거나, 한국어 뒤에 영어를 괄호로 붙이지 마세요.
+용어 하나만 씁니다.
+  나쁨: "큐 깊이(QD)" / "QD(큐 깊이)" / "병렬성(parallelism)" / "지연(latency)"
+  좋음: "QD" / "parallelism" / "latency"
+
+`
 
 // traceSystemPrompt — trace 결과 해석용 도메인 지식.
 // traceDomainKnowledge — UFS/Block trace 해석에 필요한 도메인 지식.
@@ -251,13 +276,10 @@ const chatOutputRules = `## 답변 방식
   **행들에서 읽히는 공통점·패턴을 서술**하세요 — 어떤 command 가 많은지, 시각이
   몰려 있는지, size/QD 에 공통점이 있는지.
 
-## 용어 (다시 강조 — 반드시 지킬 것)
-기술 용어는 번역하지 말고 **영어 원문 그대로** 쓰세요:
-latency(지연 아님), device(디바이스 아님), request(요청 아님), command(명령어 아님),
-queue/QD, small write(소량 쓰기 아님), chunk, burst, sequential, random access,
-cache flush, GC, throughput, workload, job, trace.
-서술 문장(조사·서술어)만 한국어입니다.
-예) "가장 느린 request 5개는 모두 WRITE command 이고, dtoc 가 4ms 대입니다."`
+## 용어 (맨 위 변환표를 반드시 다시 확인할 것)
+"요청/명령어/지연/큐 깊이/랜덤/순차/크기/병렬성" 을 쓰면 안 됩니다.
+각각 request / command / latency / QD / random / sequential / size / parallelism 입니다.
+예) "가장 느린 request 5개는 모두 write command 이고, latency 가 4ms 대입니다."`
 
 // BuildChatUserPrompt — 이번 턴의 질문에 집계 결과를 붙여 user 메시지를 만든다.
 //
@@ -284,6 +306,19 @@ func BuildChatUserPrompt(question, aggLabel, aggJSON string) string {
 
 --- 아래는 위 질문에 답하기 위해 실행한 집계(%s) 결과입니다. 이 숫자만 근거로 답하세요. ---
 %s`, question, aggLabel, aggJSON)
+}
+
+// BuildChatSummaryPrompt — 별도 집계 없이 배경 summary 로 답해야 할 때의 질문 래퍼.
+//
+// overview(전반적 해석 요청)나 benchmark job 이 여기 해당한다. 근거가 이미 앞에
+// 주어져 있으므로 거절 지시를 쓰면 안 된다 — "전반적으로 해석해줘" 에 답을 거부하게
+// 된다(실측으로 확인).
+func BuildChatSummaryPrompt(question string) string {
+	return fmt.Sprintf(`%s
+
+--- 참고 ---
+이 질문은 앞에서 제공한 **전체 집계 통계**로 답하세요. 별도 집계는 실행하지 않았습니다.
+그 통계에 있는 숫자만 근거로 삼고, 없는 값은 지어내지 마세요.`, question)
 }
 
 // BuildChatContextPrompt — 대화 첫 턴에 깔아두는 전체 요약 컨텍스트.
