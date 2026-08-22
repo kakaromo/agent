@@ -827,6 +827,117 @@ export function createAiAnalyzeSource(
 	return new EventSource(`/api/agent/ai/analyze/stream?${params.toString()}`);
 }
 
+// ── AI 채팅 (멀티턴 + 근거 노출) ──
+
+// 집계 근거. 답변 토큰보다 먼저 도착해 UI 가 뱃지를 먼저 그린다.
+export interface AiToolEvidence {
+	tool: string;
+	params?: Record<string, unknown>;
+	query?: string;
+	rowCount?: number;
+	truncated?: boolean;
+	data?: Record<string, unknown>;
+	note?: string;
+}
+
+export interface AiChatMessage {
+	role: 'user' | 'assistant';
+	content: string;
+	// 이 답변의 근거. 다음 턴에 서버로 되돌려줘야 후속 질문이 맥락을 잃지 않는다
+	// (서버는 대화 상태를 보관하지 않는다).
+	tool?: string;
+	aggJson?: unknown;
+}
+
+export interface AiChatHandlers {
+	onTool?: (ev: AiToolEvidence) => void;
+	onToken?: (text: string) => void;
+	onDone?: () => void;
+	onError?: (msg: string) => void;
+}
+
+// AI 채팅 SSE — POST 라서 EventSource 를 못 쓰고 fetch + ReadableStream 으로 파싱한다.
+// (대화 히스토리가 쿼리스트링에 담기지 않는다.)
+//
+// 반환값을 호출하면 스트림이 중단된다 (시트 닫기 → ollama 요청까지 취소).
+export function createAiChatStream(
+	serverId: number,
+	jobId: string,
+	kind: 'trace' | 'benchmark',
+	messages: AiChatMessage[],
+	handlers: AiChatHandlers
+): () => void {
+	const controller = new AbortController();
+
+	(async () => {
+		try {
+			const resp = await fetch(`/api/agent/ai/chat/stream?serverId=${serverId}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ jobId, kind, messages }),
+				signal: controller.signal
+			});
+
+			if (!resp.ok || !resp.body) {
+				let msg = `AI 채팅 실패 (${resp.status})`;
+				try {
+					const j = await resp.json();
+					if (j?.error) msg = j.error;
+					else if (j?.message) msg = j.message;
+				} catch {
+					/* body 가 JSON 이 아니면 기본 메시지 */
+				}
+				handlers.onError?.(msg);
+				return;
+			}
+
+			const reader = resp.body.getReader();
+			const decoder = new TextDecoder();
+			let buf = '';
+
+			// SSE 프레임: "event: X\ndata: {...}\n\n"
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+
+				let sep: number;
+				while ((sep = buf.indexOf('\n\n')) !== -1) {
+					const frame = buf.slice(0, sep);
+					buf = buf.slice(sep + 2);
+					if (!frame.trim() || frame.startsWith(':')) continue; // keepalive
+
+					let event = 'message';
+					const dataLines: string[] = [];
+					for (const line of frame.split('\n')) {
+						if (line.startsWith('event:')) event = line.slice(6).trim();
+						else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+					}
+					if (!dataLines.length) continue;
+
+					let payload: Record<string, unknown> = {};
+					try {
+						payload = JSON.parse(dataLines.join('\n'));
+					} catch {
+						continue;
+					}
+
+					if (event === 'token') handlers.onToken?.(String(payload.text ?? ''));
+					else if (event === 'tool') handlers.onTool?.(payload as unknown as AiToolEvidence);
+					else if (event === 'done') handlers.onDone?.();
+					else if (event === 'error') handlers.onError?.(String(payload.error ?? 'AI 오류'));
+				}
+			}
+		} catch (e) {
+			// abort 는 정상 종료 (사용자가 시트를 닫았거나 새 질문을 보냈다).
+			if ((e as Error)?.name === 'AbortError') return;
+			handlers.onError?.((e as Error)?.message ?? 'AI 채팅 실패');
+		}
+	})();
+
+	return () => controller.abort();
+}
+
 // 시나리오 wire shape (ScenarioStep). params 는 문자열 맵.
 export interface AiScenarioStep {
 	type: string;

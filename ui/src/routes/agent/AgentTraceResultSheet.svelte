@@ -3,10 +3,11 @@
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import { DataTable } from '$lib/components/data-table';
 	import TraceScatterChart from './TraceScatterChart.svelte';
+	import AiChatPanel from './AiChatPanel.svelte';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -142,53 +143,21 @@
 		if (reparsePollTimer) { clearInterval(reparsePollTimer); reparsePollTimer = null; }
 	}
 
-	// ── AI 해석 ──
-	// reachable=true 일 때만 버튼 노출. 시트 수명과 같으니 로컬 state 로 관리.
+	// ── AI 해석 (채팅) ──
+	// reachable=true 일 때만 노출. 대화 상태는 AiChatPanel 이 소유하고, 시트는 참조만 쥔다.
 	let aiReachable = $state(false);
-	let aiRunning = $state(false);
-	let aiText = $state('');
-	let aiError = $state('');
-	let aiSource: EventSource | null = null;
+	let aiPanel = $state<AiChatPanel | null>(null);
 
-	function closeAiSource() {
-		if (aiSource) { aiSource.close(); aiSource = null; }
-	}
-
+	// "AI 해석" 버튼 — 첫 턴(전체 해석)을 자동 실행하고, 이후엔 패널에서 이어서 질문한다.
 	function startAiAnalyze() {
 		if (!serverId || activeJobIds.length === 0) return;
-		// AI 해석 패널은 Statistics 탭에 있으므로, 어느 탭에서 눌러도 결과가 보이게 탭을 전환한다.
+		// 패널은 Statistics 탭에 있으므로, 어느 탭에서 눌러도 결과가 보이게 탭을 전환한다.
 		mainTab = 'stats';
-		closeAiSource();
-		aiRunning = true;
-		aiText = '';
-		aiError = '';
-		// 첫 job 기준으로 해석 (서버가 jobId 로 통계 조달)
-		const es = createAiAnalyzeSource(serverId, activeJobIds[0], 'trace');
-		aiSource = es;
-
-		es.addEventListener('token', (e: MessageEvent) => {
-			try {
-				const d = JSON.parse(e.data);
-				if (typeof d?.text === 'string') aiText += d.text;
-			} catch { /* ignore */ }
-		});
-
-		es.addEventListener('done', () => {
-			closeAiSource();
-			aiRunning = false;
-		});
-
-		es.addEventListener('error', (e: MessageEvent) => {
-			let msg = 'AI 해석 실패';
-			try { const d = JSON.parse((e as MessageEvent).data); if (d?.error) msg = d.error; } catch { /* SSE 연결 에러엔 data 없음 */ }
-			closeAiSource();
-			aiRunning = false;
-			if (!aiText) aiError = msg;
-		});
+		aiPanel?.startOverview();
 	}
 
 	// 시트 열릴 때 reparsing 상태 확인
-	onDestroy(() => { stopReparsePoll(); closeAiSource(); });
+	onDestroy(() => { stopReparsePoll(); });
 
 	$effect(() => {
 		if (open && serverId && jobIds.length === 1) {
@@ -204,7 +173,7 @@
 		}
 		if (!open) {
 			stopReparsePoll(); reparsing = false; archiveExec = null;
-			closeAiSource(); aiRunning = false; aiText = ''; aiError = '';
+			aiPanel?.reset();
 		}
 	});
 
@@ -597,16 +566,11 @@
 				<div class="ml-auto mr-6 inline-flex items-center gap-1">
 					{#if aiReachable && activeJobIds.length > 0}
 						<button
-							class="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors disabled:opacity-50"
+							class="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border hover:bg-muted transition-colors"
 							onclick={startAiAnalyze}
-							disabled={aiRunning}
-							title="AI 로 trace 통계를 자연어 해석"
+							title="AI 로 trace 통계를 해석하고 이어서 질문"
 						>
-							{#if aiRunning}
-								<LoaderIcon class="size-3 animate-spin" /> 해석 중...
-							{:else}
-								<SparklesIcon class="size-3" /> AI 해석
-							{/if}
+							<SparklesIcon class="size-3" /> AI 해석
 						</button>
 					{/if}
 					{#if jobIds.length === 1 && !reparsing}
@@ -790,20 +754,14 @@
 
 				<!-- Statistics Tab -->
 				<Tabs.Content value="stats" class="pt-2 space-y-3">
-					<!-- AI 해석 패널 (스트리밍) -->
-					{#if aiReachable && (aiRunning || aiText || aiError)}
-						<div class="border rounded-md bg-muted/20 p-2.5 space-y-1.5">
-							<div class="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
-								<SparklesIcon class="size-3" /> AI 해석
-								{#if aiRunning}<LoaderIcon class="size-3 animate-spin" />{/if}
-							</div>
-							{#if aiError}
-								<div class="text-[11px] text-destructive">{aiError}</div>
-							{:else}
-								<div class="text-[11px] leading-relaxed whitespace-pre-wrap">{aiText}{#if aiRunning}<span class="inline-block w-1.5 h-3 -mb-0.5 bg-foreground/60 animate-pulse"></span>{/if}</div>
-							{/if}
-						</div>
-					{/if}
+					<!-- AI 채팅 패널 (근거 집계 표시 + 멀티턴) -->
+					<AiChatPanel
+						bind:this={aiPanel}
+						{serverId}
+						jobId={activeJobIds[0] ?? null}
+						kind="trace"
+						reachable={aiReachable}
+						{open} />
 					{#if loadingStats}
 						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
 					{:else if statsResult}

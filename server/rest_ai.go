@@ -67,6 +67,9 @@ func registerAIRoutes(mux *http.ServeMux, agent *DeviceAgentServer, aicfg config
 		handleAIAnalyzeSSE(w, r, agent, client, jobID, kind)
 	})
 
+	// POST /api/agent/ai/chat/stream — 멀티턴 채팅 (집계 도구 선택 + 근거 노출)
+	registerAIChatRoutes(mux, agent, client)
+
 	// POST /api/agent/ai/scenario/generate
 	//   body: { prompt: "자연어 요청", deviceContext?: "...", deviceId?: "..." }
 	//     - deviceId 가 오면 백엔드가 그 기기의 설치앱 + 현재 activity 를 자동 조달해 프롬프트에 주입.
@@ -360,90 +363,136 @@ func handleAIAnalyzeSSE(w http.ResponseWriter, r *http.Request, agent *DeviceAge
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
+	stream, ok := startAISSE(w, r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-	setSSEHeaders(w)
-	flusher.Flush()
-
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
-	// 동시 Write 직렬화 (토큰 emit + keepalive).
-	var writeMu sync.Mutex
-	emit := func(event string, data any) bool {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		var payload []byte
-		switch v := data.(type) {
-		case nil:
-			payload = []byte("{}")
-		case []byte:
-			payload = v
-		case string:
-			payload = []byte(v)
-		default:
-			b, err := json.Marshal(v)
-			if err != nil {
-				return false
-			}
-			payload = b
-		}
-		if len(payload) == 0 {
-			payload = []byte("{}")
-		}
-		if event != "" {
-			if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
-				return false
-			}
-		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
-	}
-
-	// keepalive — 30초. ollama 첫 토큰까지 오래 걸릴 수 있어(모델 로드) proxy timeout 방지.
-	keepalive := time.NewTicker(30 * time.Second)
-	defer keepalive.Stop()
-	stopKeepalive := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-stopKeepalive:
-				return
-			case <-ctx.Done():
-				return
-			case <-keepalive.C:
-				writeMu.Lock()
-				fmt.Fprintf(w, ": keepalive %d\n\n", time.Now().Unix())
-				flusher.Flush()
-				writeMu.Unlock()
-			}
-		}
-	}()
+	defer stream.Close()
 
 	// 2) 프롬프트 조립 + ollama 스트리밍. 토큰을 그대로 emit.
 	system := ai.SystemPromptFor(jobType)
 	user := ai.BuildUserPrompt(jobType, summaryJSON)
 
-	err := client.Chat(ctx, system, user, func(token string) {
-		emit("token", map[string]any{"text": token})
+	err := client.Chat(stream.Ctx, system, user, func(token string) {
+		stream.Emit("token", map[string]any{"text": token})
 	})
-	close(stopKeepalive)
+	stream.StopKeepalive()
 
 	if err != nil {
 		// ctx 취소(클라이언트 disconnect)면 조용히 종료.
-		if ctx.Err() != nil {
+		if stream.Ctx.Err() != nil {
 			return
 		}
-		emit("error", map[string]any{"error": err.Error()})
+		stream.Emit("error", map[string]any{"error": err.Error()})
 		return
 	}
-	emit("done", map[string]any{})
+	stream.Emit("done", map[string]any{})
+}
+
+// aiSSEStream — AI 스트리밍 SSE 응답의 공통 배선.
+//
+// 단발 해석(handleAIAnalyzeSSE)과 채팅(handleAIChatSSE)이 공유한다. 동시 Write 직렬화와
+// keepalive 는 둘 다 필요하다 — ollama 는 모델 로드 때문에 첫 토큰까지 수십 초가 걸릴 수
+// 있어 keepalive 없이는 proxy 가 연결을 끊는다.
+type aiSSEStream struct {
+	Ctx context.Context
+
+	w             http.ResponseWriter
+	flusher       http.Flusher
+	writeMu       sync.Mutex
+	cancel        context.CancelFunc
+	stopKeepalive chan struct{}
+	stopOnce      sync.Once
+}
+
+// startAISSE — SSE 헤더를 쓰고 keepalive 고루틴을 띄운다.
+// 반환된 stream 은 반드시 Close() 해야 한다(고루틴 정리 + ctx 취소).
+//
+// ok=false 면 이미 에러 응답을 보냈으므로 호출자는 그대로 리턴하면 된다.
+func startAISSE(w http.ResponseWriter, r *http.Request) (*aiSSEStream, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return nil, false
+	}
+	setSSEHeaders(w)
+	flusher.Flush()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	s := &aiSSEStream{
+		Ctx:           ctx,
+		w:             w,
+		flusher:       flusher,
+		cancel:        cancel,
+		stopKeepalive: make(chan struct{}),
+	}
+
+	// keepalive — 30초. ollama 첫 토큰까지 오래 걸릴 수 있어(모델 로드) proxy timeout 방지.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stopKeepalive:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.writeMu.Lock()
+				fmt.Fprintf(s.w, ": keepalive %d\n\n", time.Now().Unix())
+				s.flusher.Flush()
+				s.writeMu.Unlock()
+			}
+		}
+	}()
+	return s, true
+}
+
+// Emit — 명명 SSE 이벤트 하나를 보낸다. 쓰기 실패 시 false.
+func (s *aiSSEStream) Emit(event string, data any) bool {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	var payload []byte
+	switch v := data.(type) {
+	case nil:
+		payload = []byte("{}")
+	case []byte:
+		payload = v
+	case string:
+		payload = []byte(v)
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return false
+		}
+		payload = b
+	}
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	if event != "" {
+		if _, err := fmt.Fprintf(s.w, "event: %s\n", event); err != nil {
+			return false
+		}
+	}
+	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", payload); err != nil {
+		return false
+	}
+	s.flusher.Flush()
+	return true
+}
+
+// StopKeepalive — keepalive 고루틴만 멈춘다(스트림은 계속 쓸 수 있다).
+// 여러 번 불러도 안전하다.
+func (s *aiSSEStream) StopKeepalive() {
+	s.stopOnce.Do(func() { close(s.stopKeepalive) })
+}
+
+// Close — keepalive 정리 + ctx 취소. defer 로 호출한다.
+func (s *aiSSEStream) Close() {
+	s.StopKeepalive()
+	s.cancel()
 }
 
 // resolveAISummary — jobId 로 (jobType, summaryJSON) 을 구한다.

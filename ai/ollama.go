@@ -84,19 +84,45 @@ type chatStreamChunk struct {
 	Error   string      `json:"error"`
 }
 
+// Message — 대화 한 턴. Role 은 "system" | "user" | "assistant".
+//
+// 멀티턴 채팅(ChatMessages)에서 히스토리를 넘기기 위한 공개 타입이다. 내부 wire 타입
+// (chatMessage)과 필드가 같지만, 패키지 외부가 ollama 의 JSON shape 에 직접 의존하지
+// 않도록 분리해 둔다.
+type Message struct {
+	Role    string
+	Content string
+}
+
 // Chat 은 system+user 프롬프트로 ollama 에 스트리밍 요청을 보내고, 토큰이 오는 대로 onToken 을 호출한다.
 //
+// 단일 턴 편의 래퍼다. 대화 히스토리가 필요하면 ChatMessages 를 쓴다.
+func (c *Client) Chat(ctx context.Context, system, user string, onToken func(string)) error {
+	return c.ChatMessages(ctx, []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}, onToken)
+}
+
+// ChatMessages 는 대화 히스토리를 그대로 ollama 에 넘겨 스트리밍 응답을 받는다.
+//
+//   - msgs 는 호출자가 구성한 순서대로 전달된다(보통 system 1개 + user/assistant 교대).
+//     컨텍스트 상한 관리(오래된 턴 잘라내기)는 호출자 책임이다 — 여기서는 자르지 않는다.
 //   - ctx 취소 시 요청이 중단된다 (SSE disconnect 전파).
 //   - ollama 가 모델을 못 찾으면(pull 안 됨) 응답 body 의 error 필드 또는 non-200 status 로 온다 → 에러 반환.
 //   - onToken 은 부분 토큰(단어 조각)을 받을 수 있다. 호출자가 이어붙인다.
-func (c *Client) Chat(ctx context.Context, system, user string, onToken func(string)) error {
+func (c *Client) ChatMessages(ctx context.Context, msgs []Message, onToken func(string)) error {
+	if len(msgs) == 0 {
+		return fmt.Errorf("빈 메시지 목록")
+	}
+	wire := make([]chatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		wire = append(wire, chatMessage{Role: m.Role, Content: m.Content})
+	}
 	body, err := json.Marshal(chatRequest{
-		Model: c.Model,
-		Messages: []chatMessage{
-			{Role: "system", Content: system},
-			{Role: "user", Content: user},
-		},
-		Stream: true,
+		Model:    c.Model,
+		Messages: wire,
+		Stream:   true,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
