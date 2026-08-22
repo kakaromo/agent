@@ -373,9 +373,12 @@ func handleAIAnalyzeSSE(w http.ResponseWriter, r *http.Request, agent *DeviceAge
 	system := ai.SystemPromptFor(jobType)
 	user := ai.BuildUserPrompt(jobType, summaryJSON)
 
-	err := client.Chat(stream.Ctx, system, user, func(token string) {
-		stream.Emit("token", map[string]any{"text": token})
+	// 채팅과 동일하게 용어 정규화를 거친다(문장 단위 버퍼링).
+	norm := ai.NewTermStreamer(func(text string) {
+		stream.Emit("token", map[string]any{"text": text})
 	})
+	err := client.Chat(stream.Ctx, system, user, norm.Write)
+	norm.Flush()
 	stream.StopKeepalive()
 
 	if err != nil {

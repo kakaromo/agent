@@ -120,9 +120,13 @@ func handleAIChatSSE(w http.ResponseWriter, r *http.Request, agent *DeviceAgentS
 	msgs := buildChatMessages(jobType, summaryJSON, body.Messages, question, agg)
 
 	// ── 3) 답변 스트리밍 ──
-	err := client.ChatMessages(stream.Ctx, msgs, func(token string) {
-		stream.Emit("token", map[string]any{"text": token})
+	// 용어 정규화를 거쳐 내보낸다. 토큰은 단어 중간에서 잘려 오므로 문장 단위로 버퍼링해
+	// 정규화한다(ai.TermStreamer) — 로컬 모델이 프롬프트 지시를 놓쳐도 용어가 통일된다.
+	norm := ai.NewTermStreamer(func(text string) {
+		stream.Emit("token", map[string]any{"text": text})
 	})
+	err := client.ChatMessages(stream.Ctx, msgs, norm.Write)
+	norm.Flush()
 	stream.StopKeepalive()
 
 	if err != nil {
