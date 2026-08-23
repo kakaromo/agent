@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -15,9 +16,10 @@ import (
 // portal frontend 가 그대로 동작하도록 만든 호환 어댑터.
 //
 // Phase 1 범위:
-//   Device(3) + Benchmark(5: run/status/result/cancel/delete) + Trace(5) = 13 endpoint
-//   진행률 SSE(/benchmark/progress), Monitor SSE, Scenario, Server CRUD, Macro, Preset, Schedule, Archive, Execution
-//   은 후속 Phase 에서 추가.
+//
+//	Device(3) + Benchmark(5: run/status/result/cancel/delete) + Trace(5) = 13 endpoint
+//	진행률 SSE(/benchmark/progress), Monitor SSE, Scenario, Server CRUD, Macro, Preset, Schedule, Archive, Execution
+//	은 후속 Phase 에서 추가.
 //
 // serverId 쿼리 파라미터는 portal 호환을 위해 받기만 하고 무시한다 (standalone 은 self).
 func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
@@ -264,6 +266,14 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 		if traceType == "" {
 			traceType = "ufs"
 		}
+		// 알 수 없는 trace_type 은 여기서 거절한다. 그냥 통과시키면 수집기가
+		// 아무 이벤트도 안 켜고 "성공" 으로 끝나서, 오타가 "이벤트 0건" 으로만
+		// 드러난다 — 원인 추적이 어려운 종류의 조용한 실패다.
+		if !validTraceTypes[traceType] {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"unknown traceType %q (allowed: ufs, block, both, ufscustom, fsio_ufs, fsio_block)", traceType))
+			return
+		}
 		jobName, _ := body["jobName"].(string)
 		var windowSec int32
 		if v, ok := numberOf(body["windowSeconds"]); ok {
@@ -477,4 +487,12 @@ func stringMap(v any) map[string]string {
 		}
 	}
 	return out
+}
+
+// validTraceTypes — StartTrace 가 받아들이는 trace_type.
+// scenario/steptypes.go 의 trace_start enum 과 같은 집합이어야 한다
+// (ufscustom 은 파일 업로드 전용이라 그쪽 enum 에는 없다).
+var validTraceTypes = map[string]bool{
+	"ufs": true, "block": true, "both": true, "ufscustom": true,
+	"fsio_ufs": true, "fsio_block": true,
 }

@@ -19,6 +19,17 @@
 	let { serverId, selectedDevices, serverName, onJobStarted, activeTraceJobId = $bindable() }: Props = $props();
 
 	let traceType = $state('ufs');
+
+	// trace_type 선택지. fsio_* 는 bpftrace(eBPF) 기반이라 수집 방식 자체가 다르다.
+	// 한 번에 한 레이어만 받는다 (`--only ufs` / `--only blk`) — ftrace 의 Both 에
+	// 해당하는 조합은 두지 않는다.
+	const TRACE_TYPES = [
+		{ value: 'ufs', label: 'UFS', desc: 'UFS 레이어 I/O' },
+		{ value: 'block', label: 'Block', desc: 'Block 레이어 I/O' },
+		{ value: 'both', label: 'Both', desc: 'UFS + Block' },
+		{ value: 'fsio_ufs', label: 'fsio UFS', desc: 'eBPF · UFS + 파일 귀속' },
+		{ value: 'fsio_block', label: 'fsio Block', desc: 'eBPF · Block + 파일 귀속' }
+	];
 	let windowSeconds = $state(0);
 	let jobName = $state('');
 	let starting = $state(false);
@@ -86,7 +97,7 @@
 	<div class="space-y-1">
 		<label class="{sectionLabel}">Trace Type</label>
 		<div class="grid grid-cols-3 gap-2">
-			{#each [{ value: 'ufs', label: 'UFS', desc: 'UFS 레이어 I/O' }, { value: 'block', label: 'Block', desc: 'Block 레이어 I/O' }, { value: 'both', label: 'Both', desc: 'UFS + Block' }] as t}
+			{#each TRACE_TYPES as t}
 				<button
 					onclick={() => traceType = t.value}
 					disabled={!!activeTraceJobId}
@@ -98,6 +109,14 @@
 				</button>
 			{/each}
 		</div>
+		{#if traceType.startsWith('fsio_')}
+			<!-- eBPF 는 root 가 필수다. 아니면 StartTrace 가 명시적으로 실패한다
+			     (조용히 빈 로그를 만드는 것보다 낫다). -->
+			<div class="text-[9px] text-amber-600 dark:text-amber-500 leading-relaxed">
+				eBPF 기반 — <b>root(userdebug)</b> 필요. 파일명·프로세스·syscall 귀속과
+				io_flags(journal/GC/writeback 등), UFS management 이벤트를 함께 수집합니다.
+			</div>
+		{/if}
 	</div>
 
 	<!-- Window Seconds -->

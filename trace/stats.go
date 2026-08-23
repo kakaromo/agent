@@ -26,6 +26,11 @@ func parquetGlobPatterns(traceType string) []string {
 		return []string{"result_block.parquet", "block.parquet", "realtime_block_*.parquet"}
 	case "ufscustom":
 		return []string{"result_ufscustom.parquet", "ufscustom.parquet", "realtime_ufscustom_*.parquet"}
+	// bpftrace(fsiotrace) 계열 — 수집 시 `--only` 로 한 레이어만 받으므로 단일 파일이다.
+	case "fsio_ufs":
+		return []string{"result_fsio_ufs.parquet", "fsio_ufs.parquet"}
+	case "fsio_block":
+		return []string{"result_fsio_block.parquet", "fsio_block.parquet"}
 	default:
 		return []string{"*.parquet"}
 	}
@@ -85,7 +90,17 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
+	fsio := detectFsioSchema(db, glob)
 	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	// mgmt(Query/TM UPIU, UIC) 행 제외.
+	//
+	// 집계 대부분은 action = send_req/block_rq_issue 로 걸러져 mgmt 가 자동 제외되지만,
+	// total_events(count(*)) 와 duration 은 필터가 없어 mgmt 가 섞인다. **idle 구간에서는
+	// mgmt 가 행의 대부분**이라 데이터 IO 의 분모가 통째로 흔들린다.
+	// COALESCE 인 이유 — 다른 trace_type parquet 과 union 하면 is_mgmt 가 NULL 이다.
+	if fsio.isUFS {
+		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
+	}
 
 	stats := &pb.TraceStats{}
 
@@ -149,18 +164,27 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	// 5.5 Compute read/write/discard totals from cmd stats
 	// UFS: size unit = 4096 bytes (1 LBA = 4KB)
 	// Block: size unit = 512 bytes (1 sector = 512B)
+	//
+	// ⚠ **fsio 는 계수가 1 이다.** bpftrace 는 size 를 이미 bytes 로 내려 보낸다
+	// (OUTPUT_FORMAT.md col 13). 아래 ×4096/×512 를 그대로 태우면 read/write 바이트가
+	// 4096배/512배 부풀어 오른다. Rust 도 fsio 일 때만 sector_bytes=1 로 둔다.
+	// fsio 는 1, ftrace UFS 는 4096(1 LBA), ftrace Block 은 512(1 sector).
+	ufsUnit, blockUnit := uint64(4096), uint64(512)
+	if fsio.any() {
+		ufsUnit, blockUnit = 1, 1
+	}
 	for _, cs := range stats.CmdStats {
 		cmd := strings.ToUpper(cs.Cmd)
 		switch {
-		// UFS data-transfer opcodes (size * 4096)
+		// UFS data-transfer opcodes
 		case cmd == "0X28" || cmd == "0X88": // READ_10, READ_16
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.ReadTotalBytes += cs.TotalSizeBytes
 		case cmd == "0X2A" || cmd == "0X8A": // WRITE_10, WRITE_16
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.WriteTotalBytes += cs.TotalSizeBytes
 		case cmd == "0X42": // UNMAP (discard)
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
 		// UFS/SCSI control-plane opcodes — 데이터 전송 없거나 작아서 read/write/discard
 		// 합산 대상 아님. 단위 변환도 하지 않는다 (size 가 의미적으로 LBA 가 아님).
@@ -174,22 +198,23 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 			cmd == "0X25" || cmd == "0X9E" ||
 			cmd == "0XA0" || cmd == "0X1A" || cmd == "0X5A":
 			// 합산 안 함, 단위 변환 안 함.
-		// Block io_type (size * 512)
+		// Block io_type / fsio rwbs — 첫 글자로 분류한다.
+		// 완전일치로 하면 rwbs 의 조합값("WS"/"RS"/"DS")이 전부 default 로 샌다.
 		case strings.HasPrefix(cmd, "R"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.ReadTotalBytes += cs.TotalSizeBytes
 		case strings.HasPrefix(cmd, "W"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.WriteTotalBytes += cs.TotalSizeBytes
 		case strings.HasPrefix(cmd, "D"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
 		default:
 			// 분류 못한 cmd — UFS 단위 추정만 하고 합산은 보류.
 			// 새 opcode 가 자주 보이면 위 switch 에 추가해야 한다.
 			slog.Warn("unknown trace cmd opcode (not classified into read/write/discard)",
 				"cmd", cs.Cmd, "count", cs.Count, "raw_size_total", cs.TotalSizeBytes)
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 		}
 	}
 
@@ -675,35 +700,75 @@ func queryTimeSeriesLatency(db *sql.DB, glob, where, timeCol string, bins int) (
 
 // ==================== Helpers ====================
 
-func detectCmdColumn(db *sql.DB, glob string) string {
-	// With union_by_name=true, both columns may exist (NULL for missing rows).
-	// Check which columns are present.
+// hasColumns — glob 대상 parquet 에 존재하는 컬럼 집합을 조회한다.
+func hasColumns(db *sql.DB, glob string, names ...string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, "'"+n+"'")
+	}
 	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
-		WHERE column_name IN ('opcode', 'io_type')`, glob)
+		WHERE column_name IN (%s)`, glob, strings.Join(quoted, ", "))
 	rows, err := db.Query(q)
 	if err != nil {
-		return "opcode"
+		return out
 	}
 	defer rows.Close()
-
-	var cols []string
 	for rows.Next() {
 		var col string
-		rows.Scan(&col)
-		cols = append(cols, col)
+		if err := rows.Scan(&col); err == nil {
+			out[col] = true
+		}
+	}
+	return out
+}
+
+// fsioSchema — 이 parquet 이 bpftrace(fsiotrace) 산출물인가.
+//
+// trace_type 문자열이 아니라 **스키마로** 판정한다. 통계 경로는 여러 잡을 합쳐
+// 조회할 수 있어 호출부가 종류를 확실히 알지 못하는 경우가 있기 때문이다.
+// `is_mgmt` 는 fsio_ufs 에만, `rwbs` 는 fsio_block 에만 있다.
+type fsioSchema struct {
+	isUFS   bool // fsio_ufs
+	isBlock bool // fsio_block
+}
+
+func (f fsioSchema) any() bool { return f.isUFS || f.isBlock }
+
+func detectFsioSchema(db *sql.DB, glob string) fsioSchema {
+	c := hasColumns(db, glob, "is_mgmt", "rwbs", "mgmt_name")
+	return fsioSchema{
+		isUFS:   c["is_mgmt"] || c["mgmt_name"],
+		isBlock: c["rwbs"],
+	}
+}
+
+// detectCmdColumn — cmd 축으로 쓸 SQL 식.
+//
+// fsio 는 기존 ftrace 스키마와 타입/의미가 달라 그대로 못 쓴다 (Rust
+// `output/stats_rpc_duckdb.rs` 가 같은 문제를 같은 방식으로 푼다):
+//   - fsio_ufs `opcode` 는 **UInt8 숫자**다. 기존 ftrace UFS 는 `0x2a` **문자열**이라
+//     그대로 두면 cmd 축이 `42` 같은 10진수로 나와 read/write 분류기가 전부 빗나간다.
+//   - fsio_block `io_type` 은 파서 정책상 **항상 빈 문자열**이라 cmd 축이 통째로 빈다.
+//     대신 `rwbs`("WS"/"R"/"D")가 분류 정보를 갖고 있다.
+func detectCmdColumn(db *sql.DB, glob string) string {
+	if f := detectFsioSchema(db, glob); f.any() {
+		switch {
+		case f.isUFS && f.isBlock:
+			// 여러 잡을 합쳐 두 스키마가 섞인 경우 — 있는 쪽을 쓴다.
+			return "COALESCE('0x' || lpad(lower(to_hex(opcode)), 2, '0'), rwbs)"
+		case f.isUFS:
+			return "'0x' || lpad(lower(to_hex(opcode)), 2, '0')"
+		default:
+			return "rwbs"
+		}
 	}
 
+	// With union_by_name=true, both columns may exist (NULL for missing rows).
+	cols := hasColumns(db, glob, "opcode", "io_type")
+	hasOpcode, hasIoType := cols["opcode"], cols["io_type"]
+
 	// Both exist (mixed ufs+block) → use COALESCE
-	hasOpcode := false
-	hasIoType := false
-	for _, c := range cols {
-		if c == "opcode" {
-			hasOpcode = true
-		}
-		if c == "io_type" {
-			hasIoType = true
-		}
-	}
 	if hasOpcode && hasIoType {
 		return "COALESCE(opcode, io_type)"
 	}

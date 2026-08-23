@@ -1,6 +1,6 @@
 // goparse — Rust ↔ Go 파서 정합성 검증용 standalone CLI.
 //
-//	go run ./cmd/goparse <trace.log> <outputDir> <ufs|block|both|ufscustom>
+//	go run ./cmd/goparse <trace.log> <outputDir> <ufs|block|both|ufscustom|fsio_ufs|fsio_block>
 //
 // agent 본체와 동일한 trace/parser.RunParquetOnly 를 직접 호출해
 // outputDir/result_<type>.parquet 을 생성한다. scripts/compare-parsers.sh 가
@@ -17,7 +17,7 @@ import (
 
 func main() {
 	if len(os.Args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: goparse <trace.log> <outputDir> <ufs|block|both|ufscustom>")
+		fmt.Fprintln(os.Stderr, "usage: goparse <trace.log> <outputDir> <ufs|block|both|ufscustom|fsio_ufs|fsio_block>")
 		os.Exit(2)
 	}
 	logFile, outputDir, traceType := os.Args[1], os.Args[2], os.Args[3]

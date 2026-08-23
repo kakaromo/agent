@@ -11,6 +11,7 @@ tools/iozone
 tools/tiotest
 tools/trace
 tools/iotest
+tools/fsiotrace
 
 # APK 번들 — binary, 로컬에서만 사용 (README 만 추적)
 tools/apks/*.apk
