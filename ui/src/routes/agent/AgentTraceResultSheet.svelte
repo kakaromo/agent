@@ -5,6 +5,7 @@
 	import TraceScatterChart from './TraceScatterChart.svelte';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
+	import { columnsFor } from './rawDataColumns.js';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
@@ -258,11 +259,17 @@
 	}
 
 	// Filtered events by action tab
-	let filteredEvents = $derived<TraceEvent[]>(() => {
+	// ⚠ `$derived(() => ...)` 로 쓰면 **함수 자체가 값**이 되어 타입이 TraceEvent[] 가
+	// 아니게 된다(호출부는 filteredEvents() 로 쓰고 있어 런타임은 맞지만 타입이 어긋난다).
+	// `$derived.by` 가 이 형태의 올바른 룬이다.
+	const filteredEvents = $derived.by<TraceEvent[]>(() => {
 		if (!rawResult) return [];
 		if (activeActionTab === 'all') return rawResult.events;
 		return rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
 	});
+
+	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
+	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
 	// Available chart items based on action tab
 	let availableChartItems = $derived(
@@ -528,7 +535,7 @@
 	}
 
 	function getChartOption(key: string): ReturnType<typeof buildScatter> {
-		const events = filteredEvents();
+		const events = filteredEvents;
 		if (events.length === 0) return null;
 		const item = CHART_ITEMS.find(c => c.key === key);
 		if (!item) return null;
@@ -713,8 +720,9 @@
 
 			<Tabs.Root bind:value={mainTab}>
 				<Tabs.List class="flex gap-0.5">
-					<Tabs.Trigger value="raw" class="text-[10px] px-3 py-1">Raw Data</Tabs.Trigger>
+					<Tabs.Trigger value="raw" class="text-[10px] px-3 py-1">Charts</Tabs.Trigger>
 					<Tabs.Trigger value="stats" class="text-[10px] px-3 py-1">Statistics</Tabs.Trigger>
+					<Tabs.Trigger value="table" class="text-[10px] px-3 py-1">Raw Data</Tabs.Trigger>
 					{#if isFsio}
 						<!-- 귀속 집계는 cross-layer 메타가 있는 fsio 에서만 답이 나온다. -->
 						<Tabs.Trigger value="attribution" class="text-[10px] px-3 py-1">Attribution</Tabs.Trigger>
@@ -728,7 +736,7 @@
 					{:else if rawResult && rawResult.events.length > 0}
 						<div class="flex items-center gap-2 mb-1">
 							<div class="text-[9px] text-muted-foreground">
-								{filteredEvents().length.toLocaleString()} events
+								{filteredEvents.length.toLocaleString()} events
 								{#if rawResult.isSampled} (sampled from {rawResult.totalEvents.toLocaleString()}){/if}
 							</div>
 							<!-- Action tabs: Send / Complete -->
@@ -1052,6 +1060,36 @@
 						<div class="text-center text-xs text-muted-foreground py-8">
 							Raw Data 차트에서 드래그로 영역을 선택하거나, 필터를 설정 후 "조회" 버튼을 눌러주세요.
 						</div>
+					{/if}
+				</Tabs.Content>
+
+				<!-- Raw Data Tab — 행 단위 표 -->
+				<Tabs.Content value="table" class="pt-2">
+					{#if loadingRaw}
+						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
+					{:else if rawResult && rawResult.events.length > 0}
+						<div class="flex items-center gap-2 mb-1">
+							<div class="text-[9px] text-muted-foreground">
+								{tableRows.length.toLocaleString()} 행
+								{#if rawResult.isSampled}
+									· 전체 {rawResult.totalEvents.toLocaleString()} 중 샘플
+								{/if}
+								{#if activeTraceType}· {activeTraceType}{/if}
+							</div>
+							<div class="text-[9px] text-muted-foreground ml-auto">
+								셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사
+							</div>
+						</div>
+						<DataTable
+							data={tableRows}
+							columns={columnsFor(activeTraceType ?? 'ufs')}
+							enableCellCopy={true}
+							showPagination={false}
+							compact
+							scrollHeight="calc(100vh - 260px)"
+						/>
+					{:else}
+						<div class="text-center text-xs text-muted-foreground py-8">데이터 없음</div>
 					{/if}
 				</Tabs.Content>
 

@@ -548,6 +548,42 @@ message TraceEvent {
   uint32 size = 9;
   bool continuous = 10;
   string action = 11;          // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+
+  // ── 아래는 fsio_* (bpftrace) 전용. ftrace 산출물에서는 전부 비어 있다. ──
+  //
+  // Raw Data 표가 "이 IO 를 누가/어느 파일에" 를 행 단위로 보여주려면 필요하다.
+  // 39개 is_* 불리언은 싣지 않는다 — io_flags 원본 u64 하나면 클라이언트가 같은
+  // 비트 정의로 풀 수 있고, 그쪽이 전송량도 작고 비트 추가에도 안 깨진다.
+  bool  aligned      = 12;
+  uint64 line_number = 13;  // 원본 로그 라인 번호 (1-based)
+  uint32 pid         = 14;
+  uint32 tid         = 15;
+  string comm        = 16;
+  string syscall     = 17;  // "vfs_write" / "-" (VFS 안 거침)
+  string fs          = 18;  // "ext4" / "f2fs"
+  uint64 ino         = 19;
+  string name        = 20;  // 풀패스 / "ino:N" / "(라벨)" — 뒤 둘은 파일명 부재의 표현
+  uint64 io_flags    = 21;  // 39비트 마스크. 클라이언트가 이름으로 푼다
+
+  // fsio_ufs 전용
+  uint32 tag     = 22;
+  uint32 opcode  = 23;  // SCSI opcode (parquet 은 u8)
+  uint32 lun     = 24;  // 255 = 미상(LunUnknown). LU 마다 LBA 주소공간 독립
+  uint32 groupid = 25;
+  int32  hwqid   = 26;
+  // UPIU 헤더 — send_req 에만 붙는다(응답 UPIU 는 stash 안 함). 없으면 미설정.
+  optional uint32 txn        = 27;
+  optional uint32 upiu_flags = 28;
+  optional uint32 upiu_func  = 29;
+  string upiu_attr           = 30;  // "Simple"/"Ordered"/"HoQ"/"ACA"
+  optional uint32 upiu_cp    = 31;
+
+  // fsio_block 전용
+  uint32 devmajor = 32;
+  uint32 devminor = 33;
+  string rwbs     = 34;  // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
+  string flags    = 35;  // ftrace trace flag string. bpftrace 엔 없어 빈 값
+  uint32 extra    = 36;  // bpftrace 엔 없어 0
 }
 
 // ==================== Upload to MinIO ====================

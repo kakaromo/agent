@@ -4008,18 +4008,51 @@ func (x *GetTraceRawDataResponse) GetEvents() []*TraceEvent {
 }
 
 type TraceEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Time          float64                `protobuf:"fixed64,1,opt,name=time,proto3" json:"time,omitempty"`
-	Lba           uint64                 `protobuf:"varint,2,opt,name=lba,proto3" json:"lba,omitempty"`
-	Qd            uint32                 `protobuf:"varint,3,opt,name=qd,proto3" json:"qd,omitempty"`
-	Cpu           uint32                 `protobuf:"varint,4,opt,name=cpu,proto3" json:"cpu,omitempty"`
-	Dtoc          float64                `protobuf:"fixed64,5,opt,name=dtoc,proto3" json:"dtoc,omitempty"`
-	Ctod          float64                `protobuf:"fixed64,6,opt,name=ctod,proto3" json:"ctod,omitempty"`
-	Ctoc          float64                `protobuf:"fixed64,7,opt,name=ctoc,proto3" json:"ctoc,omitempty"`
-	Cmd           string                 `protobuf:"bytes,8,opt,name=cmd,proto3" json:"cmd,omitempty"`
-	Size          uint32                 `protobuf:"varint,9,opt,name=size,proto3" json:"size,omitempty"`
-	Continuous    bool                   `protobuf:"varint,10,opt,name=continuous,proto3" json:"continuous,omitempty"`
-	Action        string                 `protobuf:"bytes,11,opt,name=action,proto3" json:"action,omitempty"` // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Time       float64                `protobuf:"fixed64,1,opt,name=time,proto3" json:"time,omitempty"`
+	Lba        uint64                 `protobuf:"varint,2,opt,name=lba,proto3" json:"lba,omitempty"`
+	Qd         uint32                 `protobuf:"varint,3,opt,name=qd,proto3" json:"qd,omitempty"`
+	Cpu        uint32                 `protobuf:"varint,4,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	Dtoc       float64                `protobuf:"fixed64,5,opt,name=dtoc,proto3" json:"dtoc,omitempty"`
+	Ctod       float64                `protobuf:"fixed64,6,opt,name=ctod,proto3" json:"ctod,omitempty"`
+	Ctoc       float64                `protobuf:"fixed64,7,opt,name=ctoc,proto3" json:"ctoc,omitempty"`
+	Cmd        string                 `protobuf:"bytes,8,opt,name=cmd,proto3" json:"cmd,omitempty"`
+	Size       uint32                 `protobuf:"varint,9,opt,name=size,proto3" json:"size,omitempty"`
+	Continuous bool                   `protobuf:"varint,10,opt,name=continuous,proto3" json:"continuous,omitempty"`
+	Action     string                 `protobuf:"bytes,11,opt,name=action,proto3" json:"action,omitempty"` // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+	// ── 아래는 fsio_* (bpftrace) 전용. ftrace 산출물에서는 전부 비어 있다. ──
+	//
+	// Raw Data 표가 "이 IO 를 누가/어느 파일에" 를 행 단위로 보여주려면 필요하다.
+	// 39개 is_* 불리언은 싣지 않는다 — io_flags 원본 u64 하나면 클라이언트가 같은
+	// 비트 정의로 풀 수 있고, 그쪽이 전송량도 작고 비트 추가에도 안 깨진다.
+	Aligned    bool   `protobuf:"varint,12,opt,name=aligned,proto3" json:"aligned,omitempty"`
+	LineNumber uint64 `protobuf:"varint,13,opt,name=line_number,json=lineNumber,proto3" json:"line_number,omitempty"` // 원본 로그 라인 번호 (1-based)
+	Pid        uint32 `protobuf:"varint,14,opt,name=pid,proto3" json:"pid,omitempty"`
+	Tid        uint32 `protobuf:"varint,15,opt,name=tid,proto3" json:"tid,omitempty"`
+	Comm       string `protobuf:"bytes,16,opt,name=comm,proto3" json:"comm,omitempty"`
+	Syscall    string `protobuf:"bytes,17,opt,name=syscall,proto3" json:"syscall,omitempty"` // "vfs_write" / "-" (VFS 안 거침)
+	Fs         string `protobuf:"bytes,18,opt,name=fs,proto3" json:"fs,omitempty"`           // "ext4" / "f2fs"
+	Ino        uint64 `protobuf:"varint,19,opt,name=ino,proto3" json:"ino,omitempty"`
+	Name       string `protobuf:"bytes,20,opt,name=name,proto3" json:"name,omitempty"`                       // 풀패스 / "ino:N" / "(라벨)" — 뒤 둘은 파일명 부재의 표현
+	IoFlags    uint64 `protobuf:"varint,21,opt,name=io_flags,json=ioFlags,proto3" json:"io_flags,omitempty"` // 39비트 마스크. 클라이언트가 이름으로 푼다
+	// fsio_ufs 전용
+	Tag     uint32 `protobuf:"varint,22,opt,name=tag,proto3" json:"tag,omitempty"`
+	Opcode  uint32 `protobuf:"varint,23,opt,name=opcode,proto3" json:"opcode,omitempty"` // SCSI opcode (parquet 은 u8)
+	Lun     uint32 `protobuf:"varint,24,opt,name=lun,proto3" json:"lun,omitempty"`       // 255 = 미상(LunUnknown). LU 마다 LBA 주소공간 독립
+	Groupid uint32 `protobuf:"varint,25,opt,name=groupid,proto3" json:"groupid,omitempty"`
+	Hwqid   int32  `protobuf:"varint,26,opt,name=hwqid,proto3" json:"hwqid,omitempty"`
+	// UPIU 헤더 — send_req 에만 붙는다(응답 UPIU 는 stash 안 함). 없으면 미설정.
+	Txn       *uint32 `protobuf:"varint,27,opt,name=txn,proto3,oneof" json:"txn,omitempty"`
+	UpiuFlags *uint32 `protobuf:"varint,28,opt,name=upiu_flags,json=upiuFlags,proto3,oneof" json:"upiu_flags,omitempty"`
+	UpiuFunc  *uint32 `protobuf:"varint,29,opt,name=upiu_func,json=upiuFunc,proto3,oneof" json:"upiu_func,omitempty"`
+	UpiuAttr  string  `protobuf:"bytes,30,opt,name=upiu_attr,json=upiuAttr,proto3" json:"upiu_attr,omitempty"` // "Simple"/"Ordered"/"HoQ"/"ACA"
+	UpiuCp    *uint32 `protobuf:"varint,31,opt,name=upiu_cp,json=upiuCp,proto3,oneof" json:"upiu_cp,omitempty"`
+	// fsio_block 전용
+	Devmajor      uint32 `protobuf:"varint,32,opt,name=devmajor,proto3" json:"devmajor,omitempty"`
+	Devminor      uint32 `protobuf:"varint,33,opt,name=devminor,proto3" json:"devminor,omitempty"`
+	Rwbs          string `protobuf:"bytes,34,opt,name=rwbs,proto3" json:"rwbs,omitempty"`    // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
+	Flags         string `protobuf:"bytes,35,opt,name=flags,proto3" json:"flags,omitempty"`  // ftrace trace flag string. bpftrace 엔 없어 빈 값
+	Extra         uint32 `protobuf:"varint,36,opt,name=extra,proto3" json:"extra,omitempty"` // bpftrace 엔 없어 0
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4129,6 +4162,181 @@ func (x *TraceEvent) GetAction() string {
 		return x.Action
 	}
 	return ""
+}
+
+func (x *TraceEvent) GetAligned() bool {
+	if x != nil {
+		return x.Aligned
+	}
+	return false
+}
+
+func (x *TraceEvent) GetLineNumber() uint64 {
+	if x != nil {
+		return x.LineNumber
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetPid() uint32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetTid() uint32 {
+	if x != nil {
+		return x.Tid
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetComm() string {
+	if x != nil {
+		return x.Comm
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetSyscall() string {
+	if x != nil {
+		return x.Syscall
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetFs() string {
+	if x != nil {
+		return x.Fs
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetIno() uint64 {
+	if x != nil {
+		return x.Ino
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetIoFlags() uint64 {
+	if x != nil {
+		return x.IoFlags
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetTag() uint32 {
+	if x != nil {
+		return x.Tag
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetOpcode() uint32 {
+	if x != nil {
+		return x.Opcode
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetLun() uint32 {
+	if x != nil {
+		return x.Lun
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetGroupid() uint32 {
+	if x != nil {
+		return x.Groupid
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetHwqid() int32 {
+	if x != nil {
+		return x.Hwqid
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetTxn() uint32 {
+	if x != nil && x.Txn != nil {
+		return *x.Txn
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetUpiuFlags() uint32 {
+	if x != nil && x.UpiuFlags != nil {
+		return *x.UpiuFlags
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetUpiuFunc() uint32 {
+	if x != nil && x.UpiuFunc != nil {
+		return *x.UpiuFunc
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetUpiuAttr() string {
+	if x != nil {
+		return x.UpiuAttr
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetUpiuCp() uint32 {
+	if x != nil && x.UpiuCp != nil {
+		return *x.UpiuCp
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetDevmajor() uint32 {
+	if x != nil {
+		return x.Devmajor
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetDevminor() uint32 {
+	if x != nil {
+		return x.Devminor
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetRwbs() string {
+	if x != nil {
+		return x.Rwbs
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetFlags() string {
+	if x != nil {
+		return x.Flags
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetExtra() uint32 {
+	if x != nil {
+		return x.Extra
+	}
+	return 0
 }
 
 type UploadTraceRequest struct {
@@ -7894,7 +8102,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x0esampled_events\x18\x03 \x01(\x03R\rsampledEvents\x12\x1d\n" +
 	"\n" +
 	"is_sampled\x18\x04 \x01(\bR\tisSampled\x12)\n" +
-	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\"\xee\x01\n" +
+	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\"\xf9\x06\n" +
 	"\n" +
 	"TraceEvent\x12\x12\n" +
 	"\x04time\x18\x01 \x01(\x01R\x04time\x12\x10\n" +
@@ -7910,7 +8118,40 @@ const file_proto_agent_proto_rawDesc = "" +
 	"continuous\x18\n" +
 	" \x01(\bR\n" +
 	"continuous\x12\x16\n" +
-	"\x06action\x18\v \x01(\tR\x06action\"N\n" +
+	"\x06action\x18\v \x01(\tR\x06action\x12\x18\n" +
+	"\aaligned\x18\f \x01(\bR\aaligned\x12\x1f\n" +
+	"\vline_number\x18\r \x01(\x04R\n" +
+	"lineNumber\x12\x10\n" +
+	"\x03pid\x18\x0e \x01(\rR\x03pid\x12\x10\n" +
+	"\x03tid\x18\x0f \x01(\rR\x03tid\x12\x12\n" +
+	"\x04comm\x18\x10 \x01(\tR\x04comm\x12\x18\n" +
+	"\asyscall\x18\x11 \x01(\tR\asyscall\x12\x0e\n" +
+	"\x02fs\x18\x12 \x01(\tR\x02fs\x12\x10\n" +
+	"\x03ino\x18\x13 \x01(\x04R\x03ino\x12\x12\n" +
+	"\x04name\x18\x14 \x01(\tR\x04name\x12\x19\n" +
+	"\bio_flags\x18\x15 \x01(\x04R\aioFlags\x12\x10\n" +
+	"\x03tag\x18\x16 \x01(\rR\x03tag\x12\x16\n" +
+	"\x06opcode\x18\x17 \x01(\rR\x06opcode\x12\x10\n" +
+	"\x03lun\x18\x18 \x01(\rR\x03lun\x12\x18\n" +
+	"\agroupid\x18\x19 \x01(\rR\agroupid\x12\x14\n" +
+	"\x05hwqid\x18\x1a \x01(\x05R\x05hwqid\x12\x15\n" +
+	"\x03txn\x18\x1b \x01(\rH\x00R\x03txn\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"upiu_flags\x18\x1c \x01(\rH\x01R\tupiuFlags\x88\x01\x01\x12 \n" +
+	"\tupiu_func\x18\x1d \x01(\rH\x02R\bupiuFunc\x88\x01\x01\x12\x1b\n" +
+	"\tupiu_attr\x18\x1e \x01(\tR\bupiuAttr\x12\x1c\n" +
+	"\aupiu_cp\x18\x1f \x01(\rH\x03R\x06upiuCp\x88\x01\x01\x12\x1a\n" +
+	"\bdevmajor\x18  \x01(\rR\bdevmajor\x12\x1a\n" +
+	"\bdevminor\x18! \x01(\rR\bdevminor\x12\x12\n" +
+	"\x04rwbs\x18\" \x01(\tR\x04rwbs\x12\x14\n" +
+	"\x05flags\x18# \x01(\tR\x05flags\x12\x14\n" +
+	"\x05extra\x18$ \x01(\rR\x05extraB\x06\n" +
+	"\x04_txnB\r\n" +
+	"\v_upiu_flagsB\f\n" +
+	"\n" +
+	"_upiu_funcB\n" +
+	"\n" +
+	"\b_upiu_cp\"N\n" +
 	"\x12UploadTraceRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12\x1f\n" +
 	"\vremote_path\x18\x02 \x01(\tR\n" +
@@ -8554,6 +8795,7 @@ func file_proto_agent_proto_init() {
 		return
 	}
 	file_proto_agent_proto_msgTypes[45].OneofWrappers = []any{}
+	file_proto_agent_proto_msgTypes[50].OneofWrappers = []any{}
 	file_proto_agent_proto_msgTypes[58].OneofWrappers = []any{}
 	file_proto_agent_proto_msgTypes[99].OneofWrappers = []any{
 		(*ShellClientMsg_Start)(nil),

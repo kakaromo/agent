@@ -175,3 +175,77 @@ func TestAttributionFlowPrioritizesBackgroundWork(t *testing.T) {
 		t.Errorf("flow = %q, want GC (백그라운드 작업이 DATA 를 가려야 한다)", got)
 	}
 }
+
+// Raw Data 표에 fsio cross-layer 컬럼이 실려야 한다.
+// 이게 없으면 표가 기존 11컬럼과 똑같아져 Attribution 탭과 중복만 된다.
+func TestRawDataCarriesFsioColumns(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Events) == 0 {
+		t.Fatal("이벤트 없음")
+	}
+	// 픽스처의 send_req 행 — cross-layer 가 채워져 있어야 한다.
+	var send *pb.TraceEvent
+	for _, e := range resp.Events {
+		if e.GetAction() == "send_req" && e.GetComm() != "" {
+			send = e
+			break
+		}
+	}
+	if send == nil {
+		t.Fatalf("cross-layer 가 채워진 send 행이 없다")
+	}
+	if send.GetComm() != "mysqld" || send.GetSyscall() != "vfs_write" || send.GetFs() != "ext4" {
+		t.Errorf("cross-layer: comm=%q syscall=%q fs=%q", send.GetComm(), send.GetSyscall(), send.GetFs())
+	}
+	if send.GetName() != "/data/ibdata1" {
+		t.Errorf("name = %q", send.GetName())
+	}
+	if send.GetLun() != 0 || send.GetTag() != 7 {
+		t.Errorf("lun=%d tag=%d", send.GetLun(), send.GetTag())
+	}
+	if send.GetLineNumber() == 0 {
+		t.Error("line_number 가 0 — 원본 로그 라인 추적이 안 된다")
+	}
+	// UPIU 헤더는 send_req 에만 붙는다.
+	if send.Txn == nil || send.GetTxn() != 0x01 {
+		t.Errorf("txn = %v, want 0x01", send.Txn)
+	}
+	// io_flags 원본이 살아 있어야 클라이언트가 39비트를 푼다.
+	if send.GetIoFlags() == 0 {
+		t.Error("io_flags 가 0")
+	}
+}
+
+// ftrace 산출물은 확장 컬럼이 없다 — 기존 11컬럼 경로가 그대로 동작해야 한다.
+func TestRawDataFtracePathUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "trace.log")
+	data := "  kworker/0:1H-123   [000] ....  1000.000000: ufshcd_command: send_req: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n" +
+		"  kworker/0:1H-123   [000] ....  1000.001000: ufshcd_command: complete_rsp: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n"
+	if err := os.WriteFile(logFile, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "ufs", nil); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Events) != 2 {
+		t.Fatalf("events = %d, want 2", len(resp.Events))
+	}
+	// 기본 컬럼은 살아 있고 fsio 확장은 비어 있어야 한다.
+	e := resp.Events[0]
+	if e.GetCmd() == "" || e.GetTime() == 0 {
+		t.Errorf("기본 컬럼이 비었다: cmd=%q time=%v", e.GetCmd(), e.GetTime())
+	}
+	if e.GetComm() != "" || e.GetIoFlags() != 0 || e.GetLineNumber() != 0 {
+		t.Errorf("ftrace 에 fsio 확장이 채워졌다: comm=%q io_flags=%d line=%d",
+			e.GetComm(), e.GetIoFlags(), e.GetLineNumber())
+	}
+}

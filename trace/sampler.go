@@ -3,6 +3,7 @@ package trace
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	pb "agent/pb"
 
@@ -22,6 +23,9 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	glob := buildGlobList(infos)
 	cmdCol := detectCmdColumn(db, glob)
 	lbaCol := detectLbaColumn(db, glob)
+	// fsio 산출물이면 cross-layer 컬럼을 함께 싣는다 — Raw Data 표가 "이 IO 를 누가/
+	// 어느 파일에" 를 행 단위로 보여주기 위해 필요하다. ftrace 는 기존 11컬럼 그대로.
+	fsio := detectFsioSchema(db, glob)
 	where := buildFilterWhere(filter, lbaCol, cmdCol)
 
 	// Count total events
@@ -41,7 +45,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 
 	if total <= maxEvents {
 		// No sampling needed
-		events, err := queryAllEvents(db, glob, where, cmdCol, lbaCol)
+		events, err := queryAllEvents(db, glob, where, cmdCol, lbaCol, fsio)
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +56,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	}
 
 	// Sampling required
-	events, err := querySampledEvents(db, glob, where, cmdCol, lbaCol, total)
+	events, err := querySampledEvents(db, glob, where, cmdCol, lbaCol, total, fsio)
 	if err != nil {
 		return nil, err
 	}
@@ -62,13 +66,17 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	return resp, nil
 }
 
-func queryAllEvents(db *sql.DB, glob, where, cmdCol, lbaCol string) ([]*pb.TraceEvent, error) {
-	q := fmt.Sprintf(`SELECT time, %s, qd, cpu, dtoc, ctod, ctoc, %s, size, continuous, action
-		FROM read_parquet(%s) %s ORDER BY time`, lbaCol, cmdCol, glob, where)
+func queryAllEvents(db *sql.DB, glob, where, cmdCol, lbaCol string, fsio fsioSchema) ([]*pb.TraceEvent, error) {
+	q := fmt.Sprintf(`SELECT time, %s, qd, cpu, dtoc, ctod, ctoc, %s, size, continuous, action%s
+		FROM read_parquet(%s) %s ORDER BY time`,
+		lbaCol, cmdCol, fsioExtraSelect(fsio), glob, where)
+	if fsio.any() {
+		return scanEventsFsio(db, q, fsio)
+	}
 	return scanEvents(db, q)
 }
 
-func querySampledEvents(db *sql.DB, glob, where, cmdCol, lbaCol string, total int64) ([]*pb.TraceEvent, error) {
+func querySampledEvents(db *sql.DB, glob, where, cmdCol, lbaCol string, total int64, fsio fsioSchema) ([]*pb.TraceEvent, error) {
 	// Strategy:
 	// 1. Divide time range into buckets
 	// 2. From each bucket, pick min/max rows for lba, qd, dtoc, ctod, ctoc
@@ -122,7 +130,7 @@ combined AS (
   UNION
   SELECT rn FROM sampled
 )
-SELECT b.time, b.%s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, b.%s, b.size, b.continuous, b.action
+SELECT b.time, b.%s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, b.%s, b.size, b.continuous, b.action%s
 FROM base b
 JOIN combined c ON b.rn = c.rn
 ORDER BY b.time
@@ -131,10 +139,151 @@ LIMIT %d`,
 		glob, filterCond,
 		lbaCol, lbaCol, lbaCol, lbaCol,
 		int(total)/maxEvents+1, // modulo for uniform sampling
-		lbaCol, cmdCol,
+		lbaCol, cmdCol, fsioExtraSelectPrefixed(fsio, "b."),
 		maxEvents)
 
+	if fsio.any() {
+		return scanEventsFsio(db, q, fsio)
+	}
 	return scanEvents(db, q)
+}
+
+// fsioExtraSelectPrefixed — 샘플링 쿼리처럼 테이블 별칭이 필요한 곳용.
+func fsioExtraSelectPrefixed(f fsioSchema, prefix string) string {
+	cols := fsioExtraColsFor(f)
+	if len(cols) == 0 {
+		return ""
+	}
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = prefix + c
+	}
+	return ", " + strings.Join(out, ", ")
+}
+
+// fsioExtraCols — fsio 산출물에만 있는 확장 컬럼. Raw Data 표가 "이 IO 를 누가/
+// 어느 파일에" 를 행 단위로 보여주기 위해 필요하다.
+//
+// 39개 is_* 불리언은 싣지 않는다 — io_flags 원본 하나면 클라이언트가 같은 비트
+// 정의로 풀 수 있고, 전송량도 작고 비트가 늘어도 안 깨진다.
+//
+// 순서는 scanEventsFsio 의 Scan 순서와 **정확히 일치해야 한다** (positional scan).
+var fsioUfsExtraCols = []string{
+	"aligned", "line_number", "pid", "tid", "comm", "syscall", "fs", "ino", "name", "io_flags",
+	"tag", "opcode", "lun", "groupid", "hwqid",
+	"txn", "upiu_flags", "upiu_func", "upiu_attr", "upiu_cp",
+}
+
+var fsioBlockExtraCols = []string{
+	"aligned", "line_number", "pid", "tid", "comm", "syscall", "fs", "ino", "name", "io_flags",
+	"devmajor", "devminor", "rwbs", "flags", "extra",
+}
+
+// fsioExtraSelect — 확장 컬럼의 SELECT 절 조각. fsio 가 아니면 빈 문자열.
+func fsioExtraSelect(f fsioSchema) string {
+	cols := fsioExtraColsFor(f)
+	if len(cols) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(cols, ", ")
+}
+
+func fsioExtraColsFor(f fsioSchema) []string {
+	switch {
+	case f.isUFS:
+		return fsioUfsExtraCols
+	case f.isBlock:
+		return fsioBlockExtraCols
+	default:
+		return nil
+	}
+}
+
+// scanEventsFsio — 기본 11컬럼 + fsio 확장 컬럼을 읽는다.
+//
+// nullable 컬럼(UPIU 헤더)은 sql.Null* 로 받아 **값이 없으면 proto 필드를 안 채운다**.
+// 0 으로 채우면 "txn=0x00 인 요청" 과 "UPIU 를 못 얻은 행" 이 구분되지 않는다.
+func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error) {
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []*pb.TraceEvent
+	for rows.Next() {
+		e := &pb.TraceEvent{}
+		var action, comm, syscall, fsName, name sql.NullString
+		var aligned sql.NullBool
+		var lineNo, ino, ioFlags sql.NullInt64
+
+		dest := []any{&e.Time, &e.Lba, &e.Qd, &e.Cpu, &e.Dtoc, &e.Ctod, &e.Ctoc,
+			&e.Cmd, &e.Size, &e.Continuous, &action,
+			&aligned, &lineNo, &e.Pid, &e.Tid, &comm, &syscall, &fsName, &ino, &name, &ioFlags}
+
+		var tag, opcode, lun, groupid sql.NullInt64
+		var hwqid sql.NullInt64
+		var txn, upiuFlags, upiuFunc, upiuCp sql.NullInt64
+		var upiuAttr sql.NullString
+		var devmajor, devminor, extra sql.NullInt64
+		var rwbs, flags sql.NullString
+
+		if f.isUFS {
+			dest = append(dest, &tag, &opcode, &lun, &groupid, &hwqid,
+				&txn, &upiuFlags, &upiuFunc, &upiuAttr, &upiuCp)
+		} else if f.isBlock {
+			dest = append(dest, &devmajor, &devminor, &rwbs, &flags, &extra)
+		}
+
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("scan fsio event: %w", err)
+		}
+
+		e.Action = action.String
+		e.Aligned = aligned.Bool
+		e.LineNumber = uint64(lineNo.Int64)
+		e.Comm = comm.String
+		e.Syscall = syscall.String
+		e.Fs = fsName.String
+		e.Ino = uint64(ino.Int64)
+		e.Name = name.String
+		e.IoFlags = uint64(ioFlags.Int64)
+
+		if f.isUFS {
+			e.Tag = uint32(tag.Int64)
+			e.Opcode = uint32(opcode.Int64)
+			e.Lun = uint32(lun.Int64)
+			e.Groupid = uint32(groupid.Int64)
+			e.Hwqid = int32(hwqid.Int64)
+			e.UpiuAttr = upiuAttr.String
+			// UPIU 헤더는 없으면 안 채운다 (0 과 "없음" 을 구분).
+			if txn.Valid {
+				v := uint32(txn.Int64)
+				e.Txn = &v
+			}
+			if upiuFlags.Valid {
+				v := uint32(upiuFlags.Int64)
+				e.UpiuFlags = &v
+			}
+			if upiuFunc.Valid {
+				v := uint32(upiuFunc.Int64)
+				e.UpiuFunc = &v
+			}
+			if upiuCp.Valid {
+				v := uint32(upiuCp.Int64)
+				e.UpiuCp = &v
+			}
+		} else if f.isBlock {
+			e.Devmajor = uint32(devmajor.Int64)
+			e.Devminor = uint32(devminor.Int64)
+			e.Rwbs = rwbs.String
+			e.Flags = flags.String
+			e.Extra = uint32(extra.Int64)
+		}
+
+		events = append(events, e)
+	}
+	return events, nil
 }
 
 func scanEvents(db *sql.DB, q string) ([]*pb.TraceEvent, error) {

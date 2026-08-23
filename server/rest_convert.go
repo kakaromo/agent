@@ -2,6 +2,7 @@ package server
 
 import (
 	pb "agent/pb"
+	"strconv"
 )
 
 // portal AgentController 와 동일한 enum 문자열 변환.
@@ -390,8 +391,13 @@ func attributionToMap(r *pb.GetIoAttributionResponse) map[string]any {
 	}
 }
 
+// traceEventToMap — raw 이벤트 한 행.
+//
+// fsio 확장 필드는 **값이 있을 때만** 넣는다. ftrace 산출물에서 전부 빈 값으로 채우면
+// 표에 의미 없는 0/빈칸 컬럼이 20개 생기고, 클라이언트가 "이 trace_type 에 이 컬럼이
+// 있나" 를 값으로 판단할 수 없게 된다.
 func traceEventToMap(e *pb.TraceEvent) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"time":       e.GetTime(),
 		"lba":        e.GetLba(),
 		"qd":         e.GetQd(),
@@ -404,6 +410,55 @@ func traceEventToMap(e *pb.TraceEvent) map[string]any {
 		"continuous": e.GetContinuous(),
 		"action":     e.GetAction(),
 	}
+	// line_number 는 fsio 산출물에만 채워진다 — 이걸 fsio 여부의 신호로 쓴다.
+	if e.GetLineNumber() == 0 && e.GetComm() == "" && e.GetIoFlags() == 0 {
+		return m
+	}
+	m["aligned"] = e.GetAligned()
+	m["line_number"] = e.GetLineNumber()
+	m["pid"] = e.GetPid()
+	m["tid"] = e.GetTid()
+	m["comm"] = e.GetComm()
+	m["process"] = e.GetComm() // portal 표의 process 컬럼 = comm 별칭
+	m["syscall"] = e.GetSyscall()
+	m["fs"] = e.GetFs()
+	m["ino"] = e.GetIno()
+	m["name"] = e.GetName()
+	// io_flags 는 u64 라 JSON number 로 보내면 2^53 넘는 f2fs 비트가 깨진다.
+	// 문자열로 보내고 클라이언트가 BigInt 로 푼다.
+	m["io_flags"] = strconv.FormatUint(e.GetIoFlags(), 10)
+
+	if e.GetRwbs() != "" || e.GetDevmajor() != 0 || e.GetDevminor() != 0 {
+		// fsio_block
+		m["devmajor"] = e.GetDevmajor()
+		m["devminor"] = e.GetDevminor()
+		m["rwbs"] = e.GetRwbs()
+		m["flags"] = e.GetFlags()
+		m["extra"] = e.GetExtra()
+		m["sector"] = e.GetLba() // block 은 lba 자리에 sector 가 온다
+	} else {
+		// fsio_ufs
+		m["tag"] = e.GetTag()
+		m["opcode"] = e.GetOpcode()
+		m["lun"] = e.GetLun()
+		m["groupid"] = e.GetGroupid()
+		m["hwqid"] = e.GetHwqid()
+		m["upiu_attr"] = e.GetUpiuAttr()
+		// UPIU 헤더는 없으면 키를 빼 JSON null 로 — 0 과 "없음" 을 구분한다.
+		if e.Txn != nil {
+			m["txn"] = e.GetTxn()
+		}
+		if e.UpiuFlags != nil {
+			m["upiu_flags"] = e.GetUpiuFlags()
+		}
+		if e.UpiuFunc != nil {
+			m["upiu_func"] = e.GetUpiuFunc()
+		}
+		if e.UpiuCp != nil {
+			m["upiu_cp"] = e.GetUpiuCp()
+		}
+	}
+	return m
 }
 
 // ---------- TraceFilter body → proto ----------
