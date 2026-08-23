@@ -2551,23 +2551,50 @@ func (x *StopTraceResponse) GetMessage() string {
 }
 
 type TraceFilter struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StartTime     float64                `protobuf:"fixed64,1,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
-	EndTime       float64                `protobuf:"fixed64,2,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
-	StartLba      uint64                 `protobuf:"varint,3,opt,name=start_lba,json=startLba,proto3" json:"start_lba,omitempty"`
-	EndLba        uint64                 `protobuf:"varint,4,opt,name=end_lba,json=endLba,proto3" json:"end_lba,omitempty"`
-	MinDtoc       float64                `protobuf:"fixed64,5,opt,name=min_dtoc,json=minDtoc,proto3" json:"min_dtoc,omitempty"`
-	MaxDtoc       float64                `protobuf:"fixed64,6,opt,name=max_dtoc,json=maxDtoc,proto3" json:"max_dtoc,omitempty"`
-	MinCtoc       float64                `protobuf:"fixed64,7,opt,name=min_ctoc,json=minCtoc,proto3" json:"min_ctoc,omitempty"`
-	MaxCtoc       float64                `protobuf:"fixed64,8,opt,name=max_ctoc,json=maxCtoc,proto3" json:"max_ctoc,omitempty"`
-	MinCtod       float64                `protobuf:"fixed64,9,opt,name=min_ctod,json=minCtod,proto3" json:"min_ctod,omitempty"`
-	MaxCtod       float64                `protobuf:"fixed64,10,opt,name=max_ctod,json=maxCtod,proto3" json:"max_ctod,omitempty"`
-	MinQd         uint32                 `protobuf:"varint,11,opt,name=min_qd,json=minQd,proto3" json:"min_qd,omitempty"`
-	MaxQd         uint32                 `protobuf:"varint,12,opt,name=max_qd,json=maxQd,proto3" json:"max_qd,omitempty"`
-	CpuList       []uint32               `protobuf:"varint,13,rep,packed,name=cpu_list,json=cpuList,proto3" json:"cpu_list,omitempty"`
-	CmdList       []string               `protobuf:"bytes,14,rep,name=cmd_list,json=cmdList,proto3" json:"cmd_list,omitempty"`
-	SizeList      []uint32               `protobuf:"varint,15,rep,packed,name=size_list,json=sizeList,proto3" json:"size_list,omitempty"`
-	ActionList    []string               `protobuf:"bytes,16,rep,name=action_list,json=actionList,proto3" json:"action_list,omitempty"` // "send_req", "complete_rsp", "block_rq_issue", "block_rq_complete"
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	StartTime  float64                `protobuf:"fixed64,1,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime    float64                `protobuf:"fixed64,2,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	StartLba   uint64                 `protobuf:"varint,3,opt,name=start_lba,json=startLba,proto3" json:"start_lba,omitempty"`
+	EndLba     uint64                 `protobuf:"varint,4,opt,name=end_lba,json=endLba,proto3" json:"end_lba,omitempty"`
+	MinDtoc    float64                `protobuf:"fixed64,5,opt,name=min_dtoc,json=minDtoc,proto3" json:"min_dtoc,omitempty"`
+	MaxDtoc    float64                `protobuf:"fixed64,6,opt,name=max_dtoc,json=maxDtoc,proto3" json:"max_dtoc,omitempty"`
+	MinCtoc    float64                `protobuf:"fixed64,7,opt,name=min_ctoc,json=minCtoc,proto3" json:"min_ctoc,omitempty"`
+	MaxCtoc    float64                `protobuf:"fixed64,8,opt,name=max_ctoc,json=maxCtoc,proto3" json:"max_ctoc,omitempty"`
+	MinCtod    float64                `protobuf:"fixed64,9,opt,name=min_ctod,json=minCtod,proto3" json:"min_ctod,omitempty"`
+	MaxCtod    float64                `protobuf:"fixed64,10,opt,name=max_ctod,json=maxCtod,proto3" json:"max_ctod,omitempty"`
+	MinQd      uint32                 `protobuf:"varint,11,opt,name=min_qd,json=minQd,proto3" json:"min_qd,omitempty"`
+	MaxQd      uint32                 `protobuf:"varint,12,opt,name=max_qd,json=maxQd,proto3" json:"max_qd,omitempty"`
+	CpuList    []uint32               `protobuf:"varint,13,rep,packed,name=cpu_list,json=cpuList,proto3" json:"cpu_list,omitempty"`
+	CmdList    []string               `protobuf:"bytes,14,rep,name=cmd_list,json=cmdList,proto3" json:"cmd_list,omitempty"`
+	SizeList   []uint32               `protobuf:"varint,15,rep,packed,name=size_list,json=sizeList,proto3" json:"size_list,omitempty"`
+	ActionList []string               `protobuf:"bytes,16,rep,name=action_list,json=actionList,proto3" json:"action_list,omitempty"` // "send_req", "complete_rsp", "block_rq_issue", "block_rq_complete"
+	// ── fsio_* 전용 cross-layer 필터 ──────────────────────────────────────────
+	//
+	// "dd 프로세스가 낸 IO 만", "이 파일에 대한 IO 만" 처럼 bpftrace 가 실어 온 귀속
+	// 정보로 좁힌다. Attribution 행 클릭(드릴다운)이 이걸로 흘러 Charts/Statistics/
+	// Raw Data/Attribution 이 **같은 모수**를 보게 된다.
+	//
+	// 해당 컬럼이 없는 parquet(ftrace 계열)에서는 서버가 조건을 조용히 skip 한다 —
+	// 없는 컬럼을 참조하면 쿼리 자체가 깨지기 때문.
+	CommList    []string `protobuf:"bytes,17,rep,name=comm_list,json=commList,proto3" json:"comm_list,omitempty"`
+	PidList     []uint32 `protobuf:"varint,18,rep,packed,name=pid_list,json=pidList,proto3" json:"pid_list,omitempty"`
+	SyscallList []string `protobuf:"bytes,19,rep,name=syscall_list,json=syscallList,proto3" json:"syscall_list,omitempty"`
+	FsList      []string `protobuf:"bytes,20,rep,name=fs_list,json=fsList,proto3" json:"fs_list,omitempty"`
+	NameList    []string `protobuf:"bytes,21,rep,name=name_list,json=nameList,proto3" json:"name_list,omitempty"` // 정확 일치
+	InoList     []uint64 `protobuf:"varint,22,rep,packed,name=ino_list,json=inoList,proto3" json:"ino_list,omitempty"`
+	LunList     []uint32 `protobuf:"varint,23,rep,packed,name=lun_list,json=lunList,proto3" json:"lun_list,omitempty"` // fsio_ufs
+	DevList     []string `protobuf:"bytes,24,rep,name=dev_list,json=devList,proto3" json:"dev_list,omitempty"`         // fsio_block — "major:minor" (예 "8:0")
+	// 파일명 부분일치. name_list 는 목록에 있는 값만 고를 수 있어서, 상위 N 밖의
+	// 파일을 찾으려면 이쪽이 필요하다.
+	NameContains string `protobuf:"bytes,25,opt,name=name_contains,json=nameContains,proto3" json:"name_contains,omitempty"`
+	// io_flags 비트 마스크 필터.
+	//
+	// ⚠ **문자열이다.** u64 를 JSON number 로 실으면 2^53 넘는 f2fs 힌트 비트가
+	// 조용히 반올림된다 (raw 이벤트의 io_flags 를 문자열로 보내는 것과 같은 이유).
+	// 빈 문자열 = 미적용.
+	IoFlagsAny    string `protobuf:"bytes,26,opt,name=io_flags_any,json=ioFlagsAny,proto3" json:"io_flags_any,omitempty"`    // (io_flags & mask) != 0
+	IoFlagsAll    string `protobuf:"bytes,27,opt,name=io_flags_all,json=ioFlagsAll,proto3" json:"io_flags_all,omitempty"`    // (io_flags & mask) == mask
+	IoFlagsNone   string `protobuf:"bytes,28,opt,name=io_flags_none,json=ioFlagsNone,proto3" json:"io_flags_none,omitempty"` // (io_flags & mask) == 0
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2712,6 +2739,90 @@ func (x *TraceFilter) GetActionList() []string {
 		return x.ActionList
 	}
 	return nil
+}
+
+func (x *TraceFilter) GetCommList() []string {
+	if x != nil {
+		return x.CommList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetPidList() []uint32 {
+	if x != nil {
+		return x.PidList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetSyscallList() []string {
+	if x != nil {
+		return x.SyscallList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetFsList() []string {
+	if x != nil {
+		return x.FsList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetNameList() []string {
+	if x != nil {
+		return x.NameList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetInoList() []uint64 {
+	if x != nil {
+		return x.InoList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetLunList() []uint32 {
+	if x != nil {
+		return x.LunList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetDevList() []string {
+	if x != nil {
+		return x.DevList
+	}
+	return nil
+}
+
+func (x *TraceFilter) GetNameContains() string {
+	if x != nil {
+		return x.NameContains
+	}
+	return ""
+}
+
+func (x *TraceFilter) GetIoFlagsAny() string {
+	if x != nil {
+		return x.IoFlagsAny
+	}
+	return ""
+}
+
+func (x *TraceFilter) GetIoFlagsAll() string {
+	if x != nil {
+		return x.IoFlagsAll
+	}
+	return ""
+}
+
+func (x *TraceFilter) GetIoFlagsNone() string {
+	if x != nil {
+		return x.IoFlagsNone
+	}
+	return ""
 }
 
 type GetTraceResultRequest struct {
@@ -7958,7 +8069,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11StopTraceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xc1\x03\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xb0\x06\n" +
 	"\vTraceFilter\x12\x1d\n" +
 	"\n" +
 	"start_time\x18\x01 \x01(\x01R\tstartTime\x12\x19\n" +
@@ -7978,7 +8089,21 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\bcmd_list\x18\x0e \x03(\tR\acmdList\x12\x1b\n" +
 	"\tsize_list\x18\x0f \x03(\rR\bsizeList\x12\x1f\n" +
 	"\vaction_list\x18\x10 \x03(\tR\n" +
-	"actionList\"\x88\x01\n" +
+	"actionList\x12\x1b\n" +
+	"\tcomm_list\x18\x11 \x03(\tR\bcommList\x12\x19\n" +
+	"\bpid_list\x18\x12 \x03(\rR\apidList\x12!\n" +
+	"\fsyscall_list\x18\x13 \x03(\tR\vsyscallList\x12\x17\n" +
+	"\afs_list\x18\x14 \x03(\tR\x06fsList\x12\x1b\n" +
+	"\tname_list\x18\x15 \x03(\tR\bnameList\x12\x19\n" +
+	"\bino_list\x18\x16 \x03(\x04R\ainoList\x12\x19\n" +
+	"\blun_list\x18\x17 \x03(\rR\alunList\x12\x19\n" +
+	"\bdev_list\x18\x18 \x03(\tR\adevList\x12#\n" +
+	"\rname_contains\x18\x19 \x01(\tR\fnameContains\x12 \n" +
+	"\fio_flags_any\x18\x1a \x01(\tR\n" +
+	"ioFlagsAny\x12 \n" +
+	"\fio_flags_all\x18\x1b \x01(\tR\n" +
+	"ioFlagsAll\x12\"\n" +
+	"\rio_flags_none\x18\x1c \x01(\tR\vioFlagsNone\"\x88\x01\n" +
 	"\x15GetTraceResultRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12*\n" +
 	"\x06filter\x18\x02 \x01(\v2\x12.agent.TraceFilterR\x06filter\x12*\n" +

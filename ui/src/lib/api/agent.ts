@@ -359,6 +359,30 @@ export interface TraceFilter {
 	cmdList?: string[];
 	sizeList?: number[];
 	actionList?: string[];
+
+	/**
+	 * fsio_* 전용 cross-layer 필터. Attribution 드릴다운이 여기로 흘러
+	 * Charts / Statistics / Raw Data / Attribution 이 같은 모수를 본다.
+	 * 해당 컬럼이 없는 parquet(ftrace)에서는 서버가 조건을 조용히 skip 한다.
+	 */
+	commList?: string[];
+	pidList?: number[];
+	syscallList?: string[];
+	fsList?: string[];
+	nameList?: string[];
+	inoList?: number[];
+	lunList?: number[];
+	/** "major:minor" (예 "8:0") */
+	devList?: string[];
+	/** 파일명 부분일치 — 상위 N 밖의 파일을 찾을 때 */
+	nameContains?: string;
+	/**
+	 * io_flags 비트 마스크. **문자열이다** — u64 를 number 로 실으면 2^53 넘는
+	 * f2fs 힌트 비트가 조용히 반올림된다.
+	 */
+	ioFlagsAny?: string;
+	ioFlagsAll?: string;
+	ioFlagsNone?: string;
 }
 
 export interface LatencyStats {

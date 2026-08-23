@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	pb "agent/pb"
@@ -91,7 +92,7 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	fsio := detectFsioSchema(db, glob)
-	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
 	// mgmt(Query/TM UPIU, UIC) 행 제외.
 	//
 	// 집계 대부분은 action = send_req/block_rq_issue 로 걸러져 mgmt 가 자동 제외되지만,
@@ -559,7 +560,7 @@ func ComputeAIExtras(infos []*TraceJobInfo, filter *pb.TraceFilter, tailN, timeB
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	timeCol := detectTimeColumn(db, glob) // UFSCUSTOM 등 time 컬럼 부재 대비
-	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
 
 	// 1. tail latency top-N (dtoc 기준 가장 느린 요청)
 	if tail, err := queryTailLatency(db, glob, where, cmdCol, timeCol, tailN); err != nil {
@@ -806,10 +807,59 @@ func detectCmdColumn(db *sql.DB, glob string) string {
 	return "opcode"
 }
 
-func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
+// filterCols — cross-layer 필터가 참조하는 컬럼. 존재 검사용.
+var filterCols = []string{"comm", "pid", "syscall", "fs", "name", "ino", "lun",
+	"devmajor", "devminor", "io_flags"}
+
+// filterPresentCols — 이 parquet 에 있는 필터 대상 컬럼 집합.
+func filterPresentCols(db *sql.DB, glob string) map[string]bool {
+	return hasColumns(db, glob, filterCols...)
+}
+
+// sqlQuote — SQL 문자열 리터럴로 안전하게 감싼다.
+//
+// 값의 출처가 UI 선택지만이 아니다 — 파일명(name)과 프로세스명(comm)은 **기기 위
+// 앱이 정하는 값**이라 작은따옴표가 들어올 수 있다. 이스케이프 없이 문자열을
+// 이어붙이면 쿼리가 깨지거나(정상 케이스) SQL 이 주입된다(악성 케이스).
+func sqlQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+}
+
+// quotedList — 문자열 목록을 IN (...) 절 값으로.
+func quotedList(vs []string) string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = sqlQuote(v)
+	}
+	return strings.Join(out, ",")
+}
+
+// parseMaskString — io_flags 마스크 문자열 → u64. 빈 문자열/파싱 실패는 0(미적용).
+//
+// 문자열로 받는 이유: u64 를 JSON number 로 실으면 2^53 넘는 f2fs 힌트 비트가
+// 조용히 반올림된다.
+func parseMaskString(s string) uint64 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// buildFilterWhereCols — TraceFilter → WHERE 절.
+//
+// present 는 이 parquet 에 실제로 있는 컬럼 집합이다. cross-layer 필터는 fsio 에만
+// 있는 컬럼을 참조하므로, 없는 컬럼 조건은 **조용히 건너뛴다** — 넣으면 쿼리 자체가
+// 깨져서 ftrace 산출물 조회가 통째로 실패한다. nil 이면 검사를 생략한다(하위 호환).
+func buildFilterWhereCols(f *pb.TraceFilter, lbaCol, cmdCol string, present map[string]bool) string {
 	if f == nil {
 		return ""
 	}
+	// has — 컬럼 존재 여부. present 가 nil 이면 전부 있다고 본다.
+	has := func(col string) bool { return present == nil || present[col] }
 	var conds []string
 	if f.StartTime > 0 {
 		conds = append(conds, fmt.Sprintf("time >= %f", f.StartTime))
@@ -855,11 +905,7 @@ func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
 		conds = append(conds, fmt.Sprintf("cpu IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(f.CmdList) > 0 {
-		vals := make([]string, len(f.CmdList))
-		for i, v := range f.CmdList {
-			vals[i] = fmt.Sprintf("'%s'", v)
-		}
-		conds = append(conds, fmt.Sprintf("%s IN (%s)", cmdCol, strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("%s IN (%s)", cmdCol, quotedList(f.CmdList)))
 	}
 	if len(f.SizeList) > 0 {
 		vals := make([]string, len(f.SizeList))
@@ -869,12 +915,66 @@ func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
 		conds = append(conds, fmt.Sprintf("size IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(f.ActionList) > 0 {
-		vals := make([]string, len(f.ActionList))
-		for i, v := range f.ActionList {
-			vals[i] = fmt.Sprintf("'%s'", v)
-		}
-		conds = append(conds, fmt.Sprintf("action IN (%s)", strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("action IN (%s)", quotedList(f.ActionList)))
 	}
+	// ── fsio cross-layer 필터 ──
+	// 없는 컬럼은 건너뛴다 (ftrace 산출물에서 쿼리가 깨지지 않게).
+	if len(f.CommList) > 0 && has("comm") {
+		conds = append(conds, fmt.Sprintf("comm IN (%s)", quotedList(f.CommList)))
+	}
+	if len(f.PidList) > 0 && has("pid") {
+		vals := make([]string, len(f.PidList))
+		for i, v := range f.PidList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("pid IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.SyscallList) > 0 && has("syscall") {
+		conds = append(conds, fmt.Sprintf("syscall IN (%s)", quotedList(f.SyscallList)))
+	}
+	if len(f.FsList) > 0 && has("fs") {
+		conds = append(conds, fmt.Sprintf("fs IN (%s)", quotedList(f.FsList)))
+	}
+	if len(f.NameList) > 0 && has("name") {
+		conds = append(conds, fmt.Sprintf("name IN (%s)", quotedList(f.NameList)))
+	}
+	if f.NameContains != "" && has("name") {
+		// LIKE 특수문자(%, _)도 리터럴로 취급 — 파일명에 흔히 들어간다.
+		esc := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(f.NameContains)
+		conds = append(conds, fmt.Sprintf("name LIKE %s ESCAPE '\\'", sqlQuote("%"+esc+"%")))
+	}
+	if len(f.InoList) > 0 && has("ino") {
+		vals := make([]string, len(f.InoList))
+		for i, v := range f.InoList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("ino IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.LunList) > 0 && has("lun") {
+		vals := make([]string, len(f.LunList))
+		for i, v := range f.LunList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("lun IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.DevList) > 0 && has("devmajor") && has("devminor") {
+		// "major:minor" 문자열 — 두 컬럼을 이어 비교한다.
+		conds = append(conds, fmt.Sprintf(
+			"(CAST(devmajor AS VARCHAR) || ':' || CAST(devminor AS VARCHAR)) IN (%s)",
+			quotedList(f.DevList)))
+	}
+	if has("io_flags") {
+		if m := parseMaskString(f.IoFlagsAny); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) != 0", m))
+		}
+		if m := parseMaskString(f.IoFlagsAll); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) = %d", m, m))
+		}
+		if m := parseMaskString(f.IoFlagsNone); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) = 0", m))
+		}
+	}
+
 	if len(conds) == 0 {
 		return ""
 	}

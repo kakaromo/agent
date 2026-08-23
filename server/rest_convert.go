@@ -534,6 +534,67 @@ func buildTraceFilter(f map[string]any) *pb.TraceFilter {
 			}
 		}
 	}
+
+	// ── fsio cross-layer 필터 ──
+	// Attribution 드릴다운이 여기로 흘러 모든 탭이 같은 모수를 보게 된다.
+	out.CommList = jsonStrings(f["commList"])
+	out.SyscallList = jsonStrings(f["syscallList"])
+	out.FsList = jsonStrings(f["fsList"])
+	out.NameList = jsonStrings(f["nameList"])
+	out.DevList = jsonStrings(f["devList"])
+	for _, v := range jsonNumbers(f["pidList"]) {
+		out.PidList = append(out.PidList, uint32(v))
+	}
+	for _, v := range jsonNumbers(f["inoList"]) {
+		out.InoList = append(out.InoList, uint64(v))
+	}
+	for _, v := range jsonNumbers(f["lunList"]) {
+		out.LunList = append(out.LunList, uint32(v))
+	}
+	if s, ok := f["nameContains"].(string); ok {
+		out.NameContains = s
+	}
+	// io_flags 마스크는 **문자열**로 받는다 — u64 를 JSON number 로 실으면
+	// 2^53 넘는 f2fs 힌트 비트가 조용히 반올림된다.
+	if s, ok := f["ioFlagsAny"].(string); ok {
+		out.IoFlagsAny = s
+	}
+	if s, ok := f["ioFlagsAll"].(string); ok {
+		out.IoFlagsAll = s
+	}
+	if s, ok := f["ioFlagsNone"].(string); ok {
+		out.IoFlagsNone = s
+	}
+	return out
+}
+
+// jsonStrings — JSON 배열에서 문자열만 뽑는다.
+func jsonStrings(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, x := range arr {
+		if s, ok := x.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// jsonNumbers — JSON 배열에서 숫자만 뽑는다.
+func jsonNumbers(v any) []float64 {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []float64
+	for _, x := range arr {
+		if n, ok := numberOf(x); ok {
+			out = append(out, n)
+		}
+	}
 	return out
 }
 

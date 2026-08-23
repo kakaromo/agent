@@ -249,3 +249,102 @@ func TestRawDataFtracePathUnchanged(t *testing.T) {
 			e.GetComm(), e.GetIoFlags(), e.GetLineNumber())
 	}
 }
+
+// cross-layer 필터가 실제로 좁히는지 + 없는 컬럼은 조용히 건너뛰는지.
+func TestCrossLayerFilterNarrowsAndSkips(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	// comm 필터 — 픽스처의 데이터 IO 는 mysqld 3행.
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.TraceFilter{CommList: []string{"mysqld"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalEvents == 0 {
+		t.Error("comm 필터가 전부 걸러냈다")
+	}
+	// 없는 comm — 0건이어야 한다 (필터가 무시되면 3건이 나온다).
+	empty, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.TraceFilter{CommList: []string{"존재하지-않는-프로세스"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.TotalEvents != 0 {
+		t.Errorf("없는 comm 인데 %d건 — 필터가 안 걸렸다", empty.TotalEvents)
+	}
+}
+
+// ftrace 산출물에는 cross-layer 컬럼이 없다.
+// 조건을 그대로 넣으면 쿼리가 깨져 조회 자체가 실패한다 — 조용히 건너뛰어야 한다.
+func TestCrossLayerFilterSkippedOnFtrace(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "trace.log")
+	data := "  kworker/0:1H-123   [000] ....  1000.000000: ufshcd_command: send_req: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n" +
+		"  kworker/0:1H-123   [000] ....  1000.001000: ufshcd_command: complete_rsp: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n"
+	if err := os.WriteFile(logFile, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "ufs", nil); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "ufs"}},
+		&pb.TraceFilter{
+			CommList:   []string{"dd"},
+			NameList:   []string{"/data/x"},
+			IoFlagsAny: "2",
+		}, nil)
+	if err != nil {
+		t.Fatalf("없는 컬럼 필터로 쿼리가 깨졌다: %v", err)
+	}
+	// 조건이 skip 됐으므로 전체 2건이 그대로 보여야 한다.
+	if stats.TotalEvents != 2 {
+		t.Errorf("total = %d, want 2 (필터가 skip 되지 않았다)", stats.TotalEvents)
+	}
+}
+
+// 파일명·프로세스명은 **기기 위 앱이 정하는 값**이라 작은따옴표가 들어올 수 있다.
+// 이스케이프가 없으면 쿼리가 깨지거나 SQL 이 주입된다.
+func TestCrossLayerFilterEscapesQuotes(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	nasty := []string{
+		"it's",                // 평범한 따옴표
+		"'; DROP TABLE x; --", // 주입 시도
+		"a'b'c",               // 여러 개
+	}
+	for _, v := range nasty {
+		stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+			&pb.TraceFilter{NameList: []string{v}}, nil)
+		if err != nil {
+			t.Fatalf("name=%q 에서 쿼리가 깨졌다: %v", v, err)
+		}
+		if stats.TotalEvents != 0 {
+			t.Errorf("name=%q 가 매칭됐다 (%d건) — 이스케이프가 잘못됐다", v, stats.TotalEvents)
+		}
+	}
+}
+
+// io_flags 마스크는 2^53 을 넘어도 정확해야 한다.
+func TestIoFlagsMaskFilterAboveFloat53(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	// 픽스처의 UFS 행 io_flags = 0x80040002102 — SAW_UFS(bit43) 가 켜져 있다.
+	// bit43 = 0x80000000000 = 8796093022208. JSON number 로도 아직 정확하지만,
+	// 여기서 보는 것은 **문자열 경로가 u64 를 온전히 실어 나르는가** 다.
+	const sawUfs = "8796093022208" // 0x80000000000
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.TraceFilter{IoFlagsAny: sawUfs}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalEvents == 0 {
+		t.Error("SAW_UFS 마스크로 아무것도 안 걸렸다")
+	}
+	// 켜지지 않은 비트 — 0건이어야 한다. GC = bit24 = 0x1000000
+	none, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.TraceFilter{IoFlagsAll: "16777216"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.TotalEvents != 0 {
+		t.Errorf("GC 비트가 없는데 %d건", none.TotalEvents)
+	}
+}

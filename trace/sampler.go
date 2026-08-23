@@ -26,7 +26,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	// fsio 산출물이면 cross-layer 컬럼을 함께 싣는다 — Raw Data 표가 "이 IO 를 누가/
 	// 어느 파일에" 를 행 단위로 보여주기 위해 필요하다. ftrace 는 기존 11컬럼 그대로.
 	fsio := detectFsioSchema(db, glob)
-	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
 
 	// Count total events
 	q := fmt.Sprintf("SELECT count(*) FROM read_parquet(%s) %s", glob, where)

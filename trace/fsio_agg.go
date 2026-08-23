@@ -196,7 +196,7 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	fsio := detectFsioSchema(db, glob)
-	where := buildFilterWhere(req.GetFilter(), lbaCol, cmdCol)
+	where := buildFilterWhereCols(req.GetFilter(), lbaCol, cmdCol, filterPresentCols(db, glob))
 	if fsio.isUFS {
 		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
 	}

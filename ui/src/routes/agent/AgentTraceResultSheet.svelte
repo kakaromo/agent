@@ -57,24 +57,136 @@
 		return ids.length > 0 ? ids : jobIds;
 	});
 
-	// Attribution 탭이 쓰는 필터. 현재 시트는 서버사이드 필터를 쓰지 않으므로 빈 객체를
-	// 넘긴다 — 드릴다운은 아래 핸들러가 받아 UI 안내만 한다(서버 필터 연동은 후속).
-	function attributionFilter(): TraceFilter {
-		return {};
-	}
+	// ── cross-layer 필터 (fsio 전용) ──
+	//
+	// Attribution 드릴다운이 채운다. 시간/LBA 등 기존 필터와 **같은 파이프라인**을 타서
+	// Charts / Statistics / Raw Data / Attribution 이 항상 같은 모수를 본다.
+	let filterComm = $state<string[]>([]);
+	let filterName = $state<string[]>([]);
+	let filterSyscall = $state<string[]>([]);
+	let filterFs = $state<string[]>([]);
+	let filterPid = $state<number[]>([]);
+	let filterIno = $state<number[]>([]);
+	let filterLun = $state<number[]>([]);
+	let filterDev = $state<string[]>([]);
+	let filterIoFlagsAny = $state('');
+
+	// 활성 cross-layer 필터를 칩으로. 각 칩은 클릭하면 그 조건만 해제한다.
+	const crossLayerChips = $derived.by<{ label: string; value: string; clear: () => void }[]>(() => {
+		const out: { label: string; value: string; clear: () => void }[] = [];
+		const pushStr = (label: string, vals: string[], set: (v: string[]) => void) => {
+			for (const v of vals) {
+				out.push({ label, value: v, clear: () => { set(vals.filter(x => x !== v)); applyFilter(); } });
+			}
+		};
+		const pushNum = (label: string, vals: number[], set: (v: number[]) => void) => {
+			for (const v of vals) {
+				out.push({ label, value: String(v), clear: () => { set(vals.filter(x => x !== v)); applyFilter(); } });
+			}
+		};
+		pushStr('comm', filterComm, v => filterComm = v);
+		pushStr('file', filterName, v => filterName = v);
+		pushStr('syscall', filterSyscall, v => filterSyscall = v);
+		pushStr('fs', filterFs, v => filterFs = v);
+		pushNum('pid', filterPid, v => filterPid = v);
+		pushNum('ino', filterIno, v => filterIno = v);
+		pushNum('lun', filterLun, v => filterLun = v);
+		pushStr('device', filterDev, v => filterDev = v);
+		if (filterIoFlagsAny) {
+			const name = Object.entries(FLOW_BITS).find(([, b]) => b === filterIoFlagsAny)?.[0];
+			out.push({
+				label: 'flow',
+				value: name ?? `io_flags&${filterIoFlagsAny}`,
+				clear: () => { filterIoFlagsAny = ''; applyFilter(); }
+			});
+		}
+		return out;
+	});
+
+	const hasCrossLayerFilter = $derived(
+		filterComm.length > 0 || filterName.length > 0 || filterSyscall.length > 0 ||
+		filterFs.length > 0 || filterPid.length > 0 || filterIno.length > 0 ||
+		filterLun.length > 0 || filterDev.length > 0 || filterIoFlagsAny !== ''
+	);
+
+	// Attribution 에 넘길 필터 = 현재 화면 필터 그대로.
+	// 확대(brush)나 드릴다운이 걸려 있으면 Attribution 도 같은 범위만 집계한다.
+	const attributionFilter = $derived(buildFilter() ?? {});
 
 	/**
 	 * Attribution 행 클릭 → 해당 값으로 좁혀 보기.
 	 *
-	 * portal 은 이걸 서버사이드 필터로 흘려 chart/stats/raw 를 함께 좁힌다. agent 시트는
-	 * 아직 그 필터 파이프라인이 없어서 지금은 알림만 띄운다 — 값을 조용히 무시하면
-	 * "클릭했는데 아무 일도 안 일어난다" 가 되므로 명시적으로 알린다.
+	 * additive(Ctrl/⌘/Shift)면 기존 선택에 더한다 — 파일 여러 개를 한 번에 볼 때.
+	 * 일반 클릭은 단일 선택이고, 같은 값을 다시 누르면 해제(토글)된다.
+	 *
+	 * 롤업 행 "(other)" 과 "(파일 아님)"/"(none)" 은 **실제 값이 아니라 묶음 라벨**이라
+	 * 필터로 쓸 수 없다 — 그걸로 좁히면 0건이 되므로 클릭을 무시한다.
 	 */
-	function handleAttrDrillDown(dim: string, key: string, _additive: boolean) {
-		toast.info(`${dim} = ${key}`, {
-			description: '필터 연동은 후속 작업입니다 — 현재는 값 확인만 가능합니다.'
-		});
+	function handleAttrDrillDown(dim: string, key: string, additive: boolean) {
+		if (key === '(other)' || key === '(none)' || key === '(파일 아님)') {
+			toast.info(`${key} 은(는) 묶음 라벨이라 필터로 쓸 수 없습니다`);
+			return;
+		}
+		const toggleStr = (cur: string[]) => {
+			if (!additive) return cur.length === 1 && cur[0] === key ? [] : [key];
+			return cur.includes(key) ? cur.filter(v => v !== key) : [...cur, key];
+		};
+		const toggleNum = (cur: number[]) => {
+			const n = Number(key);
+			if (!Number.isFinite(n)) return cur;
+			if (!additive) return cur.length === 1 && cur[0] === n ? [] : [n];
+			return cur.includes(n) ? cur.filter(v => v !== n) : [...cur, n];
+		};
+
+		switch (dim) {
+			case 'comm': filterComm = toggleStr(filterComm); break;
+			case 'file': filterName = toggleStr(filterName); break;
+			case 'syscall': filterSyscall = toggleStr(filterSyscall); break;
+			case 'fs': filterFs = toggleStr(filterFs); break;
+			case 'pid': filterPid = toggleNum(filterPid); break;
+			case 'ino': filterIno = toggleNum(filterIno); break;
+			case 'lun': {
+				// 표시값은 "LU1" 형태라 숫자만 떼어낸다.
+				const n = Number(key.replace(/^LU/, ''));
+				if (Number.isFinite(n)) {
+					filterLun = additive
+						? (filterLun.includes(n) ? filterLun.filter(v => v !== n) : [...filterLun, n])
+						: (filterLun.length === 1 && filterLun[0] === n ? [] : [n]);
+				}
+				break;
+			}
+			case 'device': filterDev = toggleStr(filterDev); break;
+			case 'flow': {
+				// flow 는 io_flags 파생 라벨이라 역매핑이 필요하다.
+				// ⚠ 서버의 flowClassExpr 은 **우선순위 CASE** 라 정확한 역변환이 아니다
+				// (GC 이면서 DATA 인 행은 GC 로 분류된다). 여기서는 "그 비트가 켜진 행"
+				// 으로 좁히므로 서버 집계보다 넓게 잡힐 수 있다.
+				const bit = FLOW_BITS[key];
+				if (!bit) { toast.info(`${key} 는 비트 필터로 옮길 수 없습니다`); return; }
+				filterIoFlagsAny = filterIoFlagsAny === bit ? '' : bit;
+				break;
+			}
+			default:
+				toast.info(`${dim} 축은 아직 필터로 연결되지 않았습니다`);
+				return;
+		}
+		showFilter = true;
+		applyFilter();
 	}
+
+	// flow 라벨 → io_flags 비트(10진 문자열). 서버 flowClassExpr 와 같은 값.
+	const FLOW_BITS: Record<string, string> = {
+		GC: '16777216',
+		Checkpoint: '8388608',
+		Journal: '4194304',
+		'Writeback(kworker)': '34359738368',
+		fsync: '68719476736',
+		DirectIO: '8589934592',
+		'mmap-writeback': '17179869184',
+		Metadata: '131072',
+		'Buffered(app)': '4294967296',
+		Data: '65536'
+	};
 
 	// 활성 잡의 trace_type. mgmt 섹션과 Attribution 탭은 fsio 에서만 의미가 있다.
 	// mappings 가 비어 있으면(단독 trace 실행) 통계 조회 때 알아낸 값으로 폴백한다.
@@ -215,7 +327,7 @@
 	const hasActiveFilter = $derived(
 		!!(filterStartTime || filterEndTime || filterStartLba || filterEndLba ||
 		   filterMinDtoc || filterMaxDtoc || filterMinCtod || filterMaxCtod ||
-		   filterMinCtoc || filterMaxCtoc || filterMinQd || filterMaxQd)
+		   filterMinCtoc || filterMaxCtoc || filterMinQd || filterMaxQd) || hasCrossLayerFilter
 	);
 	let mainTab = $state('raw');
 
@@ -409,6 +521,16 @@
 		if (filterMaxCtoc) f.maxCtoc = Number(filterMaxCtoc);
 		if (filterMinQd) f.minQd = Number(filterMinQd);
 		if (filterMaxQd) f.maxQd = Number(filterMaxQd);
+		// cross-layer (fsio 전용) — 없는 컬럼 조건은 서버가 조용히 skip 한다.
+		if (filterComm.length) f.commList = filterComm;
+		if (filterName.length) f.nameList = filterName;
+		if (filterSyscall.length) f.syscallList = filterSyscall;
+		if (filterFs.length) f.fsList = filterFs;
+		if (filterPid.length) f.pidList = filterPid;
+		if (filterIno.length) f.inoList = filterIno;
+		if (filterLun.length) f.lunList = filterLun;
+		if (filterDev.length) f.devList = filterDev;
+		if (filterIoFlagsAny) f.ioFlagsAny = filterIoFlagsAny;
 		return Object.keys(f).length > 0 ? f : undefined;
 	}
 
@@ -465,6 +587,9 @@
 		filterMinCtod = ''; filterMaxCtod = '';
 		filterMinCtoc = ''; filterMaxCtoc = '';
 		filterMinQd = ''; filterMaxQd = '';
+		filterComm = []; filterName = []; filterSyscall = []; filterFs = [];
+		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
+		filterIoFlagsAny = '';
 		statsResult = null;
 		loadRawData();
 	}
@@ -684,6 +809,25 @@
 							<div><label class="text-muted-foreground">CtoC min</label><input bind:value={filterMinCtoc} class="w-full border rounded px-1 py-0.5 bg-background font-mono" /></div>
 							<div><label class="text-muted-foreground">CtoC max</label><input bind:value={filterMaxCtoc} class="w-full border rounded px-1 py-0.5 bg-background font-mono" /></div>
 						</div>
+						{#if hasCrossLayerFilter}
+							<!-- cross-layer 필터는 대부분 Attribution 드릴다운으로 들어온다.
+							     어떤 값이 걸렸는지 보이고 개별 해제가 되어야 "왜 데이터가
+							     적지?" 를 되짚을 수 있다. -->
+							<div class="flex flex-wrap items-center gap-1 text-[9px]">
+								<span class="text-muted-foreground">귀속 필터</span>
+								{#each crossLayerChips as chip}
+									<button
+										onclick={chip.clear}
+										class="inline-flex items-center gap-0.5 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 hover:bg-blue-500/20"
+										title="클릭하면 해제"
+									>
+										<span class="text-muted-foreground">{chip.label}</span>
+										<span class="font-mono max-w-[16rem] truncate">{chip.value}</span>
+										<XIcon class="size-2.5" />
+									</button>
+								{/each}
+							</div>
+						{/if}
 						<div class="text-[9px]">
 							<label class="text-muted-foreground">Latency Ranges (ms, comma-separated)</label>
 							<input bind:value={latencyRangesText} class="w-full border rounded px-1 py-0.5 bg-background font-mono" />
@@ -1100,7 +1244,7 @@
 							serverId={serverId ?? 0}
 							jobIds={activeJobIds}
 							traceType={activeTraceType}
-							filter={attributionFilter()}
+							filter={attributionFilter}
 							onDrillDown={handleAttrDrillDown}
 						/>
 					</Tabs.Content>
