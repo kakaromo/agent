@@ -971,7 +971,21 @@ export async function generateScenario(prompt: string, deviceId?: string): Promi
 	}>('/agent/ai/scenario/generate', body);
 	return {
 		steps: Array.isArray(raw?.steps) ? raw.steps : [],
-		loops: Array.isArray(raw?.loops) ? raw.loops : [],
+		// 백엔드는 loop 값을 **문자열**로 보낸다(server/rest_ai.go 의 aiScenarioLoop 은
+		// 전부 string). 캔버스는 이 값으로 비교/반복을 하는데 문자열이면 사전순 비교가
+		// 되어 두 자리 인덱스에서 깨진다 — "9" <= "10" 은 false 라 loop 노드가 하나도
+		// 안 그려진다. TS 선언은 number 라 컴파일러가 못 잡으므로 여기서 변환한다.
+		loops: Array.isArray(raw?.loops) ? raw.loops.map(normalizeLoop) : [],
 		warnings: Array.isArray(raw?.warnings) ? raw.warnings : []
 	};
+}
+
+// normalizeLoop — wire(문자열) → 캔버스가 쓰는 숫자.
+// 숫자로 못 바꾸는 값은 0 으로 두어 상위 검증에서 걸리게 한다.
+function normalizeLoop(l: AiScenarioLoop): AiScenarioLoop {
+	const num = (v: unknown): number => {
+		const n = Number(v);
+		return Number.isFinite(n) ? n : 0;
+	};
+	return { startStep: num(l?.startStep), endStep: num(l?.endStep), count: num(l?.count) };
 }

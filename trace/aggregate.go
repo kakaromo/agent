@@ -33,9 +33,14 @@ const (
 	AggNone            = "none"
 )
 
-// 집계 결과 표의 행 수 상한. 근거 표시용 payload 가 커지는 것을 막고, 동시에
-// 로컬 소형 모델(14b)이 "해석" 대신 "데이터 구조 나열"로 빠지는 것을 막는다
-// (rest_summary.go 의 tailN=5 / timeBins=8 과 같은 이유 — 실측으로 확인된 경향).
+// MaxAggRows — 집계 결과 표의 행 수 상한.
+//
+// 두 가지를 동시에 막는다:
+//  1. 근거 표시용 SSE payload 가 커지는 것
+//  2. **로컬 소형 모델이 "해석" 대신 "데이터 구조 나열"로 빠지는 것** — 집계 배열이
+//     길어지면 모델이 패턴을 서술하지 않고 행을 그대로 읊는다. 이 프로젝트에서 반복
+//     확인된 경향이라 다른 집계 상한(rest_summary.go 의 tailN=5 / timeBins=8)도 같은
+//     이유로 작게 잡혀 있다.
 const MaxAggRows = 20
 
 // AggParam — 도구가 받는 파라미터 하나. 프롬프트의 schema 와 검증이 여기서 파생된다.
@@ -354,7 +359,7 @@ func buildAggFilter(params map[string]any) (*pb.TraceFilter, string, string) {
 	if s := strings.TrimSpace(paramString(params, "cmd")); s != "" {
 		// opcode 는 parquet 에 소문자로 저장된다("0x2a"). 모델은 도메인 관례대로 대문자
 		// ("0x2A")를 내기 쉬운데, buildFilterWhere 는 대소문자를 구분해 IN 비교하므로
-		// 그대로 두면 **0건이 매칭돼 조용히 틀린 답**이 나온다(실측 확인).
+		// 그대로 두면 **0건이 매칭돼 조용히 틀린 답**이 나온다.
 		// 양쪽 표기를 모두 넣어 어느 쪽이든 잡히게 한다.
 		f.CmdList = cmdCaseVariants(s)
 		parts = append(parts, "cmd = "+s)
@@ -476,8 +481,8 @@ var numberRe = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 // parseNumericParam — 모델이 낸 문자열에서 숫자를 얻는다.
 //
 // 우선 전체가 숫자인지 본다(정상 경로). 아니면 문자열 안에 숫자가 **정확히 하나**일
-// 때만 그것을 취한다 — 실측에서 14b 가 값을 그대로 주지 않고 설명을 붙이는 경우가
-// 있었다(예: "With the actual number from the question, it should be: 947257").
+// 때만 그것을 취한다 — 모델이 값을 그대로 주지 않고 설명을 붙이는 경우가 있다
+// (예: "With the actual number from the question, it should be: 947257").
 //
 // 숫자가 여럿이면 어느 것이 값인지 알 수 없으므로 실패로 둔다. 아무거나 고르면
 // 조용히 틀린 구간을 계산하게 되고, 근거 뱃지는 정상처럼 보인다.

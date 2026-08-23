@@ -140,7 +140,14 @@ func (o *Orchestrator) fireFinishHook(jobID, state, errMsg string) {
 	}
 }
 
-// jobStateHookString — pb.JobState 를 DB/REST 호환 소문자 문자열로 변환 (server.jobStateString 과 동일 매핑).
+// jobStateHookString — pb.JobState 를 DB/REST 호환 소문자 문자열로 변환.
+//
+// server.jobStateString 과 같은 매핑이지만 패키지 의존 방향(server → benchmark) 때문에
+// 공유하지 않는다. terminal 4개만 다루므로 값이 갈릴 여지는 작다.
+//
+// default 가 "failed" 인 것은 의도적이다. 호출자는 모두 확정된 terminal 상태를 넘기므로
+// 여기 도달하면 안 되지만, 만약 새 상태가 추가돼 매핑이 빠지면 **성공으로 기록되는 쪽이
+// 훨씬 위험하다** — 실패가 조용히 성공으로 남는다. 모르면 실패로 기록하고 로그를 남긴다.
 func jobStateHookString(s pb.JobState) string {
 	switch s {
 	case pb.JobState_JOB_STATE_COMPLETED:
@@ -152,7 +159,8 @@ func jobStateHookString(s pb.JobState) string {
 	case pb.JobState_JOB_STATE_CANCELLED:
 		return "cancelled"
 	default:
-		return "completed"
+		slog.Warn("매핑되지 않은 job 상태 — failed 로 기록", "state", s)
+		return "failed"
 	}
 }
 

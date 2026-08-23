@@ -473,12 +473,14 @@ type TailLatencyEvent struct {
 
 // TimeBinLatency — 전체 duration 을 여러 bin 으로 나눈 구간별 latency 추이 1개 bin.
 type TimeBinLatency struct {
-	Bin     int     `json:"bin"`
-	StartMs float64 `json:"startMs"`
-	EndMs   float64 `json:"endMs"`
-	Count   int64   `json:"count"`
-	AvgDtoc float64 `json:"avgDtoc"`
-	P99Dtoc float64 `json:"p99Dtoc"`
+	Bin int `json:"bin"`
+	// 구간 경계. parquet 의 time 컬럼 원값이며 **초 단위**다(ms 아님 — 실측: span 29.6 이
+	// 29.6초에 해당). LLM 프롬프트에 그대로 들어가므로 이름이 단위를 정확히 말해야 한다.
+	StartSec float64 `json:"startSec"`
+	EndSec   float64 `json:"endSec"`
+	Count    int64   `json:"count"`
+	AvgDtoc  float64 `json:"avgDtoc"`
+	P99Dtoc  float64 `json:"p99Dtoc"`
 }
 
 // ComputeAIExtras — AI 해석용 다각도 집계를 한 번에 계산해 map 으로 반환.
@@ -535,7 +537,10 @@ func detectTimeColumn(db *sql.DB, glob string) string {
 		WHERE column_name IN ('time', 'start_time')`, glob)
 	rows, err := db.Query(q)
 	if err != nil {
-		return "time"
+		// 정상 경로는 컬럼이 없으면 "" 를 반환해 시간 기반 집계를 skip 한다.
+		// 에러 경로도 같은 계약을 따른다 — "time 이 있다"고 낙관하면 상위 쿼리가
+		// SQL 에러로 죽는다(skip 이 조용한 오답보다 낫다).
+		return ""
 	}
 	defer rows.Close()
 
@@ -543,7 +548,9 @@ func detectTimeColumn(db *sql.DB, glob string) string {
 	hasStart := false
 	for rows.Next() {
 		var col string
-		rows.Scan(&col)
+		if err := rows.Scan(&col); err != nil {
+			continue
+		}
 		if col == "time" {
 			hasTime = true
 		}
@@ -655,12 +662,12 @@ func queryTimeSeriesLatency(db *sql.DB, glob, where, timeCol string, bins int) (
 		}
 		b := int(bin.Int64)
 		series = append(series, TimeBinLatency{
-			Bin:     b,
-			StartMs: minT.Float64 + float64(b)*binWidth,
-			EndMs:   minT.Float64 + float64(b+1)*binWidth,
-			Count:   cnt.Int64,
-			AvgDtoc: avgD.Float64,
-			P99Dtoc: p99D.Float64,
+			Bin:      b,
+			StartSec: minT.Float64 + float64(b)*binWidth,
+			EndSec:   minT.Float64 + float64(b+1)*binWidth,
+			Count:    cnt.Int64,
+			AvgDtoc:  avgD.Float64,
+			P99Dtoc:  p99D.Float64,
 		})
 	}
 	return series, rows.Err()
