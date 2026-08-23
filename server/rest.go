@@ -309,6 +309,9 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			case "raw":
 				handleTraceRaw(w, r, agent)
 				return
+			case "attribution":
+				handleTraceAttribution(w, r, agent)
+				return
 			}
 		}
 		if len(parts) != 2 {
@@ -421,6 +424,57 @@ func handleTraceRaw(w http.ResponseWriter, r *http.Request, agent *DeviceAgentSe
 		"isSampled":     resp.GetIsSampled(),
 		"events":        events,
 	})
+}
+
+// handleTraceAttribution — POST /api/agent/trace/attribution
+//
+// body: {jobIds, filter?, dims[], topN?, sortBy?}
+//
+//	dims  : "comm"|"pid"|"tid"|"syscall"|"fs"|"file"|"ino"|"flow"|"cmd"|"lun"|"device"
+//	sortBy: "count"(기본) | "bytes" | "latency"
+//
+// parquet 에 없는 축은 200 + unsupportedDims 로 알린다 (에러 아님).
+func handleTraceAttribution(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	body, err := readJSONBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "decode: "+err.Error())
+		return
+	}
+	jobIDs := stringSlice(body["jobIds"])
+	if len(jobIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "jobIds required")
+		return
+	}
+	req := &pb.GetIoAttributionRequest{JobIds: jobIDs}
+	if f, ok := body["filter"].(map[string]any); ok {
+		req.Filter = buildTraceFilter(f)
+	}
+	for _, d := range stringSlice(body["dims"]) {
+		if dim := attributionDimFromName(d); dim != pb.AttributionDim_ATTR_DIM_UNSPECIFIED {
+			req.Dims = append(req.Dims, dim)
+		}
+	}
+	if len(req.Dims) == 0 {
+		writeError(w, http.StatusBadRequest, "dims required (comm|pid|tid|syscall|fs|file|ino|flow|cmd|lun|device)")
+		return
+	}
+	if v, ok := numberOf(body["topN"]); ok {
+		req.TopN = uint32(v)
+	}
+	if s, ok := body["sortBy"].(string); ok {
+		req.SortBy = attributionSortFromName(s)
+	}
+
+	resp, err := agent.GetIoAttribution(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, attributionToMap(resp))
 }
 
 // ---------- helpers ----------

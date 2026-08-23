@@ -234,9 +234,22 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 			"count": c.GetCount(),
 		})
 	}
+	// mgmt 는 fsio_ufs 에만 있다. 없으면 빈 배열 — 프론트가 `?? []` 안 해도 되게.
+	mgmt := make([]map[string]any, 0, len(s.GetMgmtStats()))
+	for _, m := range s.GetMgmtStats() {
+		mgmt = append(mgmt, map[string]any{
+			"name":        m.GetName(),
+			"kind":        m.GetKind(),
+			"count":       m.GetCount(),
+			"pairedCount": m.GetPairedCount(),
+			"totalTimeMs": m.GetTotalTimeMs(),
+			"dtoc":        latencyStatsToMap(m.GetDtoc()),
+		})
+	}
 	return map[string]any{
 		"totalEvents":       s.GetTotalEvents(),
 		"durationSeconds":   s.GetDurationSeconds(),
+		"mgmtStats":         mgmt,
 		"dtoc":              latencyStatsToMap(s.GetDtoc()),
 		"ctod":              latencyStatsToMap(s.GetCtod()),
 		"ctoc":              latencyStatsToMap(s.GetCtoc()),
@@ -252,6 +265,128 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 		"writeTotalBytes":   s.GetWriteTotalBytes(),
 		"discardTotalBytes": s.GetDiscardTotalBytes(),
 		"sendCount":         s.GetSendCount(),
+	}
+}
+
+// attributionDimName — proto enum → portal 프론트가 쓰는 소문자 축 이름.
+func attributionDimName(d pb.AttributionDim) string {
+	switch d {
+	case pb.AttributionDim_ATTR_DIM_COMM:
+		return "comm"
+	case pb.AttributionDim_ATTR_DIM_PID:
+		return "pid"
+	case pb.AttributionDim_ATTR_DIM_TID:
+		return "tid"
+	case pb.AttributionDim_ATTR_DIM_SYSCALL:
+		return "syscall"
+	case pb.AttributionDim_ATTR_DIM_FS:
+		return "fs"
+	case pb.AttributionDim_ATTR_DIM_FILE:
+		return "file"
+	case pb.AttributionDim_ATTR_DIM_INO:
+		return "ino"
+	case pb.AttributionDim_ATTR_DIM_FLOW:
+		return "flow"
+	case pb.AttributionDim_ATTR_DIM_CMD:
+		return "cmd"
+	case pb.AttributionDim_ATTR_DIM_LUN:
+		return "lun"
+	case pb.AttributionDim_ATTR_DIM_DEVICE:
+		return "device"
+	}
+	return "unspecified"
+}
+
+// attributionDimFromName — 위의 역변환. 모르는 이름은 UNSPECIFIED (호출부가 건너뛴다).
+func attributionDimFromName(n string) pb.AttributionDim {
+	switch n {
+	case "comm":
+		return pb.AttributionDim_ATTR_DIM_COMM
+	case "pid":
+		return pb.AttributionDim_ATTR_DIM_PID
+	case "tid":
+		return pb.AttributionDim_ATTR_DIM_TID
+	case "syscall":
+		return pb.AttributionDim_ATTR_DIM_SYSCALL
+	case "fs":
+		return pb.AttributionDim_ATTR_DIM_FS
+	case "file":
+		return pb.AttributionDim_ATTR_DIM_FILE
+	case "ino":
+		return pb.AttributionDim_ATTR_DIM_INO
+	case "flow":
+		return pb.AttributionDim_ATTR_DIM_FLOW
+	case "cmd":
+		return pb.AttributionDim_ATTR_DIM_CMD
+	case "lun":
+		return pb.AttributionDim_ATTR_DIM_LUN
+	case "device":
+		return pb.AttributionDim_ATTR_DIM_DEVICE
+	}
+	return pb.AttributionDim_ATTR_DIM_UNSPECIFIED
+}
+
+func attributionSortFromName(n string) pb.AttributionSort {
+	switch n {
+	case "bytes":
+		return pb.AttributionSort_ATTR_SORT_BYTES
+	case "latency":
+		return pb.AttributionSort_ATTR_SORT_LATENCY_SUM
+	default:
+		return pb.AttributionSort_ATTR_SORT_COUNT
+	}
+}
+
+func attributionToMap(r *pb.GetIoAttributionResponse) map[string]any {
+	if r == nil {
+		return nil
+	}
+	groups := make([]map[string]any, 0, len(r.GetGroups()))
+	for _, g := range r.GetGroups() {
+		entries := make([]map[string]any, 0, len(g.GetEntries()))
+		for _, e := range g.GetEntries() {
+			m := map[string]any{
+				"key":        e.GetKey(),
+				"count":      e.GetCount(),
+				"sendCount":  e.GetSendCount(),
+				"ratio":      e.GetRatio(),
+				"readBytes":  e.GetReadBytes(),
+				"writeBytes": e.GetWriteBytes(),
+				"totalBytes": e.GetTotalBytes(),
+				"dtocSumMs":  e.GetDtocSumMs(),
+				"dtocMaxMs":  e.GetDtocMaxMs(),
+				"isOther":    e.GetIsOther(),
+			}
+			// optional 필드는 **없으면 아예 안 넣는다** — JSON null 로 나가야
+			// 프론트가 "—" 로 렌더한다. 0 으로 채우면 "0ms = 빠름" 으로 오독된다.
+			if e.DtocAvgMs != nil {
+				m["dtocAvgMs"] = e.GetDtocAvgMs()
+			}
+			if e.DtocP50Ms != nil {
+				m["dtocP50Ms"] = e.GetDtocP50Ms()
+			}
+			if e.DtocP99Ms != nil {
+				m["dtocP99Ms"] = e.GetDtocP99Ms()
+			}
+			if e.DistinctFiles != nil {
+				m["distinctFiles"] = e.GetDistinctFiles()
+			}
+			entries = append(entries, m)
+		}
+		groups = append(groups, map[string]any{
+			"dim":          attributionDimName(g.GetDim()),
+			"entries":      entries,
+			"distinctKeys": g.GetDistinctKeys(),
+		})
+	}
+	unsupported := make([]string, 0, len(r.GetUnsupportedDims()))
+	for _, d := range r.GetUnsupportedDims() {
+		unsupported = append(unsupported, attributionDimName(d))
+	}
+	return map[string]any{
+		"totalEvents":     r.GetTotalEvents(),
+		"groups":          groups,
+		"unsupportedDims": unsupported,
 	}
 }
 

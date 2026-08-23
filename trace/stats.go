@@ -231,6 +231,18 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 		}
 	}
 
+	// 5.6 mgmt 집계 (fsio_ufs 전용).
+	//
+	// 데이터 IO 통계에서는 mgmt 를 빼지만(위 not_mgmt 조건), 링크 점유 시간은
+	// 그 자체로 답해야 할 질문이라 별도 축으로 낸다. idle 구간에서는 이게 사실상
+	// 유일한 산출물이다.
+	if fsio.isUFS {
+		stats.MgmtStats, err = queryMgmtStats(db, glob)
+		if err != nil {
+			return nil, fmt.Errorf("mgmt stats: %w", err)
+		}
+	}
+
 	// 6. Cmd + size counts
 	stats.CmdSizeCounts, err = queryCmdSizeCounts(db, glob, where)
 	if err != nil {
