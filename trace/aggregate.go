@@ -3,6 +3,7 @@ package trace
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -261,6 +262,13 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 			res.Note = "좁힐 조건(start_time/end_time/cmd)이 지정되지 않았습니다"
 			return res, nil
 		}
+		// buildFilterWhere 는 시간 조건을 `time` 리터럴로 박는다. 시간 컬럼이 없는
+		// 스키마(UFSCUSTOM 단독 등)에서 그대로 두면 DuckDB Binder Error 가 나고,
+		// LLM 이 그 에러 문자열을 해석하려 든다. latency_over_time 과 같은 방식으로 끊는다.
+		if timeCol == "" && (filter.StartTime > 0 || filter.EndTime > 0) {
+			res.Note = "이 trace 에는 시간 컬럼이 없어 구간으로 좁힐 수 없습니다"
+			return res, nil
+		}
 		where := buildFilterWhere(filter, lbaCol, cmdCol)
 		scoped, err := querySliceSummary(db, glob, where, cmdCol)
 		if err != nil {
@@ -357,6 +365,14 @@ func buildAggFilter(params map[string]any) (*pb.TraceFilter, string, string) {
 		parts = append(parts, fmt.Sprintf("time <= %g", v))
 	}
 	if s := strings.TrimSpace(paramString(params, "cmd")); s != "" {
+		// cmd 는 buildFilterWhere 에서 이스케이프 없이 SQL 에 박히는데(`'%s'`), 값의
+		// 출처가 **자유 서술 채팅 질문에서 파생된 LLM 출력**이다. 화이트리스트로 막는다.
+		//   - UFS opcode: 0x28, 0x2a …   - Block io_type: read, write, discard, flush
+		// 형식을 벗어나면 조건을 만들지 않고 사유를 남긴다(조용히 전체를 계산하면
+		// "구간을 좁혔다"는 근거 뱃지가 거짓이 된다).
+		if !validCmdToken.MatchString(s) {
+			return nil, "", fmt.Sprintf("허용되지 않는 cmd 값입니다 (%q)", s)
+		}
 		// opcode 는 parquet 에 소문자로 저장된다("0x2a"). 모델은 도메인 관례대로 대문자
 		// ("0x2A")를 내기 쉬운데, buildFilterWhere 는 대소문자를 구분해 IN 비교하므로
 		// 그대로 두면 **0건이 매칭돼 조용히 틀린 답**이 나온다.
@@ -475,6 +491,12 @@ func paramFloat(p map[string]any, key string) (float64, bool) {
 	return 0, false
 }
 
+// validCmdToken — cmd 파라미터 허용 형식.
+//
+// UFS opcode(0x2a) 와 Block io_type(read/write/discard/flush) 만 통과시킨다.
+// 따옴표·공백·주석 기호가 들어올 여지를 아예 없앤다.
+var validCmdToken = regexp.MustCompile(`^[0-9A-Za-z_]{1,32}$`)
+
 // numberRe — 문자열에서 숫자 후보를 뽑는다(음수/소수 포함).
 var numberRe = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
 
@@ -569,6 +591,11 @@ func orNull(col string) string {
 	return col
 }
 
+// round3 — 소수 셋째 자리 반올림.
+//
+// math.Round 를 쓴다. `int64(f*1000+0.5)` 방식은 음수에서 절삭이 되어
+// -1.2345 가 -1.234 로 나온다(올바른 값은 -1.235). dtoc/ctod 는 clock skew 나
+// 완료 순서 역전으로 음수가 될 수 있고, 이 값이 근거 표에 그대로 노출된다.
 func round3(f float64) float64 {
-	return float64(int64(f*1000+0.5)) / 1000
+	return math.Round(f*1000) / 1000
 }

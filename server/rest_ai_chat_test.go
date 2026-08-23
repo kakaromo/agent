@@ -268,3 +268,61 @@ func TestBenchmarkNilAggUsesSummary(t *testing.T) {
 		t.Error("benchmark job 이 거절 경로를 탔다")
 	}
 }
+
+// ── AI 생성 시나리오의 loop 인덱스 remap ──
+//
+// 검증 실패한 step 은 버려지는데 loops 의 인덱스는 모델의 **원본 번호**다. 옮기지
+// 않으면 loop 가 엉뚱한 구간을 감싸는데도 경고 없이 통과한다(길이 검사가 필터링 후
+// 기준이라 어긋난 걸 못 잡는다).
+func TestScenarioLoopIndexRemap(t *testing.T) {
+	content := `{
+	 "steps":[
+	   {"type":"bogus_type","params":{}},
+	   {"type":"sleep","params":{"seconds":"1"}},
+	   {"type":"sleep","params":{"seconds":"2"}},
+	   {"type":"sleep","params":{"seconds":"3"}}
+	 ],
+	 "loops":[{"startStep":"1","endStep":"3","count":"2"}]
+	}`
+	steps, loops, _, err := parseAndValidateScenario(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("step %d개 생존 (want 3)", len(steps))
+	}
+	if len(loops) != 1 {
+		t.Fatalf("loop 이 사라졌다: %d", len(loops))
+	}
+	// step0 이 빠졌으므로 원본 1..3 은 0..2 가 되어야 한다.
+	if loops[0].StartStep != "0" || loops[0].EndStep != "2" {
+		t.Errorf("remap 실패: start=%s end=%s (want 0..2)", loops[0].StartStep, loops[0].EndStep)
+	}
+}
+
+// loop 가 감싸던 step 이 전부 사라지면 loop 도 버리고 사유를 남긴다.
+func TestScenarioLoopDroppedWhenMemberGone(t *testing.T) {
+	content := `{
+	 "steps":[
+	   {"type":"sleep","params":{"seconds":"1"}},
+	   {"type":"bogus","params":{}}
+	 ],
+	 "loops":[{"startStep":"1","endStep":"1","count":"2"}]
+	}`
+	_, loops, warns, err := parseAndValidateScenario(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loops) != 0 {
+		t.Errorf("사라진 step 을 감싸던 loop 가 남았다: %+v", loops)
+	}
+	found := false
+	for _, w := range warns {
+		if strings.Contains(w, "범위를 확정할 수 없습니다") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("제외 사유 경고가 없다: %v", warns)
+	}
+}

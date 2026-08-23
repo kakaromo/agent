@@ -279,3 +279,37 @@ func TestParseNumericParamNoNumber(t *testing.T) {
 		}
 	}
 }
+
+// cmd 는 buildFilterWhere 에서 이스케이프 없이 SQL 에 들어가고, 값의 출처가 자유 서술
+// 채팅에서 파생된 LLM 출력이다. 화이트리스트를 벗어나면 반드시 거부해야 한다.
+func TestBuildAggFilterRejectsUnsafeCmd(t *testing.T) {
+	unsafe := []string{
+		"0x2A' OR 1=1 --",
+		"READ'",
+		"a'; DROP TABLE x; --",
+		"read OR true",
+		"0x2a;",
+		"0x 2a",
+		strings.Repeat("a", 33), // 길이 상한
+	}
+	for _, in := range unsafe {
+		f, _, problem := buildAggFilter(map[string]any{"cmd": in})
+		if f != nil {
+			t.Errorf("%q: 위험한 cmd 가 filter 로 통과했다", in)
+		}
+		if problem == "" {
+			t.Errorf("%q: 조용히 무시됐다 — 사유를 남겨야 한다", in)
+		}
+	}
+}
+
+// 정상 cmd 는 통과해야 한다(화이트리스트가 과하게 막으면 기능이 죽는다).
+func TestBuildAggFilterAcceptsValidCmd(t *testing.T) {
+	// 앞뒤 공백/개행은 TrimSpace 로 정리된 뒤 검사되므로 통과가 정상이다.
+	for _, in := range []string{"0x2a", "0x2A", "0x42", "read", "write", "discard", "flush", " 0x2a ", "0x2a\n"} {
+		f, _, problem := buildAggFilter(map[string]any{"cmd": in})
+		if f == nil {
+			t.Errorf("%q: 정상 cmd 가 거부됐다 (%s)", in, problem)
+		}
+	}
+}

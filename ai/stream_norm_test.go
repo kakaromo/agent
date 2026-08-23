@@ -71,3 +71,23 @@ func TestTermStreamerEmptyToken(t *testing.T) {
 		t.Errorf("빈 입력에 emit 이 %d회 발생", n)
 	}
 }
+
+// 버퍼 상한(400자)에 걸려 emitAll 로 흘러나갈 때 조각 경계의 공백이 사라지면
+// 다음 조각과 단어가 붙는다("aaa tail" → "aaatail"). 종결부호 없는 목록·표에서
+// 실제로 발생하는 경로다.
+func TestTermStreamerKeepsBoundarySpace(t *testing.T) {
+	// n=399 에서 버퍼가 정확히 공백 직전에 비워진다.
+	for _, n := range []int{398, 399, 400, 401} {
+		full := strings.Repeat("a", n) + " tail"
+		var out strings.Builder
+		ts := NewTermStreamer(func(s string) { out.WriteString(s) })
+		for _, r := range full {
+			ts.Write(string(r))
+		}
+		ts.Flush()
+		if got, want := out.String(), NormalizeTerms(full); got != want {
+			t.Errorf("n=%d 경계 공백이 사라졌다:\n got: %q\nwant: %q",
+				n, got[len(got)-10:], want[len(want)-10:])
+		}
+	}
+}

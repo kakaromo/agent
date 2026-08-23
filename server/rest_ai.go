@@ -225,6 +225,9 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 		steps    []aiScenarioStep
 		warnings []string
 	)
+	// 원본 step 인덱스 → 살아남은 step 인덱스. 검증 실패로 버려진 step 이 있으면
+	// 번호가 밀리므로, loops 가 가리키는 인덱스를 이 표로 옮겨야 한다.
+	remap := make(map[int]int, len(raw.Steps))
 	for i, rs := range raw.Steps {
 		typ := strings.TrimSpace(rs.Type)
 		if typ == "" {
@@ -255,6 +258,7 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 			warnings = append(warnings, fmt.Sprintf("step %d: app_macro 는 기록된 매크로를 수동 지정해야 합니다 (AI 가 macroId 를 채울 수 없음)", i))
 		}
 
+		remap[i] = len(steps)
 		steps = append(steps, step)
 	}
 
@@ -271,11 +275,25 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 			warnings = append(warnings, fmt.Sprintf("loop %d: 숫자가 아닌 값 — 제외", i))
 			continue
 		}
-		if ci <= 0 || si < 0 || ei < si || si >= len(steps) {
+		if ci <= 0 || si < 0 || ei < si {
 			warnings = append(warnings, fmt.Sprintf("loop %d: 범위/횟수 유효하지 않음 (start=%d end=%d count=%d) — 제외", i, si, ei, ci))
 			continue
 		}
-		loops = append(loops, aiScenarioLoop{StartStep: start, EndStep: end, Count: count})
+		// **원본 인덱스를 살아남은 인덱스로 옮긴다.** 이 과정을 빼면, 앞쪽 step 이
+		// 검증에서 버려졌을 때 loop 가 엉뚱한 구간을 감싸는데도 경고 없이 통과한다
+		// (인덱스는 원본 기준인데 길이 검사는 필터링 후 기준이라 어긋난 걸 못 잡는다).
+		ns, okStart := remap[si]
+		ne, okEnd := remap[ei]
+		if !okStart || !okEnd {
+			warnings = append(warnings, fmt.Sprintf(
+				"loop %d: 감싸던 step 이 제외되어 범위를 확정할 수 없습니다 (start=%d end=%d) — 제외", i, si, ei))
+			continue
+		}
+		loops = append(loops, aiScenarioLoop{
+			StartStep: strconv.Itoa(ns),
+			EndStep:   strconv.Itoa(ne),
+			Count:     count,
+		})
 	}
 
 	warnings = warnUnclosedTrace(steps, warnings)

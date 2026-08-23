@@ -1,9 +1,6 @@
 package ai
 
-import (
-	"regexp"
-	"strings"
-)
+import "regexp"
 
 // 기술 용어 후처리 — LLM 출력의 번역어를 영어 원문으로 되돌린다.
 //
@@ -117,8 +114,12 @@ func NormalizeTerms(s string) string {
 			return out + suffix
 		})
 	}
-	// 치환으로 생긴 이중 공백 정리.
-	return strings.TrimRight(multiSpace.ReplaceAllString(s, " "), " ")
+	// 치환으로 생긴 이중 공백만 정리한다.
+	//
+	// 끝 공백을 자르지 않는 것이 중요하다 — TermStreamer 가 이 함수를 **조각마다**
+	// 부르므로, 조각 끝의 공백을 없애면 다음 조각과 단어가 붙어버린다("aaa tail" →
+	// "aaatail"). 문서 전체를 한 번에 다듬어야 하는 호출자가 있다면 그쪽에서 자른다.
+	return multiSpace.ReplaceAllString(s, " ")
 }
 
 var multiSpace = regexp.MustCompile(`[ \t]{2,}`)
