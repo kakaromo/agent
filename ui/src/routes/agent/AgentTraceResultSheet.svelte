@@ -4,6 +4,7 @@
 	import { DataTable } from '$lib/components/data-table';
 	import TraceScatterChart from './TraceScatterChart.svelte';
 	import AiChatPanel from './AiChatPanel.svelte';
+	import AgentAttributionView from './AgentAttributionView.svelte';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
@@ -23,6 +24,8 @@
 		stepIndex?: number;
 		loopIndex?: number;
 		repeatIndex?: number;
+		/** "ufs" | "block" | "both" | "fsio_ufs" | "fsio_block". mgmt/Attribution 노출 판단용. */
+		traceType?: string;
 	}
 
 	interface Props {
@@ -52,6 +55,37 @@
 		const ids = mappings.filter(m => m.loopIndex === selectedLoop).map(m => m.traceJobId);
 		return ids.length > 0 ? ids : jobIds;
 	});
+
+	// Attribution 탭이 쓰는 필터. 현재 시트는 서버사이드 필터를 쓰지 않으므로 빈 객체를
+	// 넘긴다 — 드릴다운은 아래 핸들러가 받아 UI 안내만 한다(서버 필터 연동은 후속).
+	function attributionFilter(): TraceFilter {
+		return {};
+	}
+
+	/**
+	 * Attribution 행 클릭 → 해당 값으로 좁혀 보기.
+	 *
+	 * portal 은 이걸 서버사이드 필터로 흘려 chart/stats/raw 를 함께 좁힌다. agent 시트는
+	 * 아직 그 필터 파이프라인이 없어서 지금은 알림만 띄운다 — 값을 조용히 무시하면
+	 * "클릭했는데 아무 일도 안 일어난다" 가 되므로 명시적으로 알린다.
+	 */
+	function handleAttrDrillDown(dim: string, key: string, _additive: boolean) {
+		toast.info(`${dim} = ${key}`, {
+			description: '필터 연동은 후속 작업입니다 — 현재는 값 확인만 가능합니다.'
+		});
+	}
+
+	// 활성 잡의 trace_type. mgmt 섹션과 Attribution 탭은 fsio 에서만 의미가 있다.
+	// mappings 가 비어 있으면(단독 trace 실행) 통계 조회 때 알아낸 값으로 폴백한다.
+	let fallbackTraceType = $state<string | null>(null);
+	const activeTraceType = $derived.by<string | null>(() => {
+		const ids = new Set(activeJobIds);
+		for (const m of mappings) {
+			if (ids.has(m.traceJobId) && m.traceType) return m.traceType;
+		}
+		return fallbackTraceType;
+	});
+	const isFsio = $derived(activeTraceType === 'fsio_ufs' || activeTraceType === 'fsio_block');
 
 	// 다른 job 의 trace 를 열면 loop 선택을 초기화한다 (이전 job 의 Loop N 잔존 방지).
 	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
@@ -681,6 +715,10 @@
 				<Tabs.List class="flex gap-0.5">
 					<Tabs.Trigger value="raw" class="text-[10px] px-3 py-1">Raw Data</Tabs.Trigger>
 					<Tabs.Trigger value="stats" class="text-[10px] px-3 py-1">Statistics</Tabs.Trigger>
+					{#if isFsio}
+						<!-- 귀속 집계는 cross-layer 메타가 있는 fsio 에서만 답이 나온다. -->
+						<Tabs.Trigger value="attribution" class="text-[10px] px-3 py-1">Attribution</Tabs.Trigger>
+					{/if}
 				</Tabs.List>
 
 				<!-- Raw Data Tab -->
@@ -892,6 +930,56 @@
 							</div>
 						{/if}
 
+						<!-- UFS Management Events (fsio_ufs 전용) -->
+						{#if (statsResult.mgmtStats?.length ?? 0) > 0}
+							{@const mgmt = statsResult.mgmtStats}
+							{@const mgmtTotalMs = mgmt.reduce((a, m) => a + m.totalTimeMs, 0)}
+							{@const mgmtRatio = statsResult.durationSeconds > 0
+								? (mgmtTotalMs / (statsResult.durationSeconds * 1000)) * 100 : 0}
+							<div>
+								<div class="flex items-baseline gap-2 mb-1">
+									<h3 class="text-xs font-semibold">UFS Management Events</h3>
+									<!-- 핵심 지표는 건수가 아니라 링크 점유 시간이다. idle 구간에서는
+									     데이터 IO 가 거의 없고 mgmt 가 행의 대부분을 차지한다. -->
+									<span class="text-[9px] text-muted-foreground">
+										링크 점유 {fmtLatency(mgmtTotalMs)}ms · 관측 기간의 {mgmtRatio.toFixed(1)}%
+									</span>
+								</div>
+								<div class="border rounded-md overflow-x-auto">
+									<table class="w-full text-[10px]">
+										<thead class="bg-muted/50">
+											<tr>
+												<th class="text-left px-2 py-1 font-medium">Event</th>
+												<th class="text-left px-2 py-1 font-medium">Kind</th>
+												<th class="text-right px-2 py-1 font-medium">Count</th>
+												<th class="text-right px-2 py-1 font-medium">Paired</th>
+												<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
+												<th class="text-right px-2 py-1 font-medium">Share</th>
+												<th class="text-right px-2 py-1 font-medium">Avg</th>
+												<th class="text-right px-2 py-1 font-medium">Max</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each mgmt as m}
+												<tr class="border-t">
+													<td class="px-2 py-0.5">{m.name}</td>
+													<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
+													<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
+													<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
+													<td class="text-right px-2 py-0.5">
+														{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
+													</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							</div>
+						{/if}
+
 						<!-- Latency Histogram: type별 탭 -->
 						{#if statsResult.latencyHistograms.length > 0}
 							{@const histTypes = [...new Set(statsResult.latencyHistograms.map(h => h.latencyType))]}
@@ -966,6 +1054,19 @@
 						</div>
 					{/if}
 				</Tabs.Content>
+
+				<!-- Attribution Tab (fsio 전용) -->
+				{#if isFsio}
+					<Tabs.Content value="attribution" class="pt-2">
+						<AgentAttributionView
+							serverId={serverId ?? 0}
+							jobIds={activeJobIds}
+							traceType={activeTraceType}
+							filter={attributionFilter()}
+							onDrillDown={handleAttrDrillDown}
+						/>
+					</Tabs.Content>
+				{/if}
 			</Tabs.Root>
 		</div>
 	</Sheet.Content>
