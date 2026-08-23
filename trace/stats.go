@@ -113,7 +113,13 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	}
 	stats.TotalEvents = total
 	if minTime.Valid && maxTime.Valid {
-		stats.DurationSeconds = (maxTime.Float64 - minTime.Float64) / 1000.0
+		// `time` 은 **초** 단위다 (ftrace 는 커널 monotonic clock 의 sec.usec,
+		// bpftrace 는 bpf_ktime_get_ns() 를 sec.usec 로 찍는다). 예전엔 여기서
+		// 1000 으로 나눠 29초짜리 트레이스가 0.029s 로 나왔다 — UI 가 이 값을
+		// 못 믿고 raw 이벤트로 직접 계산하는 우회를 두고 있었을 정도다
+		// (AgentTraceResultSheet 의 rawDurationSeconds).
+		// Rust 도 `max(time) - min(time)` 를 그대로 쓴다 (나누지 않는다).
+		stats.DurationSeconds = maxTime.Float64 - minTime.Float64
 	}
 
 	if total == 0 {
@@ -209,6 +215,13 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 		case strings.HasPrefix(cmd, "D"):
 			cs.TotalSizeBytes *= blockUnit
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
+		// F 로 시작하면 flush (rwbs 는 [RWDF] + flag [FSMA] 조합이라 'F' 가 **첫 자리**면
+		// FLUSH, 뒤에 오면 FUA 다). flush 는 데이터를 안 나르므로 size 는 0 이고
+		// read/write/discard 합산 대상이 아니다 — 단위 변환도 하지 않는다.
+		// 이 분기가 없으면 실기기 수집마다 flush 행이 default 로 새서
+		// "unknown trace cmd opcode" 경고가 쏟아진다.
+		case strings.HasPrefix(cmd, "F"):
+			// 합산 안 함, 단위 변환 안 함.
 		default:
 			// 분류 못한 cmd — UFS 단위 추정만 하고 합산은 보류.
 			// 새 opcode 가 자주 보이면 위 switch 에 추가해야 한다.

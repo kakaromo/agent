@@ -143,3 +143,75 @@ func TestDetectTraceTypeFromDir(t *testing.T) {
 		t.Errorf("빈 디렉토리 판정 = %q, want both", got)
 	}
 }
+
+// rwbs 는 `[RWDF]` + flag `[FSMA]` 조합이라 **첫 글자**로 갈라야 한다.
+// 'F' 가 첫 자리면 FLUSH, 뒤에 오면 FUA 다 — "WF" 를 flush 로 보면 write 바이트를
+// 통째로 잃는다. 실기기 수집에서 실제로 WF/WFS/WSMA 가 나온다.
+func TestFsioRwbsClassifiedByFirstLetter(t *testing.T) {
+	cases := []struct {
+		rwbs string
+		want string // "write" | "flush" | "discard" | "read"
+	}{
+		{"W", "write"}, {"WS", "write"}, {"WSM", "write"}, {"WSMA", "write"},
+		{"WF", "write"}, {"WFS", "write"}, // F 가 뒤 = FUA, flush 아님
+		{"F", "flush"}, {"FS", "flush"}, // F 가 앞 = FLUSH
+		{"R", "read"}, {"RS", "read"},
+		{"D", "discard"}, {"DS", "discard"},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		logFile := filepath.Join(dir, "trace.log")
+		// issue + complete 한 쌍, size 4096
+		mk := func(ts, action, rwbs string) string {
+			return ts + "\tBLK\t1\t1\t0\ttest\tvfs_write\t" + action +
+				"\text4\t8\t0\t0\t4096\t1000\t\t0x0\trwbs=" + rwbs + "\n"
+		}
+		data := mk("1.0", "block_rq_issue", c.rwbs) + mk("2.0", "block_rq_complete", c.rwbs)
+		if err := os.WriteFile(logFile, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := parser.RunParquetOnly(logFile, dir, "fsio_block", nil); err != nil {
+			t.Fatal(err)
+		}
+		stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_block"}}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		switch {
+		case stats.WriteTotalBytes > 0:
+			got = "write"
+		case stats.ReadTotalBytes > 0:
+			got = "read"
+		case stats.DiscardTotalBytes > 0:
+			got = "discard"
+		default:
+			got = "flush" // 합산 대상 아님
+		}
+		if got != c.want {
+			t.Errorf("rwbs=%q → %s, want %s", c.rwbs, got, c.want)
+		}
+	}
+}
+
+// `time` 은 초 단위다. 예전엔 1000 으로 나눠 29초 트레이스가 0.029s 로 나왔다.
+func TestFsioDurationIsSeconds(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "trace.log")
+	data := "100.000000\tBLK\t1\t1\t0\ttest\tvfs_write\tblock_rq_issue\text4\t8\t0\t0\t4096\t1000\t\t0x0\trwbs=W\n" +
+		"130.000000\tBLK\t1\t1\t0\ttest\tvfs_write\tblock_rq_complete\text4\t8\t0\t0\t4096\t1000\t\t0x0\trwbs=W\n"
+	if err := os.WriteFile(logFile, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "fsio_block", nil); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_block"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.DurationSeconds != 30.0 {
+		t.Errorf("duration = %v, want 30 (초 단위 그대로 — 1000 으로 나누면 안 된다)",
+			stats.DurationSeconds)
+	}
+}
