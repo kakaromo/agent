@@ -301,6 +301,10 @@ func parseAndValidateScenario(content string) ([]aiScenarioStep, []aiScenarioLoo
 	return steps, loops, warnings, nil
 }
 
+// defaultTraceType — trace_start/trace_stop 의 trace_type 생략 시 실행부가 쓰는 값.
+// scenario.Specs 의 Default 와 일치해야 한다(steptypes.go 참고).
+const defaultTraceType = "ufs"
+
 // warnUnclosedTrace — trace_start / trace_stop 개수가 맞지 않으면 경고한다.
 //
 // trace 가 중지되지 않으면 수집이 계속 돌아 다음 잡까지 방해하고("trace already
@@ -316,7 +320,13 @@ func warnUnclosedTrace(steps []aiScenarioStep, warnings []string) []string {
 	var order []string
 	seen := make(map[string]bool)
 	for _, s := range steps {
+		// trace_type 을 생략하면 실행부가 기본값("ufs")을 쓴다. 여기서도 같게 정규화하지
+		// 않으면 `trace_start`(생략) 와 `trace_stop`(ufs) 가 서로 다른 키로 세어져
+		// 짝이 맞는데도 "부족합니다" 경고가 뜬다.
 		t := s.Params["trace_type"]
+		if t == "" {
+			t = defaultTraceType
+		}
 		switch s.Type {
 		case "trace_start":
 			starts[t]++

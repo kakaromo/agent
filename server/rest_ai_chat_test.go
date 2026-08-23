@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"agent/ai"
+	"agent/scenario"
 	"agent/trace"
 )
 
@@ -325,4 +326,42 @@ func TestScenarioLoopDroppedWhenMemberGone(t *testing.T) {
 	if !found {
 		t.Errorf("제외 사유 경고가 없다: %v", warns)
 	}
+}
+
+// trace_type 생략은 실행부 기본값과 같게 취급해야 한다.
+// 정규화하지 않으면 짝이 맞는데도 "trace_stop 이 부족합니다" 오탐이 난다.
+func TestWarnUnclosedTraceDefaultType(t *testing.T) {
+	// trace_start 는 생략, trace_stop 은 명시 — 실제로는 같은 ufs 라 짝이 맞는다.
+	steps := []aiScenarioStep{
+		{Type: "trace_start", Params: map[string]string{}},
+		{Type: "trace_stop", Params: map[string]string{"trace_type": "ufs"}},
+	}
+	if w := warnUnclosedTrace(steps, nil); len(w) != 0 {
+		t.Errorf("짝이 맞는데 경고가 났다: %v", w)
+	}
+
+	// 실제로 부족하면 경고해야 한다(과하게 정규화해 놓치면 안 된다).
+	unbalanced := []aiScenarioStep{
+		{Type: "trace_start", Params: map[string]string{"trace_type": "ufs"}},
+	}
+	if w := warnUnclosedTrace(unbalanced, nil); len(w) == 0 {
+		t.Error("trace_stop 이 없는데 경고가 없다")
+	}
+}
+
+// defaultTraceType 이 계약(scenario.Specs)의 Default 와 어긋나면 위 정규화가 틀린다.
+func TestDefaultTraceTypeMatchesContract(t *testing.T) {
+	spec, ok := scenario.Lookup("trace_start")
+	if !ok {
+		t.Fatal("trace_start spec 이 없다")
+	}
+	for _, p := range spec.Params {
+		if p.Name == "trace_type" {
+			if p.Default != defaultTraceType {
+				t.Errorf("계약 기본값(%q)과 defaultTraceType(%q)이 다르다", p.Default, defaultTraceType)
+			}
+			return
+		}
+	}
+	t.Error("trace_start 에 trace_type param 이 없다")
 }
