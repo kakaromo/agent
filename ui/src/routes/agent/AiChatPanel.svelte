@@ -45,11 +45,6 @@
 	let abort: (() => void) | null = null;
 	let logEl: HTMLDivElement | null = $state(null);
 
-	// 대화가 시작됐는지 (패널 노출 판단은 부모가 하고, 여기선 빈 상태 안내에 쓴다)
-	export function hasConversation(): boolean {
-		return turns.length > 0;
-	}
-
 	// 첫 진입 자동 해석 — 부모의 "AI 해석" 버튼이 호출한다.
 	export function startOverview() {
 		if (running) return;

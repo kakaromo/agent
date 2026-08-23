@@ -153,11 +153,11 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 	// AI 해석용 다각도 집계 병합 — tail latency top-N, 시간 구간별 latency 추이.
 	// pb.TraceStats 에 대응 필드가 없어 parquet 에 직접 접근해 계산한다(proto 무변경).
 	// best-effort: 실패해도 나머지 summary 는 그대로 넘긴다.
+	//
+	// tailN=5, timeBins=8 로 작게 유지한다 — 배열이 크면 로컬 소형 모델이 summary 를
+	// "해석"하지 않고 "데이터 구조 나열"로 빠진다(trace.MaxAggRows 주석 참고).
 	if infos, ierr := agent.collectTraceJobInfos([]string{jobID}); ierr != nil {
 		slog.Warn("trace summary: AI extras 대상 조회 실패", "jobId", jobID, "err", ierr)
-		// tailN=5, timeBins=8: 다각도 집계를 작게 유지한다. 배열이 크면 로컬 소형 모델(14b)이
-		// summary JSON 을 "해석"하지 않고 "데이터 구조 나열"로 빠지는 경향이 있어(특히 대용량 trace),
-		// 패턴 파악에 충분한 최소 크기로 제한한다.
 	} else if extras, eerr := trace.ComputeAIExtras(infos, nil, 5, 8); eerr != nil {
 		slog.Warn("trace summary: AI extras 계산 실패", "jobId", jobID, "err", eerr)
 	} else {

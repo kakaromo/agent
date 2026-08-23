@@ -43,7 +43,10 @@ func (c *Client) Reachable(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	resp, err := http.DefaultClient.Do(req)
+	// c.HTTP 를 쓴다(DefaultClient 아님) — 다른 메서드와 동일한 클라이언트를 타야
+	// 테스트에서 스텁으로 교체할 때 여기만 실제 네트워크를 치지 않는다.
+	// 전체 타임아웃은 길지만 위 ctx 가 2초로 제한한다.
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return false
 	}

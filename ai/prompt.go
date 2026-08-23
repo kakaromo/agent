@@ -18,7 +18,7 @@ import (
 // koreanOnly — 모든 프롬프트 앞에 붙이는 언어 고정 지시.
 //
 // qwen 계열 모델은 한국어 지시를 받고도 출력 중간에 모국어(중국어)로 전환하는 경향이 있어
-// (14b 실측 확인), 맨 앞에 강한 한국어 지시를 둔다.
+// 맨 앞에 강한 한국어 지시를 둔다.
 //
 // 단 **기술 용어는 영어 원문을 유지**한다. "꼬리 지연"(tail latency), "소량 쓰기"
 // (small write), "큐 깊이"(QD) 같은 번역어는 parquet 컬럼명(dtoc/qd/opcode)이나
@@ -63,7 +63,6 @@ const koreanOnly = `서술 문장은 한국어로 쓰되, 기술 용어는 영�
 
 `
 
-// traceSystemPrompt — trace 결과 해석용 도메인 지식.
 // traceDomainKnowledge — UFS/Block trace 해석에 필요한 도메인 지식.
 //
 // 단발 리포트(traceSystemPrompt)와 대화형(ChatSystemPrompt)이 공유한다. 두 프롬프트의
@@ -141,8 +140,8 @@ const benchmarkSystemPrompt = koreanOnly + `당신은 storage benchmark(fio 등)
 - 확신이 없으면 "제공된 데이터로는 판단 불가" 라고 명시하세요.`
 
 // SystemPromptFor — jobType 에 맞는 system 프롬프트를 반환한다.
-// trace / benchmark / scenario 를 인식하며, 알 수 없으면 trace 를 기본으로 쓴다
-// (대부분의 미상 잡은 trace 결과 shape 를 따르지 않으므로 호출자가 kind 를 명확히 넘기는 것을 권장).
+// trace / benchmark / scenario 를 인식하며, 알 수 없으면 trace 를 기본으로 쓴다.
+// 호출자는 resolveAISummary 가 확정한 jobType 을 넘기므로 실제로 기본값에 의존하지 않는다.
 func SystemPromptFor(jobType string) string {
 	switch jobType {
 	case "benchmark", "scenario":
@@ -261,8 +260,8 @@ func ChatSystemPrompt(jobType string) string {
 // chatOutputRules — 대화형 출력 규칙. 단발 리포트의 "①~④ 형식" 을 대체한다.
 //
 // 리포트가 아니라 **질문에 답하는 것**이 목적이므로, 묻지 않은 것을 늘어놓지 않게 한다.
-// 로컬 소형 모델이 집계 JSON 을 받으면 "해석" 대신 "구조 나열"로 빠지는 경향이 있어
-// (rest_summary.go 실측), 그 금지를 여기서도 명시한다.
+// 로컬 소형 모델은 집계 JSON 을 받으면 "해석" 대신 "구조 나열"로 빠지는 경향이 있어
+// (trace.MaxAggRows 주석 참고) 그 금지를 여기서도 명시한다.
 const chatOutputRules = `## 답변 방식
 - **질문에 답하는 것이 목적입니다.** 정해진 리포트 형식(①②③) 없이, 묻는 것에
   곧바로 답하세요. 묻지 않은 항목을 늘어놓지 마세요.
@@ -290,8 +289,8 @@ const chatOutputRules = `## 답변 방식
 // BuildChatUserPrompt — 이번 턴의 질문에 집계 결과를 붙여 user 메시지를 만든다.
 //
 // aggJSON 이 비어 있으면 **답할 수 없다는 사실을 명시적으로 지시**한다. 질문만 넘기면
-// 로컬 모델이 배경 summary 나 일반 상식으로 추측해 답해버린다 — 실측으로 확인된 실패
-// 모드다("지난주 유튜브 잡보다 나쁜가?" 에 유튜브의 일반적 I/O 특성을 상상해 비교했다).
+// 로컬 모델이 배경 summary 나 일반 상식으로 추측해 답해버린다("지난주 유튜브 잡보다
+// 나쁜가?" 에 유튜브의 일반적 I/O 특성을 상상해 비교하는 식).
 // 근거 없이 그럴듯한 답을 내는 것이 이 설계가 막으려는 바로 그 상황이라, 여기서 강하게 끊는다.
 func BuildChatUserPrompt(question, aggLabel, aggJSON string) string {
 	if aggJSON == "" {
@@ -318,7 +317,7 @@ func BuildChatUserPrompt(question, aggLabel, aggJSON string) string {
 //
 // overview(전반적 해석 요청)나 benchmark job 이 여기 해당한다. 근거가 이미 앞에
 // 주어져 있으므로 거절 지시를 쓰면 안 된다 — "전반적으로 해석해줘" 에 답을 거부하게
-// 된다(실측으로 확인).
+// 된다.
 func BuildChatSummaryPrompt(question string) string {
 	return fmt.Sprintf(`%s
 

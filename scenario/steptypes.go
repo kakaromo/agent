@@ -1,10 +1,10 @@
 // Package scenario — 시나리오 step 계약의 단일 진실 소스(single source of truth).
 //
 // 배경: step 타입 정의가 네 곳에 손으로 복사돼 있었다.
-//   1. benchmark/scenario.go  executeStepInner 의 switch (실제 동작)
-//   2. ai/prompt.go           AI 프롬프트의 자연어 설명 + schema enum
-//   3. server/rest_ai.go      validateStepParams 의 필수 param 검증
-//   4. ui/.../NodePalette.svelte + types.ts  팔레트 항목 + 색상
+//  1. benchmark/scenario.go  executeStepInner 의 switch (실제 동작)
+//  2. ai/prompt.go           AI 프롬프트의 자연어 설명 + schema enum
+//  3. server/rest_ai.go      validateStepParams 의 필수 param 검증
+//  4. ui/.../NodePalette.svelte + types.ts  팔레트 항목 + 색상
 //
 // 네 곳이 어긋나도 컴파일이 통과했기 때문에, 어긋남이 항상 실기기 세션 중에야
 // 발견됐다. (예: 실행부는 clear_mode="force_stop" 을 기대하는데 프롬프트가 그걸
@@ -279,6 +279,10 @@ var specByType = func() map[string]StepSpec {
 }()
 
 // Lookup — 타입으로 spec 을 찾는다.
+//
+// 현재 프로덕션 호출자는 없고 계약 테스트(steptypes_test.go)에서만 쓴다. 이 파일이
+// step 계약의 단일 진실 소스이므로 조회 API 는 표면으로 남겨둔다 — 드리프트 가드가
+// 주 소비자인 것이 설계 의도다.
 func Lookup(stepType string) (StepSpec, bool) {
 	s, ok := specByType[stepType]
 	return s, ok

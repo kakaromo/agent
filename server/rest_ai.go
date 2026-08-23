@@ -538,9 +538,10 @@ func resolveAISummary(ctx context.Context, agent *DeviceAgentServer, jobID, kind
 	return jobType, dbSummary
 }
 
-// maxScenarioAppList — 프롬프트 폭증 방지용 설치앱 표시 상한.
-// 프롬프트에 넣을 설치앱 최대 개수. 삼성 기기는 런처 앱이 60여 개라 40 이면 시계·노트 등
-// 실사용 앱이 잘려 AI 가 패키지명을 못 찾는다. 14b 컨텍스트 여유 안에서 넉넉히 잡는다.
+// maxScenarioAppList — 프롬프트에 넣을 설치앱 최대 개수(프롬프트 폭증 방지).
+//
+// 제조사 기기는 런처 앱이 60여 개라 상한이 낮으면 시계·노트 같은 실사용 앱이 잘려
+// AI 가 패키지명을 못 찾고 지어낸다. 모델 컨텍스트 여유 안에서 넉넉히 잡는다.
 const maxScenarioAppList = 80
 
 // buildDeviceScenarioContext — deviceId 로 그 기기의 설치앱 + 현재 activity 를 조달해
@@ -591,8 +592,6 @@ func buildDeviceScenarioContext(ctx context.Context, agent *DeviceAgentServer, d
 	return strings.Join(lines, "\n")
 }
 
-// isSystemPackage — launch_app 대상이 되기 어려운 시스템/벤더 패키지 판별.
-// 프롬프트에서 제외해 사용자앱 위주로 노출한다.
 // isSystemPackage — AI 컨텍스트에 넣지 않을 순수 OS 인프라 패키지 판별.
 //
 // 주의: ListInstalledApps 는 LAUNCHER 인텐트를 가진 "런처에 뜨는 앱"만 반환하므로

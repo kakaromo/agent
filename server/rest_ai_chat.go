@@ -258,7 +258,7 @@ func buildChatMessages(jobType, summaryJSON string, history []aiChatMessage, que
 //
 // 빈 문자열을 반환하면 호출자가 "답할 수 없다" 경로를 탄다. 따라서 **overview 는 여기
 // 오면 안 된다** — overview 는 "따로 집계할 필요 없이 배경 summary 로 답하라"는 뜻이라
-// 근거가 이미 있다. 이 구분을 놓치면 "전반적으로 해석해줘" 에 답을 거부한다(실측).
+// 근거가 이미 있다. 이 구분을 놓치면 "전반적으로 해석해줘" 에 답을 거부하게 된다.
 func aggForPrompt(agg *trace.AggResult) (string, string) {
 	if agg == nil || agg.Tool == trace.AggNone || agg.Tool == trace.AggOverview {
 		return "", ""

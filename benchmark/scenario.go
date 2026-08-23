@@ -20,10 +20,10 @@ import (
 
 // expandedStep holds a step with its loop/repeat context for progress reporting.
 type expandedStep struct {
-	step       *pb.ScenarioStep
-	stepIndex  int // original step index
-	loopIndex  int // current loop iteration (1-based, 0 = no loop)
-	loopTotal  int // total loop count (0 = no loop)
+	step        *pb.ScenarioStep
+	stepIndex   int // original step index
+	loopIndex   int // current loop iteration (1-based, 0 = no loop)
+	loopTotal   int // total loop count (0 = no loop)
 	repeatIndex int // current repeat iteration (1-based)
 	repeatTotal int
 }
@@ -226,14 +226,33 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 	}
 	wg.Wait()
 
-	// Determine final state
+	finalState, failMsg := finalizeJobState(job)
+
+	slog.Info("scenario finished", "job_id", job.ID, "state", finalState)
+	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영한다 (cancel 시 running 잔존 버그 방지).
+	// 실패면 어느 스텝이 왜 실패했는지 error_message 로 함께 저장한다.
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
+}
+
+// finalizeJobState — device 별 상태를 모아 job 최종 상태를 확정한다(선형/DAG 공용).
+//
+// 판정 규칙:
+//   - 하나라도 취소 → CANCELLED. cancel 은 사용자의 명시적 의도라 COMPLETED 로 덮지 않는다.
+//   - 전부 실패 → FAILED / 일부 실패 → PARTIALLY_FAILED / 그 외 → COMPLETED
+//
+// 반환하는 failMsg 는 실패한 device 의 첫 에러 메시지다(DB error_message 로 저장되어
+// 어느 스텝이 왜 실패했는지 남긴다).
+//
+// 선형/DAG 두 경로가 같은 규칙을 써야 하므로 한 곳에 둔다 — 예전에는 복붙된 두 블록이라
+// 한쪽만 고치는 사고가 나기 쉬웠다.
+func finalizeJobState(job *Job) (pb.JobState, string) {
 	job.mu.Lock()
-	completed, failed, cancelled := 0, 0, 0
-	var failMsg string // 실패/취소 device 의 첫 에러 메시지 (DB error_message 로 전달)
+	defer job.mu.Unlock()
+
+	failed, cancelled := 0, 0
+	var failMsg string
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
-		case pb.JobState_JOB_STATE_COMPLETED:
-			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
 			if failMsg == "" {
@@ -243,10 +262,10 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 			cancelled++
 		}
 	}
+
 	total := len(job.DeviceStatuses)
 	switch {
 	case cancelled > 0:
-		// 하나라도 취소됐으면 job 은 취소로 본다 (cancel 은 사용자 명시 의도 — COMPLETED 로 덮지 않는다).
 		job.State = pb.JobState_JOB_STATE_CANCELLED
 	case failed == total:
 		job.State = pb.JobState_JOB_STATE_FAILED
@@ -255,13 +274,7 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 	default:
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
-	finalState := job.State
-	job.mu.Unlock()
-
-	slog.Info("scenario finished", "job_id", job.ID, "state", finalState)
-	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영한다 (cancel 시 running 잔존 버그 방지).
-	// 실패면 어느 스텝이 왜 실패했는지 error_message 로 함께 저장한다.
-	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
+	return job.State, failMsg
 }
 
 func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, deviceID string, steps []expandedStep) {
@@ -608,9 +621,9 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		// Initialize device: wake up + home + unlock
 		slog.Info("app_macro: initializing device", "device", deviceID)
-		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP")    // 화면 깨우기
+		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP") // 화면 깨우기
 		time.Sleep(500 * time.Millisecond)
-		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME")      // 홈 화면
+		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME") // 홈 화면
 		time.Sleep(500 * time.Millisecond)
 		md.Device.Shell(ctx, "input swipe 540 2000 540 800 300") // 잠금 화면 스와이프 해제
 		time.Sleep(1 * time.Second)
@@ -1080,35 +1093,7 @@ func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceI
 	}
 	wg.Wait()
 
-	// Determine final state (same as linear mode)
-	job.mu.Lock()
-	completed, failed, cancelled := 0, 0, 0
-	var failMsg string
-	for _, ds := range job.DeviceStatuses {
-		switch ds.State {
-		case pb.JobState_JOB_STATE_COMPLETED:
-			completed++
-		case pb.JobState_JOB_STATE_FAILED:
-			failed++
-			if failMsg == "" {
-				failMsg = ds.Message
-			}
-		case pb.JobState_JOB_STATE_CANCELLED:
-			cancelled++
-		}
-	}
-	total := len(job.DeviceStatuses)
-	if cancelled > 0 {
-		job.State = pb.JobState_JOB_STATE_CANCELLED
-	} else if failed == total {
-		job.State = pb.JobState_JOB_STATE_FAILED
-	} else if failed > 0 {
-		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
-	} else {
-		job.State = pb.JobState_JOB_STATE_COMPLETED
-	}
-	finalState := job.State
-	job.mu.Unlock()
+	finalState, failMsg := finalizeJobState(job)
 
 	slog.Info("scenario DAG finished", "job_id", job.ID, "state", finalState)
 	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
@@ -1574,9 +1559,9 @@ func parseDfOutput(output string) map[string]float64 {
 
 		return map[string]float64{
 			"data_usage_percent": pct,
-			"data_used_gb":      usedKB / (1024 * 1024),
-			"data_avail_gb":     availKB / (1024 * 1024),
-			"data_total_gb":     totalKB / (1024 * 1024),
+			"data_used_gb":       usedKB / (1024 * 1024),
+			"data_avail_gb":      availKB / (1024 * 1024),
+			"data_total_gb":      totalKB / (1024 * 1024),
 		}
 	}
 	return nil
