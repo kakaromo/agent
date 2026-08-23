@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -316,6 +317,10 @@ func (m *Manager) ListDevices() []*pb.DeviceInfo {
 			SdkVersion:     md.SdkVersion,
 		})
 	}
+	// map 순회는 Go 런타임이 순서를 랜덤화하므로 정렬해 안정적인 순서를 보장한다.
+	// 정렬하지 않으면 UI 디바이스 목록이 새로고침마다 뒤바뀌어 사용자가
+	// 엉뚱한 기기를 선택할 수 있다.
+	sort.Slice(result, func(i, j int) bool { return result[i].DeviceId < result[j].DeviceId })
 	return result
 }
 
@@ -325,6 +330,14 @@ func (m *Manager) GetDevice(deviceID string) (*ManagedDevice, error) {
 	defer m.mu.RUnlock()
 	md, ok := m.devices[deviceID]
 	if !ok {
+		// USB 연결 기기는 deviceID 가 시리얼이 아니라 USB 경로("2-1.1.2")다.
+		// 사용자가 `adb devices` 에서 본 시리얼로 호출하면 여기서 실패하는데,
+		// 어떤 ID 를 써야 하는지 알려주지 않으면 원인을 짐작할 수 없다.
+		for id, other := range m.devices {
+			if other.Serial == deviceID {
+				return nil, fmt.Errorf("device not found: %s (시리얼로 호출했습니다. deviceId=%q 를 사용하세요)", deviceID, id)
+			}
+		}
 		return nil, fmt.Errorf("device not found: %s", deviceID)
 	}
 	return md, nil
@@ -349,6 +362,8 @@ func (m *Manager) GetOnlineDevices() []string {
 			ids = append(ids, md.DeviceID)
 		}
 	}
+	// ListDevices 와 동일하게 안정적인 순서 보장 (모니터링 대상 순서가 매번 바뀌지 않도록)
+	sort.Strings(ids)
 	return ids
 }
 

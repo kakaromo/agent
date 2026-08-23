@@ -105,6 +105,10 @@ type ApkController interface {
 	Uninstall(ctx context.Context, req *pb.UninstallApkRequest) (*pb.UninstallApkResponse, error)
 }
 
+// JobFinishHook — job 이 terminal 상태로 종료될 때 호출된다(SSE 구독 여부와 무관).
+// server 레이어가 DB 영속화를 붙이는 용도. state 는 "completed"/"failed"/"cancelled"/"partially_failed".
+type JobFinishHook func(jobID, state, errMsg string)
+
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
 	mu          sync.RWMutex
@@ -116,6 +120,48 @@ type Orchestrator struct {
 	macroMgr    MacroController
 	apkMgr      ApkController
 	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
+	finishHook  JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
+}
+
+// SetJobFinishHook — job 종료 시 호출될 콜백 등록. standalone 에서 DB 영속화 연결용.
+func (o *Orchestrator) SetJobFinishHook(h JobFinishHook) {
+	o.mu.Lock()
+	o.finishHook = h
+	o.mu.Unlock()
+}
+
+// fireFinishHook — job 종료 시 등록된 hook 을 안전하게 호출한다.
+func (o *Orchestrator) fireFinishHook(jobID, state, errMsg string) {
+	o.mu.RLock()
+	h := o.finishHook
+	o.mu.RUnlock()
+	if h != nil {
+		h(jobID, state, errMsg)
+	}
+}
+
+// jobStateHookString — pb.JobState 를 DB/REST 호환 소문자 문자열로 변환.
+//
+// server.jobStateString 과 같은 매핑이지만 패키지 의존 방향(server → benchmark) 때문에
+// 공유하지 않는다. terminal 4개만 다루므로 값이 갈릴 여지는 작다.
+//
+// default 가 "failed" 인 것은 의도적이다. 호출자는 모두 확정된 terminal 상태를 넘기므로
+// 여기 도달하면 안 되지만, 만약 새 상태가 추가돼 매핑이 빠지면 **성공으로 기록되는 쪽이
+// 훨씬 위험하다** — 실패가 조용히 성공으로 남는다. 모르면 실패로 기록하고 로그를 남긴다.
+func jobStateHookString(s pb.JobState) string {
+	switch s {
+	case pb.JobState_JOB_STATE_COMPLETED:
+		return "completed"
+	case pb.JobState_JOB_STATE_FAILED:
+		return "failed"
+	case pb.JobState_JOB_STATE_PARTIALLY_FAILED:
+		return "partially_failed"
+	case pb.JobState_JOB_STATE_CANCELLED:
+		return "cancelled"
+	default:
+		slog.Warn("매핑되지 않은 job 상태 — failed 로 기록", "state", s)
+		return "failed"
+	}
 }
 
 func NewOrchestrator(manager *adb.Manager, toolsDir string) *Orchestrator {
@@ -299,9 +345,12 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job, deviceIDs []str
 	} else {
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
+	finalState := job.State
 	job.mu.Unlock()
 
-	slog.Info("job finished", "job_id", job.ID, "state", job.State, "completed", completed, "failed", failed, "cancelled", cancelled)
+	slog.Info("job finished", "job_id", job.ID, "state", finalState, "completed", completed, "failed", failed, "cancelled", cancelled)
+	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영 (scenario 경로와 동일).
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), "")
 }
 
 func (o *Orchestrator) runOnDeviceWithRetry(ctx context.Context, job *Job, deviceID string) {
@@ -525,9 +574,12 @@ func (o *Orchestrator) SubscribeJobProgress(jobID string) (chan *pb.JobProgress,
 		ch <- p
 	}
 	// If job already finished, close immediately after replay
+	// CANCELLED 도 터미널 상태다. 빠지면 취소로 끝난 잡에 재구독 시 채널이 닫히지
+	// 않고 subscriber 로 등록돼 complete 이벤트를 못 받아 카드가 running 으로 hang 된다.
 	finished := job.State == pb.JobState_JOB_STATE_COMPLETED ||
 		job.State == pb.JobState_JOB_STATE_FAILED ||
-		job.State == pb.JobState_JOB_STATE_PARTIALLY_FAILED
+		job.State == pb.JobState_JOB_STATE_PARTIALLY_FAILED ||
+		job.State == pb.JobState_JOB_STATE_CANCELLED
 	if finished {
 		close(ch)
 	} else {

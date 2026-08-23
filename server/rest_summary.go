@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 
 	pb "agent/pb"
+	"agent/trace"
 )
 
 // buildResultSummary — 잡 종료 시 agent 메모리의 결과를 fetch 해 DB 영구 저장용 summary JSON 으로 변환.
@@ -44,17 +47,35 @@ func buildBenchmarkSummaryFrom(jobID string, resp *pb.GetBenchmarkResultResponse
 	for _, br := range resp.GetResults() {
 		m := br.GetMetrics()
 		// 핵심 키만 추출 (있으면).
-		core := map[string]any{}
-		for _, k := range []string{
+		//
+		// direct 벤치마크는 "read_iops" 처럼 prefix 없는 키를 쓰지만, 시나리오 안에서
+		// 실행된 벤치마크는 "r1_step0_read_iops" 처럼 r{repeat}_[loop{n}_]step{n}_ prefix 가
+		// 붙는다(scenario.go 참고). 따라서 정확 매칭 + 접미사("_<core>") 매칭을 함께 본다.
+		coreKeys := []string{
 			"read_iops", "write_iops",
 			"read_bw_kb", "write_bw_kb",
 			"read_clat_ns_mean", "write_clat_ns_mean",
 			"read_clat_ns_p99.000000", "write_clat_ns_p99.000000",
 			"read_clat_ns_p99.900000", "write_clat_ns_p99.900000",
 			"job_runtime_ms",
-		} {
+		}
+		core := map[string]any{}
+		for _, k := range coreKeys {
 			if v, ok := m[k]; ok {
-				core[k] = v
+				core[k] = v // direct 벤치마크: prefix 없는 정확 키
+			}
+		}
+		// 시나리오 벤치마크: prefix 붙은 키를 접미사로 매칭해 원래 키 이름 그대로 담는다.
+		// 여러 스텝(r1_step0_*, r1_step2_* 등)이 있으면 각각 별도 키로 보존된다.
+		for mk, mv := range m {
+			for _, ck := range coreKeys {
+				if _, taken := core[mk]; taken {
+					continue
+				}
+				if mk != ck && strings.HasSuffix(mk, "_"+ck) {
+					core[mk] = mv
+					break
+				}
 			}
 		}
 		devices = append(devices, map[string]any{
@@ -88,17 +109,29 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 	if s == nil {
 		return "", nil
 	}
-	// cmd top 5 (count 기준)
+	// cmd top 5 (count 기준) — AI 해석용으로 상위 cmd 의 dtoc p99/p999 + continuousRatio 상세 포함.
+	// per-cmd 백분위는 이미 pb.CmdStats 에 계산돼 있어(proto 무변경) 여기서 발췌만 한다.
 	cmds := make([]map[string]any, 0)
 	for i, c := range s.GetCmdStats() {
 		if i >= 5 {
 			break
 		}
-		cmds = append(cmds, map[string]any{
-			"cmd":   c.GetCmd(),
-			"count": c.GetCount(),
-			"ratio": c.GetRatio(),
-		})
+		entry := map[string]any{
+			"cmd":             c.GetCmd(),
+			"count":           c.GetCount(),
+			"ratio":           c.GetRatio(),
+			"continuousRatio": c.GetContinuousRatio(),
+			"totalSizeBytes":  c.GetTotalSizeBytes(),
+		}
+		if d := c.GetDtoc(); d != nil {
+			entry["dtoc"] = map[string]any{
+				"avg":  d.GetAvg(),
+				"p99":  d.GetP99(),
+				"p999": d.GetP999(),
+				"max":  d.GetMax(),
+			}
+		}
+		cmds = append(cmds, entry)
 	}
 	summary := map[string]any{
 		"jobId":             jobID,
@@ -116,6 +149,23 @@ func buildTraceSummary(ctx context.Context, agent *DeviceAgentServer, jobID stri
 		"qd":                latencyStatsToMap(s.GetQd()), // QD 병렬성 해석용
 		"cmdTop":            cmds,
 	}
+
+	// AI 해석용 다각도 집계 병합 — tail latency top-N, 시간 구간별 latency 추이.
+	// pb.TraceStats 에 대응 필드가 없어 parquet 에 직접 접근해 계산한다(proto 무변경).
+	// best-effort: 실패해도 나머지 summary 는 그대로 넘긴다.
+	//
+	// tailN=5, timeBins=8 로 작게 유지한다 — 배열이 크면 로컬 소형 모델이 summary 를
+	// "해석"하지 않고 "데이터 구조 나열"로 빠진다(trace.MaxAggRows 주석 참고).
+	if infos, ierr := agent.collectTraceJobInfos([]string{jobID}); ierr != nil {
+		slog.Warn("trace summary: AI extras 대상 조회 실패", "jobId", jobID, "err", ierr)
+	} else if extras, eerr := trace.ComputeAIExtras(infos, nil, 5, 8); eerr != nil {
+		slog.Warn("trace summary: AI extras 계산 실패", "jobId", jobID, "err", eerr)
+	} else {
+		for k, v := range extras {
+			summary[k] = v
+		}
+	}
+
 	data, err := json.Marshal(summary)
 	if err != nil {
 		return "", err

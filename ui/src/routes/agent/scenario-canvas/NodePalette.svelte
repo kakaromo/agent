@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { STEP_TYPE_COLORS } from './types.js';
+	import { STEP_TYPE_COLORS, STEP_CONTRACTS } from './types.js';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
@@ -20,25 +20,36 @@
 	import CornerUpLeftIcon from '@lucide/svelte/icons/corner-up-left';
 	import CircleStopIcon from '@lucide/svelte/icons/circle-stop';
 
-	const stepTypes = [
-		{ type: 'benchmark', label: 'Benchmark', icon: PlayIcon, desc: 'fio/iozone/tiotest' },
-		{ type: 'iotest', label: 'I/O Test', icon: FlaskConicalIcon, desc: 'syscall I/O 테스트' },
-		{ type: 'shell', label: 'Shell', icon: TerminalIcon, desc: '쉘 명령어' },
-		{ type: 'cleanup', label: 'Cleanup', icon: TrashIcon, desc: '파일 삭제' },
-		{ type: 'sleep', label: 'Sleep', icon: ClockIcon, desc: '대기' },
-		{ type: 'trace_start', label: 'Trace Start', icon: ScanSearchIcon, desc: 'ftrace 시작' },
-		{ type: 'trace_stop', label: 'Trace Stop', icon: SquareIcon, desc: 'ftrace 중지' },
-		{ type: 'launch_app', label: 'Launch App', icon: RocketIcon, desc: '앱 초기화+시작' },
-		{ type: 'stop_app', label: 'Stop App', icon: CircleStopIcon, desc: '앱 완전 종료' },
-		{ type: 'app_macro', label: 'App Macro', icon: SmartphoneIcon, desc: '앱 매크로 실행' },
-		{ type: 'tap_element', label: 'Tap Element', icon: MousePointerClickIcon, desc: '요소 기반 탭' },
-		{ type: 'tap', label: 'Tap', icon: PointerIcon, desc: '좌표 탭' },
-		{ type: 'text', label: 'Text Input', icon: TypeIcon, desc: '텍스트 입력' },
-		{ type: 'scroll', label: 'Scroll', icon: MouseIcon, desc: '피드 스크롤' },
-		{ type: 'key', label: 'Key', icon: CornerUpLeftIcon, desc: '뒤로/홈/제어 키' },
-		{ type: 'install_apk', label: 'Install APK', icon: DownloadIcon, desc: 'APK 설치' },
-		{ type: 'uninstall_apk', label: 'Uninstall APK', icon: PackageMinusIcon, desc: '앱 제거' }
-	];
+	// 팔레트 항목은 Go 계약(scenario.Specs)에서 생성된 STEP_CONTRACTS 로 만든다.
+	// 새 step 을 실행부에 추가하면 팔레트에도 자동으로 나타난다 — 예전엔 이 배열을
+	// 손으로 고쳐야 해서 빠뜨리면 UI 에서 만들 수 없는 step 이 생겼다.
+	const ICONS: Record<string, typeof PlayIcon> = {
+		play: PlayIcon,
+		'flask-conical': FlaskConicalIcon,
+		terminal: TerminalIcon,
+		'trash-2': TrashIcon,
+		clock: ClockIcon,
+		'scan-search': ScanSearchIcon,
+		square: SquareIcon,
+		rocket: RocketIcon,
+		'circle-stop': CircleStopIcon,
+		smartphone: SmartphoneIcon,
+		'mouse-pointer-click': MousePointerClickIcon,
+		pointer: PointerIcon,
+		type: TypeIcon,
+		mouse: MouseIcon,
+		'corner-up-left': CornerUpLeftIcon,
+		download: DownloadIcon,
+		'package-minus': PackageMinusIcon
+	};
+
+	const stepTypes = STEP_CONTRACTS.map((c) => ({
+		type: c.type,
+		label: c.label,
+		desc: c.desc,
+		destructive: c.destructive,
+		icon: ICONS[c.icon] ?? TerminalIcon
+	}));
 
 	function onDragStart(event: DragEvent, type: string) {
 		if (!event.dataTransfer) return;
@@ -85,8 +96,15 @@
 			class="flex items-center gap-1 px-1.5 py-1 rounded border cursor-grab hover:bg-muted/50 active:cursor-grabbing transition-colors"
 		>
 			<st.icon class="size-2.5 shrink-0 {colors.text}" />
-			<div class="min-w-0">
-				<div class="text-[9px] font-medium truncate">{st.label}</div>
+			<div class="min-w-0 flex-1">
+				<!-- 경고 표시는 truncate 밖에 둔다 — 안에 넣으면 라벨이 잘릴 때 같이
+				     사라져서, 정작 가장 위험한 Uninstall APK 에서 안 보인다. -->
+				<div class="flex items-center gap-0.5">
+					<span class="text-[9px] font-medium truncate">{st.label}</span>
+					{#if st.destructive}
+						<span class="text-[9px] text-red-600 shrink-0" title="파괴적 동작 — 앱/파일이 삭제됩니다">⚠</span>
+					{/if}
+				</div>
 				<div class="text-[8px] text-muted-foreground truncate">{st.desc}</div>
 			</div>
 		</div>

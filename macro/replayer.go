@@ -58,7 +58,9 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 		if ev.T > lastT && i > 0 {
 			delay := time.Duration(ev.T-lastT) * time.Millisecond
 			if delay > 0 && delay < 30*time.Minute {
-				time.Sleep(delay)
+				if !sleepCtx(ctx, delay) {
+					return &pb.ReplayMacroResponse{Success: false, Message: "cancelled", OcrResults: ocrResults, Metrics: metrics}, nil
+				}
 			}
 		}
 		lastT = ev.T
@@ -73,9 +75,9 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 
 		case "tap_element":
 			// 현재 화면 요소를 uiautomator 로 재탐색해 중심을 탭한다.
-			// 요소를 못 찾으면(빈 트리/게임/DRM 등) 저장된 x,y 좌표로 폴백.
-			tapped := false
-			els, err := DumpUIElements(ctx, r.dev, false)
+			// 화면 전환/로딩 직후엔 요소가 아직 없을 수 있으므로 짧은 간격으로 여러 번 재탐색한다.
+			// 끝까지 못 찾으면 저장된 x,y 좌표로 폴백하고, 폴백 좌표도 없으면 "not found" 신호를 남긴다
+			// (호출측이 스텝 실패로 처리 — 요소를 못 찾았는데 성공으로 보이는 silent failure 방지).
 			sel := ElementSelector{
 				ResourceID:  ev.ElementResourceId,
 				Text:        ev.ElementText,
@@ -84,24 +86,39 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 				Index:       int(ev.ElementIndex),
 				ContainerID: ev.ElementContainerId,
 			}
-			if err != nil {
-				slog.Warn("tap_element: ui dump failed, using coordinate fallback", "error", err)
-			} else if el := findElement(els, sel); el != nil {
-				// 요소 중심 좌표는 현재 디바이스 해상도 기준이므로 스케일링하지 않는다.
-				r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", el.CenterX, el.CenterY))
-				slog.Info("tap_element: matched element",
-					"resourceId", el.ResourceID, "text", el.Text, "x", el.CenterX, "y", el.CenterY)
-				tapped = true
+			tapped := false
+			const tapElementRetries = 5 // 각 시도 사이 0.5초 → 최대 ~2초 동안 요소 등장 대기
+			for attempt := 0; attempt < tapElementRetries && !tapped; attempt++ {
+				if attempt > 0 && !sleepCtx(ctx, 500*time.Millisecond) {
+					return &pb.ReplayMacroResponse{Success: false, Message: "cancelled", OcrResults: ocrResults, Metrics: metrics}, nil
+				}
+				els, err := DumpUIElements(ctx, r.dev, false)
+				if err != nil {
+					slog.Warn("tap_element: ui dump failed", "attempt", attempt, "error", err)
+					continue
+				}
+				if el := findElement(els, sel); el != nil {
+					// 요소 중심 좌표는 현재 디바이스 해상도 기준이므로 스케일링하지 않는다.
+					r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", el.CenterX, el.CenterY))
+					slog.Info("tap_element: matched element",
+						"attempt", attempt, "resourceId", el.ResourceID, "text", el.Text, "x", el.CenterX, "y", el.CenterY)
+					tapped = true
+				}
 			}
 			if !tapped {
 				// 폴백: 저장된 좌표(녹화 해상도 기준)를 스케일링해 탭.
 				x := int(float64(ev.X) * scaleX)
 				y := int(float64(ev.Y) * scaleY)
-				slog.Warn("tap_element: element not found, coordinate fallback",
-					"resourceId", ev.ElementResourceId, "text", ev.ElementText, "x", x, "y", y)
-				metrics["tap_element_fallback"]++
 				if x != 0 || y != 0 {
+					slog.Warn("tap_element: element not found after retries, coordinate fallback",
+						"resourceId", ev.ElementResourceId, "text", ev.ElementText, "x", x, "y", y)
+					metrics["tap_element_fallback"]++
 					r.dev.Shell(ctx, fmt.Sprintf("input tap %d %d", x, y))
+				} else {
+					// 요소도 못 찾고 폴백 좌표도 없음 → 실패 신호 (호출측이 스텝 실패로 처리).
+					slog.Warn("tap_element: element not found and no fallback coordinate",
+						"resourceId", ev.ElementResourceId, "text", ev.ElementText, "contentDesc", ev.ElementContentDesc)
+					metrics["tap_element_not_found"]++
 				}
 			}
 
@@ -140,7 +157,9 @@ func (r *Replayer) Replay(ctx context.Context, events []*pb.MacroEvent) (*pb.Rep
 			if sec <= 0 {
 				sec = 1
 			}
-			time.Sleep(time.Duration(sec) * time.Second)
+			if !sleepCtx(ctx, time.Duration(sec)*time.Second) {
+				return &pb.ReplayMacroResponse{Success: false, Message: "cancelled", OcrResults: ocrResults, Metrics: metrics}, nil
+			}
 
 		case "wait_until":
 			if err := r.waitUntil(ctx, ev); err != nil {
@@ -378,8 +397,27 @@ func (r *Replayer) doScroll(ctx context.Context, ev *pb.MacroEvent) {
 		}
 		r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d %d", centerX, startY, centerX, endY, dur))
 		if i < count-1 {
-			time.Sleep(pause)
+			// ctx 취소를 존중하는 대기 — cancel 시 즉시 깨어난다(순수 time.Sleep 은 pause 를 다 채워 cancel 을 무시).
+			if !sleepCtx(ctx, pause) {
+				return
+			}
 		}
+	}
+}
+
+// sleepCtx 는 d 만큼 대기하되 ctx 취소 시 즉시 중단한다.
+// 완료까지 잤으면 true, ctx 취소로 중단됐으면 false 를 반환한다.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
@@ -459,7 +497,9 @@ func (r *Replayer) scrollCapture(ctx context.Context, ev *pb.MacroEvent) map[str
 			startY, endY = endY, startY
 		}
 		r.dev.Shell(ctx, fmt.Sprintf("input swipe %d %d %d %d 300", centerX, startY, centerX, endY))
-		time.Sleep(scrollPause)
+		if !sleepCtx(ctx, scrollPause) {
+			break
+		}
 	}
 
 	results["full_text"] = allText.String()

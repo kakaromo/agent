@@ -7,7 +7,7 @@ export interface StepNodeData {
 	label: string;
 	stepType: string;
 	execOrder?: number;  // 실행 순서 (1-based)
-	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'skipped';
+	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 	execLoopCurrent?: number;
 	execLoopTotal?: number;
 	execProgress?: number;
@@ -37,7 +37,7 @@ export interface ConditionNodeData {
 	rules: ConditionRule[];   // 복합 조건
 	logic: string;            // "and" | "or"
 	execOrder?: number;
-	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'skipped';
+	execStatus?: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 }
 
 export interface LoopGroupData {
@@ -62,25 +62,10 @@ export interface NodeExecutionState {
 	error?: string;
 }
 
-export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
-	benchmark: { bg: 'bg-blue-100', text: 'text-blue-700' },
-	iotest: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
-	shell: { bg: 'bg-gray-100', text: 'text-gray-700' },
-	cleanup: { bg: 'bg-orange-100', text: 'text-orange-700' },
-	sleep: { bg: 'bg-yellow-100', text: 'text-yellow-700' },
-	trace_start: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
-	trace_stop: { bg: 'bg-emerald-100', text: 'text-emerald-700' },
-	launch_app: { bg: 'bg-green-100', text: 'text-green-700' },
-	stop_app: { bg: 'bg-red-100', text: 'text-red-700' },
-	app_macro: { bg: 'bg-violet-100', text: 'text-violet-700' },
-	tap_element: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
-	tap: { bg: 'bg-pink-100', text: 'text-pink-700' },
-	text: { bg: 'bg-teal-100', text: 'text-teal-700' },
-	scroll: { bg: 'bg-sky-100', text: 'text-sky-700' },
-	key: { bg: 'bg-slate-100', text: 'text-slate-700' },
-	install_apk: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
-	uninstall_apk: { bg: 'bg-rose-100', text: 'text-rose-700' }
-};
+// step 계약(색상 포함)은 Go 의 scenario.Specs 에서 생성된다 — step-contract.ts 참고.
+// 여기서 재수출해 기존 import 경로를 유지한다.
+export { STEP_TYPE_COLORS, STEP_CONTRACTS, STEP_CONTRACT_BY_TYPE } from './step-contract.js';
+export type { StepContract, StepParamSpec } from './step-contract.js';
 
 export function stepSummary(form: StepForm): string {
 	switch (form.type) {

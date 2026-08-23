@@ -5,9 +5,10 @@
 	import DataTableShell from '$lib/components/DataTableShell.svelte';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import type { ColumnDef } from '@tanstack/table-core';
 
@@ -126,11 +127,59 @@
 	// 만료된 잡의 device id fallback (execution.deviceIds JSON 의 첫 device).
 	let persistedDeviceId = $state<string>('');
 
+	// ── AI 해석 ──
+	// reachable=true 일 때만 버튼 노출. 시트 로컬 state.
+	let aiReachable = $state(false);
+	let aiRunning = $state(false);
+	let aiText = $state('');
+	let aiError = $state('');
+	let aiSource: EventSource | null = null;
+
+	function closeAiSource() {
+		if (aiSource) { aiSource.close(); aiSource = null; }
+	}
+
+	function startAiAnalyze() {
+		if (serverId == null || !jobId) return;
+		closeAiSource();
+		aiRunning = true;
+		aiText = '';
+		aiError = '';
+		const es = createAiAnalyzeSource(serverId, jobId, 'benchmark');
+		aiSource = es;
+
+		es.addEventListener('token', (e: MessageEvent) => {
+			try {
+				const d = JSON.parse(e.data);
+				if (typeof d?.text === 'string') aiText += d.text;
+			} catch { /* ignore */ }
+		});
+
+		es.addEventListener('done', () => {
+			closeAiSource();
+			aiRunning = false;
+		});
+
+		es.addEventListener('error', (e: MessageEvent) => {
+			let msg = 'AI 해석 실패';
+			try { const d = JSON.parse((e as MessageEvent).data); if (d?.error) msg = d.error; } catch { /* SSE 연결 에러엔 data 없음 */ }
+			closeAiSource();
+			aiRunning = false;
+			if (!aiText) aiError = msg;
+		});
+	}
+
 	$effect(() => {
-		if (open && serverId != null && jobId != null) { loadDetail(); loadExecutionConfig(); }
-		if (!open) stopPolling();
+		if (open && serverId != null && jobId != null) {
+			loadDetail(); loadExecutionConfig();
+			getAiStatus().then(s => { aiReachable = !!(s.enabled && s.reachable); }).catch(() => { aiReachable = false; });
+		}
+		if (!open) {
+			stopPolling();
+			closeAiSource(); aiRunning = false; aiText = ''; aiError = '';
+		}
 	});
-	onDestroy(() => stopPolling());
+	onDestroy(() => { stopPolling(); closeAiSource(); });
 
 	async function loadExecutionConfig() {
 		if (!jobId) return;
@@ -195,20 +244,48 @@
 		}
 	}
 
+	/**
+	 * agent 재시작으로 메모리에서 만료된 잡의 상태를 DB 값으로 되살린다.
+	 *
+	 * GetJobStatus 는 만료 시 404 + {error, state:"failed"} 를 주고 client.ts 가 이를
+	 * 정상 데이터로 통과시킨다(portal 호환). 하지만 그 "failed" 는 "조회 불가"라는 뜻일 뿐이며,
+	 * 실제 종료 상태는 job_executions 에 영구 저장돼 있다. 구분하지 않으면 agent 재시작 후
+	 * 과거 성공 잡이 모두 '실패'로 표시된다.
+	 *
+	 * 만료 응답은 error 필드가 있고 deviceStatuses 가 비어 있어 정상 응답과 구별된다.
+	 */
+	async function resolveExpiredStatus(res: JobStatus): Promise<JobStatus> {
+		const expired = !!(res as any).error && !(res.deviceStatuses?.length);
+		if (!expired || !jobId) return res;
+		try {
+			const exec = await fetchExecutionByJobId(jobId);
+			if (!exec?.state) return res;
+			return {
+				...res,
+				state: exec.state,
+				deviceStatuses: exec.errorMessage
+					? [{ deviceId: '', state: exec.state, message: exec.errorMessage, progressPercent: 0 } as any]
+					: []
+			} as JobStatus;
+		} catch {
+			return res; // DB 에도 없으면 원래 응답(failed) 유지
+		}
+	}
+
 	async function loadDetail() {
 		if (serverId == null || jobId == null) return;
 		loading = true; jobStatus = null; result = null; selectedDevice = null; stopPolling();
 		try {
 			const res = await getJobStatus(serverId, jobId);
-			jobStatus = res;
-			if (isTerminal(res.state)) {
+			jobStatus = await resolveExpiredStatus(res);
+			if (isTerminal(jobStatus!.state)) {
 				try {
 					result = await getBenchmarkResult(serverId, jobId);
 					if (result.results.length > 0) selectedDevice = result.results[0].deviceId;
 				} catch {}
 			} else { startPolling(); }
 		} catch {
-			// Job not found (404) — 실패 상태로 표시
+			// Job not found — DB 에도 없으면 실패로 표시
 			jobStatus = { jobId: jobId ?? '', state: 'failed', totalDevices: 0, completedDevices: 0, failedDevices: 0, deviceStatuses: [] } as any;
 		}
 		finally { loading = false; }
@@ -697,6 +774,7 @@
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'running': case 'pushing_tools': case 'collecting': return 'bg-blue-100 text-blue-800';
 			case 'failed': return 'bg-red-100 text-red-800';
+			case 'partially_failed': return 'bg-orange-100 text-orange-800';
 			case 'cancelled': return 'bg-orange-100 text-orange-800';
 			default: return 'bg-gray-100 text-gray-800';
 		}
@@ -756,6 +834,20 @@
 						<ScanSearchIcon class="size-3" /> Trace 분석 ({selectedTraceIds.size > 0 ? selectedTraceIds.size : traceJobIds.length})
 					</button>
 				{/if}
+				{#if aiReachable && jobId}
+					<button
+						onclick={startAiAnalyze}
+						disabled={aiRunning}
+						class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50"
+						title="AI 로 벤치마크 결과를 자연어 해석"
+					>
+						{#if aiRunning}
+							<LoaderIcon class="size-3 animate-spin" /> 해석 중...
+						{:else}
+							<SparklesIcon class="size-3" /> AI 해석
+						{/if}
+					</button>
+				{/if}
 				<button onclick={loadDetail} disabled={loading} class="p-1 rounded hover:bg-muted">
 					<RefreshCwIcon class="size-3.5 {loading ? 'animate-spin' : ''}" />
 				</button>
@@ -769,6 +861,21 @@
 		</Sheet.Header>
 
 		<div class="flex-1 overflow-y-auto space-y-4 px-1">
+			<!-- AI 해석 패널 (스트리밍) -->
+			{#if aiReachable && (aiRunning || aiText || aiError)}
+				<div class="border rounded-md bg-muted/20 p-2.5 space-y-1.5">
+					<div class="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+						<SparklesIcon class="size-3" /> AI 해석
+						{#if aiRunning}<LoaderIcon class="size-3 animate-spin" />{/if}
+					</div>
+					{#if aiError}
+						<div class="text-[11px] text-destructive">{aiError}</div>
+					{:else}
+						<div class="text-[11px] leading-relaxed whitespace-pre-wrap">{aiText}{#if aiRunning}<span class="inline-block w-1.5 h-3 -mb-0.5 bg-foreground/60 animate-pulse"></span>{/if}</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- 시나리오 캔버스 추적 (접기/펼치기) -->
 			{#if executionConfig?.steps && executionConfig.steps.length > 0}
 				<div class="border rounded-md overflow-hidden">
@@ -785,6 +892,8 @@
 							<span class="text-[10px] text-green-600 font-normal">완료</span>
 						{:else if jobStatus?.state === 'failed' || jobStatus?.state === 'partially_failed'}
 							<span class="text-[10px] text-red-600 font-normal">실패</span>
+						{:else if jobStatus?.state === 'cancelled'}
+							<span class="text-[10px] text-orange-600 font-normal">취소됨</span>
 						{/if}
 						<span class="ml-auto text-[9px] text-muted-foreground font-normal">{executionConfig.steps.length} steps</span>
 					</button>
@@ -794,6 +903,8 @@
 								stepsJson={JSON.stringify(executionConfig.steps)}
 								loopsJson={executionConfig.loops ? JSON.stringify(executionConfig.loops) : undefined}
 								activeJob={activeJob ?? null}
+								finishedState={jobStatus?.state ?? null}
+								finishedMessages={jobStatus?.deviceStatuses?.map(d => d.message).filter(Boolean) ?? []}
 							/>
 						</div>
 					{/if}

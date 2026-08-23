@@ -10,6 +10,8 @@
 		exportAllScenarioTemplates,
 		importScenarioTemplates,
 		runScenario,
+		generateScenario,
+		getAiStatus,
 		type ScenarioTemplate
 	} from '$lib/api/agent.js';
 	import type { ActiveJob } from '../types.js';
@@ -23,6 +25,7 @@
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import UploadIcon from '@lucide/svelte/icons/upload';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	interface Props {
@@ -35,10 +38,12 @@
 		onLoadTemplate: (t: ScenarioTemplate) => void;
 		onClearCanvas: () => void;
 		onAutoLayout: () => void;
+		// AI 자연어 생성 결과(steps/loops proto wire shape)를 캔버스에 주입.
+		onGenerate: (steps: any[], loops: any[]) => void;
 		loopMembers: Map<string, Set<string>>;
 	}
 
-	let { nodes, edges, serverId, selectedDevices, serverName, onJobStarted, onLoadTemplate, onClearCanvas, onAutoLayout, loopMembers }: Props = $props();
+	let { nodes, edges, serverId, selectedDevices, serverName, onJobStarted, onLoadTemplate, onClearCanvas, onAutoLayout, onGenerate, loopMembers }: Props = $props();
 
 	let templates = $state<ScenarioTemplate[]>([]);
 	let selectedTemplateId = $state<number | null>(null);
@@ -54,6 +59,39 @@
 	let confirmAction = $state<() => Promise<void>>(async () => {});
 
 	let deviceCount = $derived(selectedDevices.size);
+
+	// ── AI 자연어 생성 ──
+	// reachable=true 일 때만 버튼 노출.
+	let aiReachable = $state(false);
+	let showGenerate = $state(false);
+	let generatePrompt = $state('');
+	let generating = $state(false);
+	// 생성 대상 디바이스 — 선택된 것 중 첫 device (deviceId 로 백엔드가 설치앱/현재화면 반영).
+	let targetDeviceId = $derived([...selectedDevices][0]);
+
+	getAiStatus().then(s => { aiReachable = !!(s.enabled && s.reachable); }).catch(() => { aiReachable = false; });
+
+	async function handleGenerate() {
+		const prompt = generatePrompt.trim();
+		if (!prompt) { toast.error('생성할 시나리오를 자연어로 입력하세요'); return; }
+		generating = true;
+		try {
+			const res = await generateScenario(prompt, targetDeviceId);
+			(res.warnings ?? []).forEach(w => toast.warning(w));
+			if (res.steps.length === 0) {
+				toast.error('생성된 step 이 없습니다');
+				return;
+			}
+			onGenerate(res.steps, res.loops);
+			toast.success(`${res.steps.length}개 step 생성됨`);
+			showGenerate = false;
+			generatePrompt = '';
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '시나리오 생성 실패');
+		} finally {
+			generating = false;
+		}
+	}
 
 	loadTemplates();
 
@@ -312,6 +350,16 @@
 		<LayoutGridIcon class="size-3" /> 정렬
 	</button>
 
+	{#if aiReachable}
+		<button
+			onclick={() => { showGenerate = !showGenerate; }}
+			class="inline-flex items-center gap-1 rounded border px-1.5 py-1 text-[9px] hover:bg-muted {showGenerate ? 'bg-muted' : ''}"
+			title="AI 로 자연어 시나리오 생성"
+		>
+			<SparklesIcon class="size-3" /> 자연어로 생성
+		</button>
+	{/if}
+
 	<div class="flex-1"></div>
 
 	<!-- Device count -->
@@ -345,3 +393,35 @@
 		실행
 	</button>
 </div>
+
+<!-- AI 자연어 생성 패널 (toolbar 아래 펼침) -->
+{#if aiReachable && showGenerate}
+	<div class="border-b bg-muted/20 px-3 py-2.5 space-y-2">
+		<div class="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
+			<SparklesIcon class="size-3" /> 자연어로 시나리오 생성
+			{#if targetDeviceId}
+				<span class="font-mono text-[9px] font-normal text-blue-600" title="이 디바이스의 설치앱·현재 화면을 반영">대상: {targetDeviceId}</span>
+			{:else}
+				<span class="text-[9px] font-normal text-amber-600">대상 디바이스를 선택하면 더 정확합니다</span>
+			{/if}
+		</div>
+		<textarea
+			bind:value={generatePrompt}
+			rows="3"
+			placeholder="예) 유튜브를 실행하고 검색창에 'lofi' 를 입력한 뒤 첫 영상을 재생, 이 과정을 3번 반복"
+			class="w-full resize-y rounded border bg-background px-2 py-1.5 text-[11px] leading-relaxed focus:outline-none focus:ring-1 focus:ring-blue-500"
+			onkeydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleGenerate(); }}
+		></textarea>
+		<div class="flex items-center justify-end gap-2">
+			<span class="mr-auto text-[9px] text-muted-foreground">Cmd/Ctrl + Enter 로 생성. 기존 캔버스를 덮어씁니다.</span>
+			<button onclick={() => { showGenerate = false; }} class="rounded border px-2 py-1 text-[9px] hover:bg-muted">취소</button>
+			<button
+				onclick={handleGenerate}
+				disabled={generating || !generatePrompt.trim()}
+				class="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1 text-[9px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+			>
+				{#if generating}<LoaderIcon class="size-3 animate-spin" /> 생성 중...{:else}<SparklesIcon class="size-3" /> 생성{/if}
+			</button>
+		</div>
+	</div>
+{/if}

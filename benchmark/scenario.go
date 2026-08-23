@@ -13,16 +13,17 @@ import (
 
 	"agent/adb"
 	pb "agent/pb"
+	"agent/scenario"
 
 	"github.com/google/uuid"
 )
 
 // expandedStep holds a step with its loop/repeat context for progress reporting.
 type expandedStep struct {
-	step       *pb.ScenarioStep
-	stepIndex  int // original step index
-	loopIndex  int // current loop iteration (1-based, 0 = no loop)
-	loopTotal  int // total loop count (0 = no loop)
+	step        *pb.ScenarioStep
+	stepIndex   int // original step index
+	loopIndex   int // current loop iteration (1-based, 0 = no loop)
+	loopTotal   int // total loop count (0 = no loop)
 	repeatIndex int // current repeat iteration (1-based)
 	repeatTotal int
 }
@@ -108,6 +109,16 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		return "", fmt.Errorf("no steps defined")
 	}
 
+	// 실행 전 계약 검증 (드라이런).
+	//
+	// 예전엔 AI 생성 경로에만 검증이 있어서, 캔버스에서 손으로 만들거나 JSON 으로
+	// import 한 시나리오는 무검증으로 실행됐다. 그래서 launch_app 에 package_name 이
+	// 없거나 clear_mode 오타가 있어도 잡을 만들어 디바이스까지 간 뒤에야 실패했다.
+	// 여기서 미리 잡으면 원인이 분명한 에러 하나로 끝난다.
+	if issues := validateScenarioSteps(req.Steps); len(issues) > 0 {
+		return "", fmt.Errorf("시나리오 검증 실패:\n%s", strings.Join(issues, "\n"))
+	}
+
 	policy := req.BusyPolicy
 	for _, id := range deviceIDs {
 		if err := o.checkDeviceBusy(id, policy); err != nil {
@@ -147,6 +158,52 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 	return jobID, nil
 }
 
+// validateScenarioSteps — 실행 전 step 계약 검증 (드라이런).
+//
+// 계약은 scenario.Specs 가 소유한다. 여기서는 실행 경로 특유의 예외만 다룬다:
+//   - app_macro: params 가 아니라 step.Macro 로 전달된다 (계약 밖)
+//   - stop_app: package_name 이 비면 실행부가 경고 후 skip 한다 (관대한 처리를 유지)
+//   - condition: DAG 제어 노드라 일반 step 계약 대상이 아니다
+//
+// 반환값은 사람이 읽는 위반 목록. 비어 있으면 통과.
+func validateScenarioSteps(steps []*pb.ScenarioStep) []string {
+	var issues []string
+	for i, s := range steps {
+		if s == nil {
+			continue
+		}
+		typ := strings.TrimSpace(s.Type)
+		if typ == "" {
+			issues = append(issues, fmt.Sprintf("step %d: type 이 비어 있습니다", i))
+			continue
+		}
+		if scenario.IsControlOnly(typ) {
+			continue
+		}
+		if typ == "app_macro" {
+			// 매크로 본문은 params 가 아니라 Macro 필드로 온다.
+			if s.Macro == nil {
+				issues = append(issues, fmt.Sprintf("step %d (app_macro): 매크로 설정이 없습니다", i))
+			}
+			continue
+		}
+		if typ == "stop_app" && strings.TrimSpace(s.Params["package_name"]) == "" {
+			// 실행부가 skip 으로 처리하는 관대한 케이스 — 실행을 막지 않는다.
+			continue
+		}
+		// Tool 은 proto enum — 계약은 문자열을 받으므로 이름으로 변환한다.
+		// UNSPECIFIED(0) 는 빈 문자열이 되어 "tool 필요" 검증에 걸린다.
+		toolName := ""
+		if s.Tool != pb.BenchmarkTool_BENCHMARK_TOOL_UNSPECIFIED {
+			toolName = defaultToolNameFor(s.Tool)
+		}
+		if reason := scenario.ValidateParams(typ, toolName, s.Params); reason != "" {
+			issues = append(issues, fmt.Sprintf("step %d (%s): %s", i, typ, reason))
+		}
+	}
+	return issues
+}
+
 func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs []string, steps []expandedStep, policy string) {
 	defer job.closeSubscribers()
 
@@ -169,28 +226,55 @@ func (o *Orchestrator) executeScenario(ctx context.Context, job *Job, deviceIDs 
 	}
 	wg.Wait()
 
-	// Determine final state
+	finalState, failMsg := finalizeJobState(job)
+
+	slog.Info("scenario finished", "job_id", job.ID, "state", finalState)
+	// SSE 구독 여부와 무관하게 최종 상태를 DB 에 반영한다 (cancel 시 running 잔존 버그 방지).
+	// 실패면 어느 스텝이 왜 실패했는지 error_message 로 함께 저장한다.
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
+}
+
+// finalizeJobState — device 별 상태를 모아 job 최종 상태를 확정한다(선형/DAG 공용).
+//
+// 판정 규칙:
+//   - 하나라도 취소 → CANCELLED. cancel 은 사용자의 명시적 의도라 COMPLETED 로 덮지 않는다.
+//   - 전부 실패 → FAILED / 일부 실패 → PARTIALLY_FAILED / 그 외 → COMPLETED
+//
+// 반환하는 failMsg 는 실패한 device 의 첫 에러 메시지다(DB error_message 로 저장되어
+// 어느 스텝이 왜 실패했는지 남긴다).
+//
+// 선형/DAG 두 경로가 같은 규칙을 써야 하므로 한 곳에 둔다 — 예전에는 복붙된 두 블록이라
+// 한쪽만 고치는 사고가 나기 쉬웠다.
+func finalizeJobState(job *Job) (pb.JobState, string) {
 	job.mu.Lock()
-	completed, failed := 0, 0
+	defer job.mu.Unlock()
+
+	failed, cancelled := 0, 0
+	var failMsg string
 	for _, ds := range job.DeviceStatuses {
 		switch ds.State {
-		case pb.JobState_JOB_STATE_COMPLETED:
-			completed++
 		case pb.JobState_JOB_STATE_FAILED:
 			failed++
+			if failMsg == "" {
+				failMsg = ds.Message
+			}
+		case pb.JobState_JOB_STATE_CANCELLED:
+			cancelled++
 		}
 	}
+
 	total := len(job.DeviceStatuses)
-	if failed == total {
+	switch {
+	case cancelled > 0:
+		job.State = pb.JobState_JOB_STATE_CANCELLED
+	case failed == total:
 		job.State = pb.JobState_JOB_STATE_FAILED
-	} else if failed > 0 {
+	case failed > 0:
 		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
-	} else {
+	default:
 		job.State = pb.JobState_JOB_STATE_COMPLETED
 	}
-	job.mu.Unlock()
-
-	slog.Info("scenario finished", "job_id", job.ID, "state", job.State)
+	return job.State, failMsg
 }
 
 func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, deviceID string, steps []expandedStep) {
@@ -252,6 +336,17 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 		}
 
 		if err != nil {
+			// 실행 중인 스텝이 취소로 중단된 경우는 실패가 아니라 취소로 기록한다.
+			// (스텝 경계의 ctx.Err() 체크는 실행 중 취소를 잡지 못하고 이 분기가 먼저 잡는다)
+			if ctx.Err() != nil {
+				// 메시지에 step 번호를 남긴다 — UI 가 어느 스텝에서 중단됐는지
+				// 파싱해 그 스텝만 취소로 표시할 수 있어야 한다.
+				cancelMsg := fmt.Sprintf("%s cancelled", msg)
+				slog.Info("scenario step cancelled", "job_id", job.ID, "device", deviceID, "step", es.stepIndex, "type", es.step.Type)
+				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, cancelMsg, progress)
+				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, cancelMsg, traceJobMappings...)
+				return
+			}
 			errMsg := fmt.Sprintf("%s failed: %s", msg, err.Error())
 			slog.Error("scenario step failed", "job_id", job.ID, "device", deviceID, "step", es.stepIndex, "type", es.step.Type, "error", err)
 			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, progress)
@@ -301,6 +396,15 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 			o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING,
 				msg+" completed", stepProgress)
 		}
+	}
+
+	// 루프 완주 후에도 cancel 여부를 최종 확인한다. 마지막 스텝이 cancel 로 깨어나 정상 리턴한 경우
+	// (예: scroll pause 가 sleepCtx 로 중단됨) 스텝 경계 체크를 지나쳐 여기 도달할 수 있으므로,
+	// COMPLETED 로 기록하기 전에 ctx 취소를 반영해 CANCELLED 로 마무리한다.
+	if ctx.Err() != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+		o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+		return
 	}
 
 	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())
@@ -451,7 +555,12 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		if sec <= 0 {
 			sec = 1
 		}
-		time.Sleep(time.Duration(sec) * time.Second)
+		// ctx 취소를 존중하는 대기 — cancel 시 즉시 깨어난다(순수 time.Sleep 은 sec 를 다 채워 cancel 을 무시).
+		select {
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		case <-time.After(time.Duration(sec) * time.Second):
+		}
 		return "", nil, nil
 	case "trace_start":
 		if o.traceMgr == nil {
@@ -512,9 +621,9 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		}
 		// Initialize device: wake up + home + unlock
 		slog.Info("app_macro: initializing device", "device", deviceID)
-		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP")    // 화면 깨우기
+		md.Device.Shell(ctx, "input keyevent KEYCODE_WAKEUP") // 화면 깨우기
 		time.Sleep(500 * time.Millisecond)
-		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME")      // 홈 화면
+		md.Device.Shell(ctx, "input keyevent KEYCODE_HOME") // 홈 화면
 		time.Sleep(500 * time.Millisecond)
 		md.Device.Shell(ctx, "input swipe 540 2000 540 800 300") // 잠금 화면 스와이프 해제
 		time.Sleep(1 * time.Second)
@@ -634,8 +743,32 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		for k, v := range resp.Metrics {
 			metrics[k] = v
 		}
-		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|success=%t",
-			step.Params["element_resource_id"], step.Params["element_text"], resp.Success), metrics, nil
+		// 요소를 못 찾고 폴백 좌표도 없었으면 스텝 실패로 처리한다.
+		// (요소를 못 찾았는데 성공으로 넘어가는 silent failure 방지 — replayer 가 재탐색까지 한 뒤의 결과.)
+		if metrics["tap_element_not_found"] > 0 {
+			// 현재 포커스 화면을 함께 알려준다. 권한 다이얼로그(permissioncontroller) 나
+			// 다른 앱이 화면을 가려 실패하는 경우가 흔한데, 요소 이름만 보여주면
+			// 사용자가 원인을 짐작할 수 없다.
+			//
+			// ctx 가 이미 취소된 경우(사용자가 잡을 취소)는 조회하지 않는다.
+			// 취소는 상위 err 분기에서 CANCELLED 로 처리되므로 이 힌트가 쓰이지 않는데,
+			// 취소된 ctx 로 adb 를 호출하면 취소 응답만 늦어진다.
+			focusHint := ""
+			if ctx.Err() == nil && md != nil && md.Device != nil {
+				if focus, err := md.Device.Shell(ctx, "dumpsys window | grep mCurrentFocus"); err == nil {
+					if f := strings.TrimSpace(focus); f != "" {
+						focusHint = fmt.Sprintf(" 현재 화면: %s", f)
+					}
+				}
+			}
+			return "", nil, fmt.Errorf("tap_element: 요소를 찾을 수 없습니다 (resource_id=%q text=%q content_desc=%q). 재시도 후에도 화면에서 대상을 못 찾았습니다.%s",
+				step.Params["element_resource_id"], step.Params["element_text"], step.Params["element_content_desc"], focusHint)
+		}
+		// content_desc 도 남긴다 — AI 생성 시나리오는 이 필드를 주로 쓰므로
+		// 빠뜨리면 raw output 에 "id=|text=" 만 찍혀 무엇을 탭했는지 알 수 없다.
+		return fmt.Sprintf("TAP_ELEMENT|id=%s|text=%s|desc=%s|success=%t",
+			step.Params["element_resource_id"], step.Params["element_text"],
+			step.Params["element_content_desc"], resp.Success), metrics, nil
 	case "tap":
 		// 절대 좌표 탭. 커스텀뷰(요소 미노출) 화면 — 삼성 노트 AI 메뉴, 게임 등 —
 		// tap_element 로 못 잡는 버튼을 좌표로 직접 누른다. 스케일링 없이 raw 좌표 그대로.
@@ -960,28 +1093,10 @@ func (o *Orchestrator) executeScenarioDAG(ctx context.Context, job *Job, deviceI
 	}
 	wg.Wait()
 
-	// Determine final state (same as linear mode)
-	job.mu.Lock()
-	completed, failed := 0, 0
-	for _, ds := range job.DeviceStatuses {
-		switch ds.State {
-		case pb.JobState_JOB_STATE_COMPLETED:
-			completed++
-		case pb.JobState_JOB_STATE_FAILED:
-			failed++
-		}
-	}
-	total := len(job.DeviceStatuses)
-	if failed == total {
-		job.State = pb.JobState_JOB_STATE_FAILED
-	} else if failed > 0 {
-		job.State = pb.JobState_JOB_STATE_PARTIALLY_FAILED
-	} else {
-		job.State = pb.JobState_JOB_STATE_COMPLETED
-	}
-	job.mu.Unlock()
+	finalState, failMsg := finalizeJobState(job)
 
-	slog.Info("scenario DAG finished", "job_id", job.ID, "state", job.State)
+	slog.Info("scenario DAG finished", "job_id", job.ID, "state", finalState)
+	o.fireFinishHook(job.ID, jobStateHookString(finalState), failMsg)
 }
 
 func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, deviceID string,
@@ -1112,6 +1227,15 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 
 			if execErr != nil {
+				// 실행 중 취소는 실패가 아니라 취소로 기록 (선형 모드와 동일)
+				if ctx.Err() != nil {
+					// step 번호를 남겨 UI 가 중단 지점을 식별할 수 있게 한다
+					cancelMsg := fmt.Sprintf("step %d (%s) cancelled", currentStep, step.Type)
+					slog.Info("scenario step cancelled", "job_id", job.ID, "device", deviceID, "step", currentStep, "type", step.Type)
+					o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, cancelMsg, 0)
+					o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, cancelMsg, traceJobMappings...)
+					return
+				}
 				errMsg := fmt.Sprintf("step %d (%s) failed: %s", currentStep, step.Type, execErr.Error())
 				o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_FAILED, errMsg, 0)
 				o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, errMsg, traceJobMappings...)
@@ -1167,6 +1291,13 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 			currentStep = nextStep
 		}
+	}
+
+	// DAG 완주 후에도 cancel 여부 최종 확인 (선형 경로와 동일 — cancel 로 깨어난 스텝이 정상 리턴한 경우 대비).
+	if ctx.Err() != nil {
+		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_CANCELLED, "cancelled", 0)
+		o.storeResult(job, deviceID, startedAt, rawOutput.String(), allMetrics, false, "cancelled", traceJobMappings...)
+		return
 	}
 
 	o.updateDeviceStatusWithResult(job, deviceID, pb.JobState_JOB_STATE_COMPLETED, "done", 100, allMetrics, rawOutput.String())
@@ -1428,9 +1559,9 @@ func parseDfOutput(output string) map[string]float64 {
 
 		return map[string]float64{
 			"data_usage_percent": pct,
-			"data_used_gb":      usedKB / (1024 * 1024),
-			"data_avail_gb":     availKB / (1024 * 1024),
-			"data_total_gb":     totalKB / (1024 * 1024),
+			"data_used_gb":       usedKB / (1024 * 1024),
+			"data_avail_gb":      availKB / (1024 * 1024),
+			"data_total_gb":      totalKB / (1024 * 1024),
 		}
 	}
 	return nil

@@ -96,7 +96,10 @@ func (db *DB) UpdateJobExecutionState(ctx context.Context, jobID, state, errMsg 
 		q += `, completed_at=?`
 		args = append(args, now)
 	}
-	q += ` WHERE job_id=?`
+	// 이미 terminal 상태(completed/failed/cancelled/partially_failed)인 잡은 덮어쓰지 않는다.
+	// agent 재시작 후 in-memory 잡이 사라지면 status 조회가 'not found → failed' 로 정리하려 드는데,
+	// 이미 completed 로 끝나 DB 에 저장된 잡까지 failed 로 오염되는 것을 막는다(terminal 은 최종).
+	q += ` WHERE job_id=? AND state NOT IN ('completed','failed','partially_failed','cancelled')`
 	args = append(args, jobID)
 	res, err := db.ExecContext(ctx, q, args...)
 	if err != nil {
