@@ -407,3 +407,50 @@ func TestSampledPathFtrace(t *testing.T) {
 	}
 	t.Logf("ftrace 샘플 %d행, cmd=%q", len(resp.Events), resp.Events[0].GetCmd())
 }
+
+// 서로 다른 trace_type 의 잡을 함께 조회 — 스키마가 달라 union_by_name 이 필요하다.
+//
+// 여기서 잡은 실제 버그: buildGlobList 가 "both"/"" 일 때만 union 을 붙여서,
+// fsio_ufs 잡과 fsio_block 잡을 같이 고르면 DuckDB 가 `schema mismatch in glob`
+// 으로 조회 자체를 거부했다. 시트는 jobIds 를 여러 개 받으므로 실제로 도달한다.
+func TestMixedFsioJobs(t *testing.T) {
+	mk := func(tt string) string {
+		dir := t.TempDir()
+		lf := filepath.Join(dir, "trace.log")
+		data := ""
+		for _, l := range fsioTestLog {
+			data += l + "\n"
+		}
+		// block 행도 하나 넣는다
+		data += "12345.678920\tBLK\t4521\t4521\t3\tmysqld\tvfs_write\tblock_rq_issue\text4\t8\t32\t983241\t16384\t8192000\t/data/ibdata1\t0x10000\trwbs=WS\n"
+		os.WriteFile(lf, []byte(data), 0o644)
+		if err := parser.RunParquetOnly(lf, dir, tt, nil); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	u, b := mk("fsio_ufs"), mk("fsio_block")
+	stats, err := ComputeStats([]*TraceJobInfo{
+		{Dir: u, TraceType: "fsio_ufs"},
+		{Dir: b, TraceType: "fsio_block"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("혼합 조회 실패: %v", err)
+	}
+	if stats.TotalEvents == 0 {
+		t.Error("혼합 조회 결과가 비었다")
+	}
+	// UFS opcode 와 block rwbs 가 cmd 축에 공존해야 한다.
+	var hasUfs, hasBlk bool
+	for _, c := range stats.CmdStats {
+		if c.Cmd == "0x2a" {
+			hasUfs = true
+		}
+		if c.Cmd == "WS" {
+			hasBlk = true
+		}
+	}
+	if !hasUfs || !hasBlk {
+		t.Errorf("두 스키마가 합쳐지지 않았다: %+v", stats.CmdStats)
+	}
+}

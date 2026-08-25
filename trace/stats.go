@@ -53,7 +53,17 @@ func findParquetFiles(dir, traceType string) []string {
 // buildGlobList builds a DuckDB-compatible glob from multiple TraceJobInfos.
 // Only includes patterns that actually have matching files.
 func buildGlobList(infos []*TraceJobInfo) string {
+	// union_by_name 이 필요한 경우 = **스키마가 섞일 수 있는 경우**.
+	//
+	//   - "both"/"" : 한 잡 안에 ufs + block parquet 이 같이 있다
+	//   - 서로 다른 trace_type 의 잡을 함께 조회 (예: fsio_ufs + fsio_block).
+	//     이건 UI 가 jobIds 를 여러 개 넘길 수 있어 실제로 도달한다. 예전에는
+	//     "both"/"" 만 봐서, 타입이 다른 두 잡을 고르면 DuckDB 가
+	//     `schema mismatch in glob` 로 조회 자체를 거부했다.
+	//
+	// 같은 타입만 여러 개면 스키마가 동일하므로 union 이 필요 없다(성능상 안 붙인다).
 	needsUnion := false
+	seenTypes := make(map[string]bool)
 	var parts []string
 	for _, info := range infos {
 		files := findParquetFiles(info.Dir, info.TraceType)
@@ -63,6 +73,10 @@ func buildGlobList(infos []*TraceJobInfo) string {
 		if info.TraceType == "both" || info.TraceType == "" {
 			needsUnion = true
 		}
+		seenTypes[info.TraceType] = true
+	}
+	if len(seenTypes) > 1 {
+		needsUnion = true
 	}
 	if len(parts) == 0 {
 		return "''" // will produce empty result
