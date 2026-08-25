@@ -6,6 +6,10 @@ import (
 	"os"
 )
 
+// reportEvery — 이 라인 수마다 진행률을 보고한다.
+// 테스트가 실제 값을 참조할 수 있도록 패키지 상수로 둔다.
+const reportEvery = 100_000
+
 // ProgressFunc — 진행 라인 콜백. tracer.go 의 SubscribeJobProgress 로 forward 된다.
 type ProgressFunc func(line string)
 
@@ -61,7 +65,6 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 	var fsioBlockEvents []FsioBlockEvent
 
 	var lineNo uint64
-	const reportEvery = 100_000
 	for scanner.Scan() {
 		lineNo++
 		line := scanner.Text()
@@ -84,6 +87,12 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 						fsioBlockEvents = append(fsioBlockEvents, ev)
 					}
 				}
+			}
+			// ⚠ 여기서 그냥 continue 하면 아래 진행률 보고를 건너뛴다.
+			// 멀티 GB trace.log 를 파싱하는 동안 UI 가 완전히 조용해진다.
+			if lineNo%reportEvery == 0 {
+				report(fmt.Sprintf("scanned %d lines (fsio_ufs=%d fsio_block=%d)",
+					lineNo, len(fsioUfsEvents), len(fsioBlockEvents)))
 			}
 			continue
 		}
