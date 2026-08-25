@@ -109,9 +109,14 @@
 		filterLun.length > 0 || filterDev.length > 0 || filterIoFlagsAny !== ''
 	);
 
-	// Attribution 에 넘길 필터 = 현재 화면 필터 그대로.
-	// 확대(brush)나 드릴다운이 걸려 있으면 Attribution 도 같은 범위만 집계한다.
-	const attributionFilter = $derived(buildFilter() ?? {});
+	// Attribution 에 넘길 필터 = **적용된** 필터.
+	//
+	// buildFilter() 를 직접 파생시키면 입력창의 draft 값까지 따라가서 ① 키 입력마다
+	// attribution 요청이 나가고 ② 조회 버튼을 누르기 전까지 Attribution 만 다른 모수를
+	// 보여준다 — "모든 탭이 같은 모수" 라는 목표와 정반대다.
+	// applyFilter/resetFilter 가 커밋한 스냅샷만 쓴다.
+	let appliedFilter = $state<TraceFilter>({});
+	const attributionFilter = $derived(appliedFilter);
 
 	/**
 	 * Attribution 행 클릭 → 해당 값으로 좁혀 보기.
@@ -543,6 +548,9 @@
 		loadingRaw = true;
 		try {
 			rawResult = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			// 단독 trace 실행(AgentTraceForm)에는 mappings 가 없다 — 서버가 알려준
+			// trace_type 이 fsio UI 노출과 컬럼 세트 결정의 유일한 출처다.
+			if (rawResult?.traceType) fallbackTraceType = rawResult.traceType;
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
 		finally { loadingRaw = false; }
 	}
@@ -576,6 +584,7 @@
 
 	function applyFilter() {
 		const f = buildFilter();
+		appliedFilter = f ?? {};
 		loadRawData(f);
 		loadStats(f);
 	}
@@ -590,6 +599,7 @@
 		filterComm = []; filterName = []; filterSyscall = []; filterFs = [];
 		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
 		filterIoFlagsAny = '';
+		appliedFilter = {};
 		statsResult = null;
 		loadRawData();
 	}

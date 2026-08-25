@@ -34,69 +34,33 @@ function col(key: string, header: string, fmt: (v: unknown) => string, w = 110):
 	};
 }
 
-export const ufsColumns: ColumnDef<AnyRow>[] = [
+// ftrace 계열(ufs/block/ufscustom) 컬럼.
+//
+// ⚠ 여기 키는 **raw API 가 실제로 내려주는 필드**여야 한다. portal 은 parquet 을
+// 직접 읽어 30컬럼을 그리지만, agent 의 `/trace/raw` 는 TraceEvent 로 정규화해
+// 아래 11개만 준다 (server/rest_convert.go traceEventToMap). 없는 키를 넣으면
+// 컬럼만 생기고 값은 전부 빈칸이 된다 — 실제로 process/tag/groupid/hwqid/aligned/
+// line_number 를 넣어 뒀다가 전부 빈 컬럼으로 나왔다.
+//
+// fsio 는 서버가 cross-layer 를 함께 실어 주므로 아래 fsio*Columns 가 더 넓다.
+const ftraceCommonColumns: ColumnDef<AnyRow>[] = [
 	col('time', 'time(s)', numFmt(6), 130),
-	col('process', 'process', strFmt, 160),
-	col('cpu', 'cpu', intFmt, 60),
-	col('action', 'action', strFmt, 110),
-	col('tag', 'tag', intFmt, 60),
-	col('opcode', 'opcode', strFmt, 90),
+	col('action', 'action', strFmt, 140),
+	col('cmd', 'cmd', strFmt, 90),
 	col('lba', 'lba', intFmt, 110),
-	col('size', 'size(4k)', intFmt, 80),
-	col('groupid', 'group', intFmt, 70),
-	col('hwqid', 'hwq', intFmt, 60),
+	col('size', 'size', intFmt, 90),
 	col('qd', 'qd', intFmt, 60),
-	col('dtoc', 'DtoC(ms)', numFmt(3), 100),
-	col('ctoc', 'CtoC(ms)', numFmt(3), 100),
-	col('ctod', 'CtoD(ms)', numFmt(3), 100),
-	col('continuous', 'cont', strFmt, 60),
-	col('aligned', 'align', strFmt, 60),
-	col('line_number', 'line', intFmt, 80)
-];
-
-export const blockColumns: ColumnDef<AnyRow>[] = [
-	col('time', 'time(s)', numFmt(6), 130),
-	col('process', 'process', strFmt, 160),
 	col('cpu', 'cpu', intFmt, 60),
-	col('flags', 'flags', strFmt, 90),
-	col('action', 'action', strFmt, 80),
-	col('devmajor', 'major', intFmt, 70),
-	col('devminor', 'minor', intFmt, 70),
-	col('io_type', 'io', strFmt, 80),
-	col('extra', 'extra', intFmt, 70),
-	col('sector', 'sector', intFmt, 110),
-	col('size', 'size(b)', intFmt, 80),
-	col('comm', 'comm', strFmt, 130),
-	col('qd', 'qd', intFmt, 60),
 	col('dtoc', 'DtoC(ms)', numFmt(3), 100),
 	col('ctoc', 'CtoC(ms)', numFmt(3), 100),
 	col('ctod', 'CtoD(ms)', numFmt(3), 100),
-	col('continuous', 'cont', strFmt, 60),
-	col('aligned', 'align', strFmt, 60),
-	col('line_number', 'line', intFmt, 80)
+	col('continuous', 'cont', strFmt, 60)
 ];
 
-export const ufscustomColumns: ColumnDef<AnyRow>[] = [
-	col('opcode', 'opcode', strFmt, 90),
-	col('lba', 'lba', intFmt, 110),
-	col('size', 'size', intFmt, 80),
-	col('start_time', 'start(s)', numFmt(6), 130),
-	col('end_time', 'end(s)', numFmt(6), 130),
-	col('dtoc', 'DtoC(ms)', numFmt(3), 100),
-	col('start_qd', 'sQD', intFmt, 60),
-	col('end_qd', 'eQD', intFmt, 60),
-	col('ctoc', 'CtoC(ms)', numFmt(3), 100),
-	col('ctod', 'CtoD(ms)', numFmt(3), 100),
-	col('continuous', 'cont', strFmt, 60),
-	col('aligned', 'align', strFmt, 60),
-	col('line_number', 'line', intFmt, 80)
-];
+export const ufsColumns: ColumnDef<AnyRow>[] = ftraceCommonColumns;
+export const blockColumns: ColumnDef<AnyRow>[] = ftraceCommonColumns;
+export const ufscustomColumns: ColumnDef<AnyRow>[] = ftraceCommonColumns;
 
-// bpftrace fsio_ufs — VFS → FS → block → UFS 한 줄 trace.
-// Rust src/output/fsio_ufs_parquet.rs:20-72 schema 미러.
-// 정렬: 기본 UFS 17 → cross-layer 7 → io_flags(풀이 합성) → UPIU 5.
-// io_flags 표시는 fsio_block 과 **동일** — hex + bpftrace -x 풀이를 한 셀에.
-//   is_* 39 컬럼은 그 안에 합쳐졌으므로 별도 컬럼으로 노출하지 않는다.
 export const fsioUfsColumns: ColumnDef<AnyRow>[] = [
 	// 기본 UFS 17
 	col('time', 'time(s)', numFmt(6), 130),

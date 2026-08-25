@@ -422,6 +422,7 @@ func handleTraceRaw(w http.ResponseWriter, r *http.Request, agent *DeviceAgentSe
 		"totalEvents":   resp.GetTotalEvents(),
 		"sampledEvents": resp.GetSampledEvents(),
 		"isSampled":     resp.GetIsSampled(),
+		"traceType":     resp.GetTraceType(),
 		"events":        events,
 	})
 }

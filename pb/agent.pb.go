@@ -4049,6 +4049,12 @@ type GetTraceRawDataResponse struct {
 	SampledEvents int64                  `protobuf:"varint,3,opt,name=sampled_events,json=sampledEvents,proto3" json:"sampled_events,omitempty"`
 	IsSampled     bool                   `protobuf:"varint,4,opt,name=is_sampled,json=isSampled,proto3" json:"is_sampled,omitempty"`
 	Events        []*TraceEvent          `protobuf:"bytes,5,rep,name=events,proto3" json:"events,omitempty"`
+	// 조회된 잡의 trace_type ("ufs"/"block"/"both"/"ufscustom"/"fsio_ufs"/"fsio_block").
+	//
+	// 클라이언트가 컬럼 세트와 fsio 전용 UI 노출을 결정하는 데 쓴다. 시나리오 경유가
+	// 아닌 단독 trace 실행에는 mappings 가 없어서, 이 값이 없으면 프론트가 타입을
+	// 알 방법이 아예 없다.
+	TraceType     string `protobuf:"bytes,6,opt,name=trace_type,json=traceType,proto3" json:"trace_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4116,6 +4122,13 @@ func (x *GetTraceRawDataResponse) GetEvents() []*TraceEvent {
 		return x.Events
 	}
 	return nil
+}
+
+func (x *GetTraceRawDataResponse) GetTraceType() string {
+	if x != nil {
+		return x.TraceType
+	}
+	return ""
 }
 
 type TraceEvent struct {
@@ -8220,14 +8233,16 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x10unsupported_dims\x18\x03 \x03(\x0e2\x15.agent.AttributionDimR\x0funsupportedDims\"]\n" +
 	"\x16GetTraceRawDataRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12*\n" +
-	"\x06filter\x18\x02 \x01(\v2\x12.agent.TraceFilterR\x06filter\"\xc4\x01\n" +
+	"\x06filter\x18\x02 \x01(\v2\x12.agent.TraceFilterR\x06filter\"\xe3\x01\n" +
 	"\x17GetTraceRawDataResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12!\n" +
 	"\ftotal_events\x18\x02 \x01(\x03R\vtotalEvents\x12%\n" +
 	"\x0esampled_events\x18\x03 \x01(\x03R\rsampledEvents\x12\x1d\n" +
 	"\n" +
 	"is_sampled\x18\x04 \x01(\bR\tisSampled\x12)\n" +
-	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\"\xf9\x06\n" +
+	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\x12\x1d\n" +
+	"\n" +
+	"trace_type\x18\x06 \x01(\tR\ttraceType\"\xf9\x06\n" +
 	"\n" +
 	"TraceEvent\x12\x12\n" +
 	"\x04time\x18\x01 \x01(\x01R\x04time\x12\x10\n" +

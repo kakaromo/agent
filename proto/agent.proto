@@ -564,6 +564,12 @@ message GetTraceRawDataResponse {
   int64 sampled_events = 3;
   bool is_sampled = 4;
   repeated TraceEvent events = 5;
+  // 조회된 잡의 trace_type ("ufs"/"block"/"both"/"ufscustom"/"fsio_ufs"/"fsio_block").
+  //
+  // 클라이언트가 컬럼 세트와 fsio 전용 UI 노출을 결정하는 데 쓴다. 시나리오 경유가
+  // 아닌 단독 trace 실행에는 mappings 가 없어서, 이 값이 없으면 프론트가 타입을
+  // 알 방법이 아예 없다.
+  string trace_type = 6;
 }
 
 message TraceEvent {

@@ -45,6 +45,9 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 
 	resp := &pb.GetTraceRawDataResponse{
 		TotalEvents: total,
+		// 프론트가 컬럼 세트/UI 노출을 정하는 데 쓴다. 단독 trace 실행에는
+		// mappings 가 없어 이 값 말고는 타입을 알 길이 없다.
+		TraceType: primaryTraceType(infos),
 	}
 
 	if total == 0 {
@@ -167,6 +170,17 @@ func fsioExtraSelectPrefixed(f fsioSchema, prefix string) string {
 		out[i] = prefix + c
 	}
 	return ", " + strings.Join(out, ", ")
+}
+
+// primaryTraceType — 조회 대상의 대표 trace_type.
+// 여러 잡을 합쳐 조회해도 계열 혼합은 막혀 있으므로(checkMixedFamily) 첫 값이면 충분하다.
+func primaryTraceType(infos []*TraceJobInfo) string {
+	for _, i := range infos {
+		if i.TraceType != "" {
+			return i.TraceType
+		}
+	}
+	return ""
 }
 
 // fsioExtraCols — fsio 산출물에만 있는 확장 컬럼. Raw Data 표가 "이 IO 를 누가/

@@ -96,7 +96,7 @@
 	<!-- Trace Type -->
 	<div class="space-y-1">
 		<label class="{sectionLabel}">Trace Type</label>
-		<div class="grid grid-cols-3 gap-2">
+		<div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
 			{#each TRACE_TYPES as t}
 				<button
 					onclick={() => traceType = t.value}

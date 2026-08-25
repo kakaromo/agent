@@ -496,6 +496,11 @@ export interface TraceEvent {
 
 export interface TraceRawDataResult {
 	jobId: string; totalEvents: number; sampledEvents: number; isSampled: boolean;
+	/**
+	 * 조회된 잡의 trace_type. 컬럼 세트와 fsio 전용 UI 노출 판단에 쓴다.
+	 * 시나리오 경유가 아닌 단독 trace 실행에는 mappings 가 없어 이 값이 유일한 출처다.
+	 */
+	traceType?: string;
 	events: TraceEvent[];
 }
 
