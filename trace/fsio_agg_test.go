@@ -348,3 +348,62 @@ func TestIoFlagsMaskFilterAboveFloat53(t *testing.T) {
 		t.Errorf("GC 비트가 없는데 %d건", none.TotalEvents)
 	}
 }
+
+// 샘플링 경로(500k 초과)는 SQL 이 훨씬 복잡하다 — NTILE 버킷 + extremes + uniform
+// 을 UNION 하고 마지막에 base 와 조인한다. 실데이터로 500k 를 넘기기 어려워
+// maxEvents 를 임시로 낮춰 그 경로를 태운다.
+//
+// 여기서 잡은 실제 버그: 최종 SELECT 가 cmdCol/lbaCol 을 `b.%s` 로 감쌌는데,
+// fsio 의 cmdCol 은 컬럼명이 아니라 **식**(`'0x' || lpad(...)`)이라
+// `b.'0x' || ...` 라는 깨진 SQL 이 됐다. 500k 넘는 fsio raw 조회가 통째로 실패했다.
+func TestSampledPathCarriesFsioColumns(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	old := maxEventsForTest
+	maxEventsForTest = 2 // 픽스처가 7행이라 샘플링 경로로 간다
+	defer func() { maxEventsForTest = old }()
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatalf("샘플링 경로에서 쿼리 실패: %v", err)
+	}
+	if !resp.IsSampled {
+		t.Fatalf("샘플링이 안 탔다 (total=%d)", resp.TotalEvents)
+	}
+	found := false
+	for _, e := range resp.Events {
+		if e.GetComm() != "" {
+			found = true
+			t.Logf("샘플 행: comm=%q name=%q lun=%d io_flags=%#x line=%d",
+				e.GetComm(), e.GetName(), e.GetLun(), e.GetIoFlags(), e.GetLineNumber())
+			break
+		}
+	}
+	if !found {
+		t.Error("샘플링 경로에서 cross-layer 가 비었다")
+	}
+}
+
+// ftrace 산출물도 샘플링 경로가 깨지지 않아야 한다 (lbaCol 이 COALESCE 식일 수 있다).
+func TestSampledPathFtrace(t *testing.T) {
+	dir := t.TempDir()
+	logFile := dir + "/trace.log"
+	data := ""
+	for i := 0; i < 10; i++ {
+		data += "  kworker/0:1H-123   [000] ....  100" + string(rune('0'+i)) + ".000000: ufshcd_command: send_req: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n"
+	}
+	os.WriteFile(logFile, []byte(data), 0o644)
+	if err := parser.RunParquetOnly(logFile, dir, "ufs", nil); err != nil {
+		t.Fatal(err)
+	}
+	old := maxEventsForTest
+	maxEventsForTest = 2
+	defer func() { maxEventsForTest = old }()
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "ufs"}}, nil)
+	if err != nil {
+		t.Fatalf("ftrace 샘플링 경로 실패: %v", err)
+	}
+	if len(resp.Events) == 0 {
+		t.Error("이벤트 없음")
+	}
+	t.Logf("ftrace 샘플 %d행, cmd=%q", len(resp.Events), resp.Events[0].GetCmd())
+}

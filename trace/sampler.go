@@ -12,6 +12,10 @@ import (
 
 const maxEvents = 500000
 
+// maxEventsForTest — 샘플링 경로를 테스트에서 강제하기 위한 훅.
+// 운영에서는 maxEvents 와 같다.
+var maxEventsForTest = maxEvents
+
 // GetRawData returns trace events, sampling if over maxEvents.
 func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawDataResponse, error) {
 	db, err := sql.Open("duckdb", "")
@@ -43,7 +47,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 		return resp, nil
 	}
 
-	if total <= maxEvents {
+	if total <= int64(maxEventsForTest) {
 		// No sampling needed
 		events, err := queryAllEvents(db, glob, where, cmdCol, lbaCol, fsio)
 		if err != nil {
@@ -130,7 +134,7 @@ combined AS (
   UNION
   SELECT rn FROM sampled
 )
-SELECT b.time, b.%s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, b.%s, b.size, b.continuous, b.action%s
+SELECT b.time, %s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, %s, b.size, b.continuous, b.action%s
 FROM base b
 JOIN combined c ON b.rn = c.rn
 ORDER BY b.time
