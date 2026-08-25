@@ -123,7 +123,7 @@ var Specs = []StepSpec{
 			"loops 와 함께 쓸 때 loops 범위는 trace_start/trace_stop 을 제외한 **워크로드 스텝만** 감싸야 합니다 (예: steps=[trace_start, launch_app, stop_app, trace_stop] 이면 loops 는 startStep=1, endStep=2).",
 		},
 		Params: []ParamSpec{
-			{Name: "trace_type", Enum: []string{"ufs", "block", "both"}, Default: "ufs", Desc: "트레이스 종류"},
+			{Name: "trace_type", Enum: []string{"ufs", "block", "both", "fsio_ufs", "fsio_block"}, Default: "ufs", Desc: "트레이스 종류 (fsio_* 는 eBPF 기반 — root 필요, 파일명/프로세스 귀속 제공)"},
 			{Name: "window_seconds", Default: "1", Desc: "수집 윈도우 (초)"},
 		},
 		Label: "Trace Start", Desc: "ftrace 시작", Icon: "scan-search", Color: "emerald",
@@ -132,7 +132,7 @@ var Specs = []StepSpec{
 		Type: "trace_stop", AIUsable: true,
 		Summary: "트레이스 중지",
 		Params: []ParamSpec{
-			{Name: "trace_type", Enum: []string{"ufs", "block", "both"}, Default: "ufs", Desc: "trace_start 와 같은 값"},
+			{Name: "trace_type", Enum: []string{"ufs", "block", "both", "fsio_ufs", "fsio_block"}, Default: "ufs", Desc: "trace_start 와 같은 값"},
 		},
 		Label: "Trace Stop", Desc: "ftrace 중지", Icon: "square", Color: "emerald",
 	},

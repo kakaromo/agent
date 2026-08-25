@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	pb "agent/pb"
@@ -26,6 +27,11 @@ func parquetGlobPatterns(traceType string) []string {
 		return []string{"result_block.parquet", "block.parquet", "realtime_block_*.parquet"}
 	case "ufscustom":
 		return []string{"result_ufscustom.parquet", "ufscustom.parquet", "realtime_ufscustom_*.parquet"}
+	// bpftrace(fsiotrace) 계열 — 수집 시 `--only` 로 한 레이어만 받으므로 단일 파일이다.
+	case "fsio_ufs":
+		return []string{"result_fsio_ufs.parquet", "fsio_ufs.parquet"}
+	case "fsio_block":
+		return []string{"result_fsio_block.parquet", "fsio_block.parquet"}
 	default:
 		return []string{"*.parquet"}
 	}
@@ -47,7 +53,17 @@ func findParquetFiles(dir, traceType string) []string {
 // buildGlobList builds a DuckDB-compatible glob from multiple TraceJobInfos.
 // Only includes patterns that actually have matching files.
 func buildGlobList(infos []*TraceJobInfo) string {
+	// union_by_name 이 필요한 경우 = **스키마가 섞일 수 있는 경우**.
+	//
+	//   - "both"/"" : 한 잡 안에 ufs + block parquet 이 같이 있다
+	//   - 서로 다른 trace_type 의 잡을 함께 조회 (예: fsio_ufs + fsio_block).
+	//     이건 UI 가 jobIds 를 여러 개 넘길 수 있어 실제로 도달한다. 예전에는
+	//     "both"/"" 만 봐서, 타입이 다른 두 잡을 고르면 DuckDB 가
+	//     `schema mismatch in glob` 로 조회 자체를 거부했다.
+	//
+	// 같은 타입만 여러 개면 스키마가 동일하므로 union 이 필요 없다(성능상 안 붙인다).
 	needsUnion := false
+	seenTypes := make(map[string]bool)
 	var parts []string
 	for _, info := range infos {
 		files := findParquetFiles(info.Dir, info.TraceType)
@@ -57,6 +73,10 @@ func buildGlobList(infos []*TraceJobInfo) string {
 		if info.TraceType == "both" || info.TraceType == "" {
 			needsUnion = true
 		}
+		seenTypes[info.TraceType] = true
+	}
+	if len(seenTypes) > 1 {
+		needsUnion = true
 	}
 	if len(parts) == 0 {
 		return "''" // will produce empty result
@@ -82,10 +102,24 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	}
 	defer db.Close()
 
+	if err := checkMixedFamily(infos); err != nil {
+		return nil, err
+	}
+
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
-	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	fsio := detectFsioSchema(db, glob)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
+	// mgmt(Query/TM UPIU, UIC) 행 제외.
+	//
+	// 집계 대부분은 action = send_req/block_rq_issue 로 걸러져 mgmt 가 자동 제외되지만,
+	// total_events(count(*)) 와 duration 은 필터가 없어 mgmt 가 섞인다. **idle 구간에서는
+	// mgmt 가 행의 대부분**이라 데이터 IO 의 분모가 통째로 흔들린다.
+	// COALESCE 인 이유 — 다른 trace_type parquet 과 union 하면 is_mgmt 가 NULL 이다.
+	if fsio.isUFS {
+		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
+	}
 
 	stats := &pb.TraceStats{}
 
@@ -98,7 +132,13 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	}
 	stats.TotalEvents = total
 	if minTime.Valid && maxTime.Valid {
-		stats.DurationSeconds = (maxTime.Float64 - minTime.Float64) / 1000.0
+		// `time` 은 **초** 단위다 (ftrace 는 커널 monotonic clock 의 sec.usec,
+		// bpftrace 는 bpf_ktime_get_ns() 를 sec.usec 로 찍는다). 예전엔 여기서
+		// 1000 으로 나눠 29초짜리 트레이스가 0.029s 로 나왔다 — UI 가 이 값을
+		// 못 믿고 raw 이벤트로 직접 계산하는 우회를 두고 있었을 정도다
+		// (AgentTraceResultSheet 의 rawDurationSeconds).
+		// Rust 도 `max(time) - min(time)` 를 그대로 쓴다 (나누지 않는다).
+		stats.DurationSeconds = maxTime.Float64 - minTime.Float64
 	}
 
 	if total == 0 {
@@ -149,18 +189,32 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	// 5.5 Compute read/write/discard totals from cmd stats
 	// UFS: size unit = 4096 bytes (1 LBA = 4KB)
 	// Block: size unit = 512 bytes (1 sector = 512B)
+	//
+	// ⚠ **fsio 는 계수가 1 이다.** bpftrace 는 size 를 이미 bytes 로 내려 보낸다
+	// (OUTPUT_FORMAT.md col 13). 아래 ×4096/×512 를 그대로 태우면 read/write 바이트가
+	// 4096배/512배 부풀어 오른다. Rust 도 fsio 일 때만 sector_bytes=1 로 둔다.
+	// fsio 는 1, ftrace UFS 는 4096(1 LBA), ftrace Block 은 512(1 sector).
+	//
+	// ⚠ 이 판정은 **쿼리 단위**라, fsio 잡과 ftrace 잡을 함께 조회하면 한쪽이 틀린다.
+	// 행별로 가르려면 집계 SQL 자체를 바꿔야 하는데, 두 계열을 섞어 보는 것 자체가
+	// 의미가 옅어서(단위·의미가 다른 값을 한 표에 합산) 그 조합은 **명시적으로 막고**
+	// 계수는 단일 계열 기준으로 둔다. mixedFamily 는 위에서 검사한다.
+	ufsUnit, blockUnit := uint64(4096), uint64(512)
+	if fsio.any() {
+		ufsUnit, blockUnit = 1, 1
+	}
 	for _, cs := range stats.CmdStats {
 		cmd := strings.ToUpper(cs.Cmd)
 		switch {
-		// UFS data-transfer opcodes (size * 4096)
+		// UFS data-transfer opcodes
 		case cmd == "0X28" || cmd == "0X88": // READ_10, READ_16
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.ReadTotalBytes += cs.TotalSizeBytes
 		case cmd == "0X2A" || cmd == "0X8A": // WRITE_10, WRITE_16
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.WriteTotalBytes += cs.TotalSizeBytes
 		case cmd == "0X42": // UNMAP (discard)
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
 		// UFS/SCSI control-plane opcodes — 데이터 전송 없거나 작아서 read/write/discard
 		// 합산 대상 아님. 단위 변환도 하지 않는다 (size 가 의미적으로 LBA 가 아님).
@@ -174,22 +228,42 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 			cmd == "0X25" || cmd == "0X9E" ||
 			cmd == "0XA0" || cmd == "0X1A" || cmd == "0X5A":
 			// 합산 안 함, 단위 변환 안 함.
-		// Block io_type (size * 512)
+		// Block io_type / fsio rwbs — 첫 글자로 분류한다.
+		// 완전일치로 하면 rwbs 의 조합값("WS"/"RS"/"DS")이 전부 default 로 샌다.
 		case strings.HasPrefix(cmd, "R"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.ReadTotalBytes += cs.TotalSizeBytes
 		case strings.HasPrefix(cmd, "W"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.WriteTotalBytes += cs.TotalSizeBytes
 		case strings.HasPrefix(cmd, "D"):
-			cs.TotalSizeBytes *= 512
+			cs.TotalSizeBytes *= blockUnit
 			stats.DiscardTotalBytes += cs.TotalSizeBytes
+		// F 로 시작하면 flush (rwbs 는 [RWDF] + flag [FSMA] 조합이라 'F' 가 **첫 자리**면
+		// FLUSH, 뒤에 오면 FUA 다). flush 는 데이터를 안 나르므로 size 는 0 이고
+		// read/write/discard 합산 대상이 아니다 — 단위 변환도 하지 않는다.
+		// 이 분기가 없으면 실기기 수집마다 flush 행이 default 로 새서
+		// "unknown trace cmd opcode" 경고가 쏟아진다.
+		case strings.HasPrefix(cmd, "F"):
+			// 합산 안 함, 단위 변환 안 함.
 		default:
 			// 분류 못한 cmd — UFS 단위 추정만 하고 합산은 보류.
 			// 새 opcode 가 자주 보이면 위 switch 에 추가해야 한다.
 			slog.Warn("unknown trace cmd opcode (not classified into read/write/discard)",
 				"cmd", cs.Cmd, "count", cs.Count, "raw_size_total", cs.TotalSizeBytes)
-			cs.TotalSizeBytes *= 4096
+			cs.TotalSizeBytes *= ufsUnit
+		}
+	}
+
+	// 5.6 mgmt 집계 (fsio_ufs 전용).
+	//
+	// 데이터 IO 통계에서는 mgmt 를 빼지만(위 not_mgmt 조건), 링크 점유 시간은
+	// 그 자체로 답해야 할 질문이라 별도 축으로 낸다. idle 구간에서는 이게 사실상
+	// 유일한 산출물이다.
+	if fsio.isUFS {
+		stats.MgmtStats, err = queryMgmtStats(db, glob, where)
+		if err != nil {
+			return nil, fmt.Errorf("mgmt stats: %w", err)
 		}
 	}
 
@@ -509,7 +583,7 @@ func ComputeAIExtras(infos []*TraceJobInfo, filter *pb.TraceFilter, tailN, timeB
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	timeCol := detectTimeColumn(db, glob) // UFSCUSTOM 등 time 컬럼 부재 대비
-	where := buildFilterWhere(filter, lbaCol, cmdCol)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
 
 	// 1. tail latency top-N (dtoc 기준 가장 느린 요청)
 	if tail, err := queryTailLatency(db, glob, where, cmdCol, timeCol, tailN); err != nil {
@@ -675,35 +749,88 @@ func queryTimeSeriesLatency(db *sql.DB, glob, where, timeCol string, bins int) (
 
 // ==================== Helpers ====================
 
-func detectCmdColumn(db *sql.DB, glob string) string {
-	// With union_by_name=true, both columns may exist (NULL for missing rows).
-	// Check which columns are present.
+// hasColumns — glob 대상 parquet 에 존재하는 컬럼 집합을 조회한다.
+func hasColumns(db *sql.DB, glob string, names ...string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, "'"+n+"'")
+	}
 	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
-		WHERE column_name IN ('opcode', 'io_type')`, glob)
+		WHERE column_name IN (%s)`, glob, strings.Join(quoted, ", "))
 	rows, err := db.Query(q)
 	if err != nil {
-		return "opcode"
+		return out
 	}
 	defer rows.Close()
-
-	var cols []string
 	for rows.Next() {
 		var col string
-		rows.Scan(&col)
-		cols = append(cols, col)
+		if err := rows.Scan(&col); err == nil {
+			out[col] = true
+		}
+	}
+	return out
+}
+
+// fsioSchema — 이 parquet 이 bpftrace(fsiotrace) 산출물인가.
+//
+// trace_type 문자열이 아니라 **스키마로** 판정한다. 통계 경로는 여러 잡을 합쳐
+// 조회할 수 있어 호출부가 종류를 확실히 알지 못하는 경우가 있기 때문이다.
+// `is_mgmt` 는 fsio_ufs 에만, `rwbs` 는 fsio_block 에만 있다.
+type fsioSchema struct {
+	isUFS   bool // fsio_ufs
+	isBlock bool // fsio_block
+}
+
+func (f fsioSchema) any() bool { return f.isUFS || f.isBlock }
+
+func detectFsioSchema(db *sql.DB, glob string) fsioSchema {
+	c := hasColumns(db, glob, "is_mgmt", "rwbs", "mgmt_name")
+	return fsioSchema{
+		isUFS:   c["is_mgmt"] || c["mgmt_name"],
+		isBlock: c["rwbs"],
+	}
+}
+
+// detectCmdColumn — cmd 축으로 쓸 SQL 식.
+//
+// fsio 는 기존 ftrace 스키마와 타입/의미가 달라 그대로 못 쓴다 (Rust
+// `output/stats_rpc_duckdb.rs` 가 같은 문제를 같은 방식으로 푼다):
+//   - fsio_ufs `opcode` 는 **UInt8 숫자**다. 기존 ftrace UFS 는 `0x2a` **문자열**이라
+//     그대로 두면 cmd 축이 `42` 같은 10진수로 나와 read/write 분류기가 전부 빗나간다.
+//   - fsio_block `io_type` 은 파서 정책상 **항상 빈 문자열**이라 cmd 축이 통째로 빈다.
+//     대신 `rwbs`("WS"/"R"/"D")가 분류 정보를 갖고 있다.
+func detectCmdColumn(db *sql.DB, glob string) string {
+	if f := detectFsioSchema(db, glob); f.any() {
+		// fsio_ufs 의 opcode 는 UInt8 이라 hex 문자열로 바꿔야 분류기와 맞는다.
+		//
+		// ⚠ 단, **ftrace 잡과 union 되면 opcode 가 VARCHAR 로 승격된다**
+		// (ftrace UFS 는 opcode 가 '0x2a' 문자열). 그 상태에서 to_hex 를 태우면
+		// 숫자가 아니라 **ASCII 바이트**를 인코딩한다 — '42' → '3432' → lpad(...,2)
+		// 로 잘려 '0x34' 라는 엉뚱한 cmd 가 나오고, 분류기가 전부 default 로 새서
+		// read/write 바이트가 0 이 된다. typeof 로 갈라 이미 문자열이면 그대로 쓴다.
+		// ⚠ CASE 의 두 갈래는 **둘 다 타입 검사를 통과해야 한다**. opcode 가 UTINYINT 일 때
+		// lower(opcode) 는 함수 매칭에 실패하므로 양쪽 모두 VARCHAR 로 캐스팅해 둔다.
+		// to_hex(VARCHAR) 는 ASCII 를 인코딩하지만 그 갈래는 실행되지 않는다.
+		hexOpcode := "CASE WHEN typeof(opcode) = 'VARCHAR' " +
+			"THEN lower(CAST(opcode AS VARCHAR)) " +
+			"ELSE '0x' || lpad(lower(to_hex(CAST(opcode AS UTINYINT))), 2, '0') END"
+		switch {
+		case f.isUFS && f.isBlock:
+			// 여러 잡을 합쳐 두 스키마가 섞인 경우 — 있는 쪽을 쓴다.
+			return fmt.Sprintf("COALESCE(%s, rwbs)", hexOpcode)
+		case f.isUFS:
+			return hexOpcode
+		default:
+			return "rwbs"
+		}
 	}
 
+	// With union_by_name=true, both columns may exist (NULL for missing rows).
+	cols := hasColumns(db, glob, "opcode", "io_type")
+	hasOpcode, hasIoType := cols["opcode"], cols["io_type"]
+
 	// Both exist (mixed ufs+block) → use COALESCE
-	hasOpcode := false
-	hasIoType := false
-	for _, c := range cols {
-		if c == "opcode" {
-			hasOpcode = true
-		}
-		if c == "io_type" {
-			hasIoType = true
-		}
-	}
 	if hasOpcode && hasIoType {
 		return "COALESCE(opcode, io_type)"
 	}
@@ -716,10 +843,91 @@ func detectCmdColumn(db *sql.DB, glob string) string {
 	return "opcode"
 }
 
-func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
+// traceFamily — trace_type 이 속한 계열. 섞이면 단위·의미가 달라 합산이 성립하지 않는다.
+//
+//   - "fsio"   : bpftrace 산출물 (size 가 bytes, opcode 가 UInt8)
+//   - "ftrace" : ufs/block/both/ufscustom (size 가 LBA/sector 단위, opcode 가 문자열)
+func traceFamily(traceType string) string {
+	if strings.HasPrefix(traceType, "fsio_") {
+		return "fsio"
+	}
+	return "ftrace"
+}
+
+// checkMixedFamily — fsio 잡과 ftrace 잡을 함께 조회하려 하면 에러.
+//
+// 조용히 합치면 **틀린 숫자가 그럴듯하게 나온다**:
+//   - size 계수가 쿼리 단위라 한쪽이 4096배 어긋난다
+//   - union 으로 opcode 가 VARCHAR 로 승격돼 cmd 축이 깨진다
+//
+// 둘 다 에러가 아니라 그럴듯한 값이라 사용자가 알아채기 어렵다. 애초에 단위와
+// 의미가 다른 값을 한 표에 합산하는 것 자체가 성립하지 않으므로 명시적으로 막는다.
+func checkMixedFamily(infos []*TraceJobInfo) error {
+	fams := make(map[string]bool)
+	for _, info := range infos {
+		fams[traceFamily(info.TraceType)] = true
+	}
+	if len(fams) > 1 {
+		return fmt.Errorf("fsio 잡과 ftrace 잡은 함께 조회할 수 없습니다 — " +
+			"size 단위(bytes vs LBA/sector)와 cmd 표현이 달라 합산이 성립하지 않습니다. " +
+			"같은 계열끼리 선택하세요")
+	}
+	return nil
+}
+
+// filterCols — cross-layer 필터가 참조하는 컬럼. 존재 검사용.
+var filterCols = []string{"comm", "pid", "syscall", "fs", "name", "ino", "lun",
+	"devmajor", "devminor", "io_flags"}
+
+// filterPresentCols — 이 parquet 에 있는 필터 대상 컬럼 집합.
+func filterPresentCols(db *sql.DB, glob string) map[string]bool {
+	return hasColumns(db, glob, filterCols...)
+}
+
+// sqlQuote — SQL 문자열 리터럴로 안전하게 감싼다.
+//
+// 값의 출처가 UI 선택지만이 아니다 — 파일명(name)과 프로세스명(comm)은 **기기 위
+// 앱이 정하는 값**이라 작은따옴표가 들어올 수 있다. 이스케이프 없이 문자열을
+// 이어붙이면 쿼리가 깨지거나(정상 케이스) SQL 이 주입된다(악성 케이스).
+func sqlQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+}
+
+// quotedList — 문자열 목록을 IN (...) 절 값으로.
+func quotedList(vs []string) string {
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = sqlQuote(v)
+	}
+	return strings.Join(out, ",")
+}
+
+// parseMaskString — io_flags 마스크 문자열 → u64. 빈 문자열/파싱 실패는 0(미적용).
+//
+// 문자열로 받는 이유: u64 를 JSON number 로 실으면 2^53 넘는 f2fs 힌트 비트가
+// 조용히 반올림된다.
+func parseMaskString(s string) uint64 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// buildFilterWhereCols — TraceFilter → WHERE 절.
+//
+// present 는 이 parquet 에 실제로 있는 컬럼 집합이다. cross-layer 필터는 fsio 에만
+// 있는 컬럼을 참조하므로, 없는 컬럼 조건은 **조용히 건너뛴다** — 넣으면 쿼리 자체가
+// 깨져서 ftrace 산출물 조회가 통째로 실패한다. nil 이면 검사를 생략한다(하위 호환).
+func buildFilterWhereCols(f *pb.TraceFilter, lbaCol, cmdCol string, present map[string]bool) string {
 	if f == nil {
 		return ""
 	}
+	// has — 컬럼 존재 여부. present 가 nil 이면 전부 있다고 본다.
+	has := func(col string) bool { return present == nil || present[col] }
 	var conds []string
 	if f.StartTime > 0 {
 		conds = append(conds, fmt.Sprintf("time >= %f", f.StartTime))
@@ -765,11 +973,7 @@ func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
 		conds = append(conds, fmt.Sprintf("cpu IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(f.CmdList) > 0 {
-		vals := make([]string, len(f.CmdList))
-		for i, v := range f.CmdList {
-			vals[i] = fmt.Sprintf("'%s'", v)
-		}
-		conds = append(conds, fmt.Sprintf("%s IN (%s)", cmdCol, strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("%s IN (%s)", cmdCol, quotedList(f.CmdList)))
 	}
 	if len(f.SizeList) > 0 {
 		vals := make([]string, len(f.SizeList))
@@ -779,12 +983,66 @@ func buildFilterWhere(f *pb.TraceFilter, lbaCol, cmdCol string) string {
 		conds = append(conds, fmt.Sprintf("size IN (%s)", strings.Join(vals, ",")))
 	}
 	if len(f.ActionList) > 0 {
-		vals := make([]string, len(f.ActionList))
-		for i, v := range f.ActionList {
-			vals[i] = fmt.Sprintf("'%s'", v)
-		}
-		conds = append(conds, fmt.Sprintf("action IN (%s)", strings.Join(vals, ",")))
+		conds = append(conds, fmt.Sprintf("action IN (%s)", quotedList(f.ActionList)))
 	}
+	// ── fsio cross-layer 필터 ──
+	// 없는 컬럼은 건너뛴다 (ftrace 산출물에서 쿼리가 깨지지 않게).
+	if len(f.CommList) > 0 && has("comm") {
+		conds = append(conds, fmt.Sprintf("comm IN (%s)", quotedList(f.CommList)))
+	}
+	if len(f.PidList) > 0 && has("pid") {
+		vals := make([]string, len(f.PidList))
+		for i, v := range f.PidList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("pid IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.SyscallList) > 0 && has("syscall") {
+		conds = append(conds, fmt.Sprintf("syscall IN (%s)", quotedList(f.SyscallList)))
+	}
+	if len(f.FsList) > 0 && has("fs") {
+		conds = append(conds, fmt.Sprintf("fs IN (%s)", quotedList(f.FsList)))
+	}
+	if len(f.NameList) > 0 && has("name") {
+		conds = append(conds, fmt.Sprintf("name IN (%s)", quotedList(f.NameList)))
+	}
+	if f.NameContains != "" && has("name") {
+		// LIKE 특수문자(%, _)도 리터럴로 취급 — 파일명에 흔히 들어간다.
+		esc := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(f.NameContains)
+		conds = append(conds, fmt.Sprintf("name LIKE %s ESCAPE '\\'", sqlQuote("%"+esc+"%")))
+	}
+	if len(f.InoList) > 0 && has("ino") {
+		vals := make([]string, len(f.InoList))
+		for i, v := range f.InoList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("ino IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.LunList) > 0 && has("lun") {
+		vals := make([]string, len(f.LunList))
+		for i, v := range f.LunList {
+			vals[i] = fmt.Sprintf("%d", v)
+		}
+		conds = append(conds, fmt.Sprintf("lun IN (%s)", strings.Join(vals, ",")))
+	}
+	if len(f.DevList) > 0 && has("devmajor") && has("devminor") {
+		// "major:minor" 문자열 — 두 컬럼을 이어 비교한다.
+		conds = append(conds, fmt.Sprintf(
+			"(CAST(devmajor AS VARCHAR) || ':' || CAST(devminor AS VARCHAR)) IN (%s)",
+			quotedList(f.DevList)))
+	}
+	if has("io_flags") {
+		if m := parseMaskString(f.IoFlagsAny); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) != 0", m))
+		}
+		if m := parseMaskString(f.IoFlagsAll); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) = %d", m, m))
+		}
+		if m := parseMaskString(f.IoFlagsNone); m != 0 {
+			conds = append(conds, fmt.Sprintf("(io_flags & %d) = 0", m))
+		}
+	}
+
 	if len(conds) == 0 {
 		return ""
 	}

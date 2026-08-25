@@ -271,6 +271,23 @@ func (s *DeviceAgentServer) GetTraceRawData(ctx context.Context, req *pb.GetTrac
 	return resp, nil
 }
 
+// GetIoAttribution — "이 IO 를 누가/무엇이 만들었나" 축별 집계 (fsio_* 전용).
+//
+// parquet 에 cross-layer 컬럼이 없는 trace_type(ftrace 계열) 은 에러가 아니라
+// 응답의 unsupported_dims 로 알린다 — 클라이언트가 축을 골라 보낼 수 있어야 하므로
+// "그 축은 못 한다" 가 정상 응답이다.
+func (s *DeviceAgentServer) GetIoAttribution(ctx context.Context, req *pb.GetIoAttributionRequest) (*pb.GetIoAttributionResponse, error) {
+	infos, err := s.collectTraceJobInfos(req.JobIds)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := trace.ComputeAttribution(infos, req)
+	if err != nil {
+		return nil, fmt.Errorf("compute attribution: %w", err)
+	}
+	return resp, nil
+}
+
 // collectTraceJobInfos resolves job IDs to parquet directories and trace types.
 //
 // parquet-only 단일화 후 RUNNING/COLLECTING/REPARSING 동안에는 result_*.parquet 가

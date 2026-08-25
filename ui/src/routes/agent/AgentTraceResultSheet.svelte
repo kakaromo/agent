@@ -4,6 +4,8 @@
 	import { DataTable } from '$lib/components/data-table';
 	import TraceScatterChart from './TraceScatterChart.svelte';
 	import AiChatPanel from './AiChatPanel.svelte';
+	import AgentAttributionView from './AgentAttributionView.svelte';
+	import { columnsFor } from './rawDataColumns.js';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
@@ -23,6 +25,8 @@
 		stepIndex?: number;
 		loopIndex?: number;
 		repeatIndex?: number;
+		/** "ufs" | "block" | "both" | "fsio_ufs" | "fsio_block". mgmt/Attribution 노출 판단용. */
+		traceType?: string;
 	}
 
 	interface Props {
@@ -52,6 +56,154 @@
 		const ids = mappings.filter(m => m.loopIndex === selectedLoop).map(m => m.traceJobId);
 		return ids.length > 0 ? ids : jobIds;
 	});
+
+	// ── cross-layer 필터 (fsio 전용) ──
+	//
+	// Attribution 드릴다운이 채운다. 시간/LBA 등 기존 필터와 **같은 파이프라인**을 타서
+	// Charts / Statistics / Raw Data / Attribution 이 항상 같은 모수를 본다.
+	let filterComm = $state<string[]>([]);
+	let filterName = $state<string[]>([]);
+	let filterSyscall = $state<string[]>([]);
+	let filterFs = $state<string[]>([]);
+	let filterPid = $state<number[]>([]);
+	let filterIno = $state<number[]>([]);
+	let filterLun = $state<number[]>([]);
+	let filterDev = $state<string[]>([]);
+	let filterIoFlagsAny = $state('');
+
+	// 활성 cross-layer 필터를 칩으로. 각 칩은 클릭하면 그 조건만 해제한다.
+	const crossLayerChips = $derived.by<{ label: string; value: string; clear: () => void }[]>(() => {
+		const out: { label: string; value: string; clear: () => void }[] = [];
+		const pushStr = (label: string, vals: string[], set: (v: string[]) => void) => {
+			for (const v of vals) {
+				out.push({ label, value: v, clear: () => { set(vals.filter(x => x !== v)); applyFilter(); } });
+			}
+		};
+		const pushNum = (label: string, vals: number[], set: (v: number[]) => void) => {
+			for (const v of vals) {
+				out.push({ label, value: String(v), clear: () => { set(vals.filter(x => x !== v)); applyFilter(); } });
+			}
+		};
+		pushStr('comm', filterComm, v => filterComm = v);
+		pushStr('file', filterName, v => filterName = v);
+		pushStr('syscall', filterSyscall, v => filterSyscall = v);
+		pushStr('fs', filterFs, v => filterFs = v);
+		pushNum('pid', filterPid, v => filterPid = v);
+		pushNum('ino', filterIno, v => filterIno = v);
+		pushNum('lun', filterLun, v => filterLun = v);
+		pushStr('device', filterDev, v => filterDev = v);
+		if (filterIoFlagsAny) {
+			const name = Object.entries(FLOW_BITS).find(([, b]) => b === filterIoFlagsAny)?.[0];
+			out.push({
+				label: 'flow',
+				value: name ?? `io_flags&${filterIoFlagsAny}`,
+				clear: () => { filterIoFlagsAny = ''; applyFilter(); }
+			});
+		}
+		return out;
+	});
+
+	const hasCrossLayerFilter = $derived(
+		filterComm.length > 0 || filterName.length > 0 || filterSyscall.length > 0 ||
+		filterFs.length > 0 || filterPid.length > 0 || filterIno.length > 0 ||
+		filterLun.length > 0 || filterDev.length > 0 || filterIoFlagsAny !== ''
+	);
+
+	// Attribution 에 넘길 필터 = **적용된** 필터.
+	//
+	// buildFilter() 를 직접 파생시키면 입력창의 draft 값까지 따라가서 ① 키 입력마다
+	// attribution 요청이 나가고 ② 조회 버튼을 누르기 전까지 Attribution 만 다른 모수를
+	// 보여준다 — "모든 탭이 같은 모수" 라는 목표와 정반대다.
+	// applyFilter/resetFilter 가 커밋한 스냅샷만 쓴다.
+	let appliedFilter = $state<TraceFilter>({});
+	const attributionFilter = $derived(appliedFilter);
+
+	/**
+	 * Attribution 행 클릭 → 해당 값으로 좁혀 보기.
+	 *
+	 * additive(Ctrl/⌘/Shift)면 기존 선택에 더한다 — 파일 여러 개를 한 번에 볼 때.
+	 * 일반 클릭은 단일 선택이고, 같은 값을 다시 누르면 해제(토글)된다.
+	 *
+	 * 롤업 행 "(other)" 과 "(파일 아님)"/"(none)" 은 **실제 값이 아니라 묶음 라벨**이라
+	 * 필터로 쓸 수 없다 — 그걸로 좁히면 0건이 되므로 클릭을 무시한다.
+	 */
+	function handleAttrDrillDown(dim: string, key: string, additive: boolean) {
+		if (key === '(other)' || key === '(none)' || key === '(파일 아님)') {
+			toast.info(`${key} 은(는) 묶음 라벨이라 필터로 쓸 수 없습니다`);
+			return;
+		}
+		const toggleStr = (cur: string[]) => {
+			if (!additive) return cur.length === 1 && cur[0] === key ? [] : [key];
+			return cur.includes(key) ? cur.filter(v => v !== key) : [...cur, key];
+		};
+		const toggleNum = (cur: number[]) => {
+			const n = Number(key);
+			if (!Number.isFinite(n)) return cur;
+			if (!additive) return cur.length === 1 && cur[0] === n ? [] : [n];
+			return cur.includes(n) ? cur.filter(v => v !== n) : [...cur, n];
+		};
+
+		switch (dim) {
+			case 'comm': filterComm = toggleStr(filterComm); break;
+			case 'file': filterName = toggleStr(filterName); break;
+			case 'syscall': filterSyscall = toggleStr(filterSyscall); break;
+			case 'fs': filterFs = toggleStr(filterFs); break;
+			case 'pid': filterPid = toggleNum(filterPid); break;
+			case 'ino': filterIno = toggleNum(filterIno); break;
+			case 'lun': {
+				// 표시값은 "LU1" 형태라 숫자만 떼어낸다.
+				const n = Number(key.replace(/^LU/, ''));
+				if (Number.isFinite(n)) {
+					filterLun = additive
+						? (filterLun.includes(n) ? filterLun.filter(v => v !== n) : [...filterLun, n])
+						: (filterLun.length === 1 && filterLun[0] === n ? [] : [n]);
+				}
+				break;
+			}
+			case 'device': filterDev = toggleStr(filterDev); break;
+			case 'flow': {
+				// flow 는 io_flags 파생 라벨이라 역매핑이 필요하다.
+				// ⚠ 서버의 flowClassExpr 은 **우선순위 CASE** 라 정확한 역변환이 아니다
+				// (GC 이면서 DATA 인 행은 GC 로 분류된다). 여기서는 "그 비트가 켜진 행"
+				// 으로 좁히므로 서버 집계보다 넓게 잡힐 수 있다.
+				const bit = FLOW_BITS[key];
+				if (!bit) { toast.info(`${key} 는 비트 필터로 옮길 수 없습니다`); return; }
+				filterIoFlagsAny = filterIoFlagsAny === bit ? '' : bit;
+				break;
+			}
+			default:
+				toast.info(`${dim} 축은 아직 필터로 연결되지 않았습니다`);
+				return;
+		}
+		showFilter = true;
+		applyFilter();
+	}
+
+	// flow 라벨 → io_flags 비트(10진 문자열). 서버 flowClassExpr 와 같은 값.
+	const FLOW_BITS: Record<string, string> = {
+		GC: '16777216',
+		Checkpoint: '8388608',
+		Journal: '4194304',
+		'Writeback(kworker)': '34359738368',
+		fsync: '68719476736',
+		DirectIO: '8589934592',
+		'mmap-writeback': '17179869184',
+		Metadata: '131072',
+		'Buffered(app)': '4294967296',
+		Data: '65536'
+	};
+
+	// 활성 잡의 trace_type. mgmt 섹션과 Attribution 탭은 fsio 에서만 의미가 있다.
+	// mappings 가 비어 있으면(단독 trace 실행) 통계 조회 때 알아낸 값으로 폴백한다.
+	let fallbackTraceType = $state<string | null>(null);
+	const activeTraceType = $derived.by<string | null>(() => {
+		const ids = new Set(activeJobIds);
+		for (const m of mappings) {
+			if (ids.has(m.traceJobId) && m.traceType) return m.traceType;
+		}
+		return fallbackTraceType;
+	});
+	const isFsio = $derived(activeTraceType === 'fsio_ufs' || activeTraceType === 'fsio_block');
 
 	// 다른 job 의 trace 를 열면 loop 선택을 초기화한다 (이전 job 의 Loop N 잔존 방지).
 	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
@@ -180,7 +332,7 @@
 	const hasActiveFilter = $derived(
 		!!(filterStartTime || filterEndTime || filterStartLba || filterEndLba ||
 		   filterMinDtoc || filterMaxDtoc || filterMinCtod || filterMaxCtod ||
-		   filterMinCtoc || filterMaxCtoc || filterMinQd || filterMaxQd)
+		   filterMinCtoc || filterMaxCtoc || filterMinQd || filterMaxQd) || hasCrossLayerFilter
 	);
 	let mainTab = $state('raw');
 
@@ -224,11 +376,17 @@
 	}
 
 	// Filtered events by action tab
-	let filteredEvents = $derived<TraceEvent[]>(() => {
+	// ⚠ `$derived(() => ...)` 로 쓰면 **함수 자체가 값**이 되어 타입이 TraceEvent[] 가
+	// 아니게 된다(호출부는 filteredEvents() 로 쓰고 있어 런타임은 맞지만 타입이 어긋난다).
+	// `$derived.by` 가 이 형태의 올바른 룬이다.
+	const filteredEvents = $derived.by<TraceEvent[]>(() => {
 		if (!rawResult) return [];
 		if (activeActionTab === 'all') return rawResult.events;
 		return rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
 	});
+
+	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
+	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
 	// Available chart items based on action tab
 	let availableChartItems = $derived(
@@ -368,6 +526,16 @@
 		if (filterMaxCtoc) f.maxCtoc = Number(filterMaxCtoc);
 		if (filterMinQd) f.minQd = Number(filterMinQd);
 		if (filterMaxQd) f.maxQd = Number(filterMaxQd);
+		// cross-layer (fsio 전용) — 없는 컬럼 조건은 서버가 조용히 skip 한다.
+		if (filterComm.length) f.commList = filterComm;
+		if (filterName.length) f.nameList = filterName;
+		if (filterSyscall.length) f.syscallList = filterSyscall;
+		if (filterFs.length) f.fsList = filterFs;
+		if (filterPid.length) f.pidList = filterPid;
+		if (filterIno.length) f.inoList = filterIno;
+		if (filterLun.length) f.lunList = filterLun;
+		if (filterDev.length) f.devList = filterDev;
+		if (filterIoFlagsAny) f.ioFlagsAny = filterIoFlagsAny;
 		return Object.keys(f).length > 0 ? f : undefined;
 	}
 
@@ -380,6 +548,9 @@
 		loadingRaw = true;
 		try {
 			rawResult = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			// 단독 trace 실행(AgentTraceForm)에는 mappings 가 없다 — 서버가 알려준
+			// trace_type 이 fsio UI 노출과 컬럼 세트 결정의 유일한 출처다.
+			if (rawResult?.traceType) fallbackTraceType = rawResult.traceType;
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
 		finally { loadingRaw = false; }
 	}
@@ -413,6 +584,7 @@
 
 	function applyFilter() {
 		const f = buildFilter();
+		appliedFilter = f ?? {};
 		loadRawData(f);
 		loadStats(f);
 	}
@@ -424,6 +596,10 @@
 		filterMinCtod = ''; filterMaxCtod = '';
 		filterMinCtoc = ''; filterMaxCtoc = '';
 		filterMinQd = ''; filterMaxQd = '';
+		filterComm = []; filterName = []; filterSyscall = []; filterFs = [];
+		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
+		filterIoFlagsAny = '';
+		appliedFilter = {};
 		statsResult = null;
 		loadRawData();
 	}
@@ -494,7 +670,7 @@
 	}
 
 	function getChartOption(key: string): ReturnType<typeof buildScatter> {
-		const events = filteredEvents();
+		const events = filteredEvents;
 		if (events.length === 0) return null;
 		const item = CHART_ITEMS.find(c => c.key === key);
 		if (!item) return null;
@@ -643,6 +819,25 @@
 							<div><label class="text-muted-foreground">CtoC min</label><input bind:value={filterMinCtoc} class="w-full border rounded px-1 py-0.5 bg-background font-mono" /></div>
 							<div><label class="text-muted-foreground">CtoC max</label><input bind:value={filterMaxCtoc} class="w-full border rounded px-1 py-0.5 bg-background font-mono" /></div>
 						</div>
+						{#if hasCrossLayerFilter}
+							<!-- cross-layer 필터는 대부분 Attribution 드릴다운으로 들어온다.
+							     어떤 값이 걸렸는지 보이고 개별 해제가 되어야 "왜 데이터가
+							     적지?" 를 되짚을 수 있다. -->
+							<div class="flex flex-wrap items-center gap-1 text-[9px]">
+								<span class="text-muted-foreground">귀속 필터</span>
+								{#each crossLayerChips as chip}
+									<button
+										onclick={chip.clear}
+										class="inline-flex items-center gap-0.5 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 hover:bg-blue-500/20"
+										title="클릭하면 해제"
+									>
+										<span class="text-muted-foreground">{chip.label}</span>
+										<span class="font-mono max-w-[16rem] truncate">{chip.value}</span>
+										<XIcon class="size-2.5" />
+									</button>
+								{/each}
+							</div>
+						{/if}
 						<div class="text-[9px]">
 							<label class="text-muted-foreground">Latency Ranges (ms, comma-separated)</label>
 							<input bind:value={latencyRangesText} class="w-full border rounded px-1 py-0.5 bg-background font-mono" />
@@ -679,8 +874,13 @@
 
 			<Tabs.Root bind:value={mainTab}>
 				<Tabs.List class="flex gap-0.5">
-					<Tabs.Trigger value="raw" class="text-[10px] px-3 py-1">Raw Data</Tabs.Trigger>
+					<Tabs.Trigger value="raw" class="text-[10px] px-3 py-1">Charts</Tabs.Trigger>
 					<Tabs.Trigger value="stats" class="text-[10px] px-3 py-1">Statistics</Tabs.Trigger>
+					<Tabs.Trigger value="table" class="text-[10px] px-3 py-1">Raw Data</Tabs.Trigger>
+					{#if isFsio}
+						<!-- 귀속 집계는 cross-layer 메타가 있는 fsio 에서만 답이 나온다. -->
+						<Tabs.Trigger value="attribution" class="text-[10px] px-3 py-1">Attribution</Tabs.Trigger>
+					{/if}
 				</Tabs.List>
 
 				<!-- Raw Data Tab -->
@@ -690,7 +890,7 @@
 					{:else if rawResult && rawResult.events.length > 0}
 						<div class="flex items-center gap-2 mb-1">
 							<div class="text-[9px] text-muted-foreground">
-								{filteredEvents().length.toLocaleString()} events
+								{filteredEvents.length.toLocaleString()} events
 								{#if rawResult.isSampled} (sampled from {rawResult.totalEvents.toLocaleString()}){/if}
 							</div>
 							<!-- Action tabs: Send / Complete -->
@@ -892,6 +1092,56 @@
 							</div>
 						{/if}
 
+						<!-- UFS Management Events (fsio_ufs 전용) -->
+						{#if (statsResult.mgmtStats?.length ?? 0) > 0}
+							{@const mgmt = statsResult.mgmtStats}
+							{@const mgmtTotalMs = mgmt.reduce((a, m) => a + m.totalTimeMs, 0)}
+							{@const mgmtRatio = statsResult.durationSeconds > 0
+								? (mgmtTotalMs / (statsResult.durationSeconds * 1000)) * 100 : 0}
+							<div>
+								<div class="flex items-baseline gap-2 mb-1">
+									<h3 class="text-xs font-semibold">UFS Management Events</h3>
+									<!-- 핵심 지표는 건수가 아니라 링크 점유 시간이다. idle 구간에서는
+									     데이터 IO 가 거의 없고 mgmt 가 행의 대부분을 차지한다. -->
+									<span class="text-[9px] text-muted-foreground">
+										링크 점유 {fmtLatency(mgmtTotalMs)}ms · 관측 기간의 {mgmtRatio.toFixed(1)}%
+									</span>
+								</div>
+								<div class="border rounded-md overflow-x-auto">
+									<table class="w-full text-[10px]">
+										<thead class="bg-muted/50">
+											<tr>
+												<th class="text-left px-2 py-1 font-medium">Event</th>
+												<th class="text-left px-2 py-1 font-medium">Kind</th>
+												<th class="text-right px-2 py-1 font-medium">Count</th>
+												<th class="text-right px-2 py-1 font-medium">Paired</th>
+												<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
+												<th class="text-right px-2 py-1 font-medium">Share</th>
+												<th class="text-right px-2 py-1 font-medium">Avg</th>
+												<th class="text-right px-2 py-1 font-medium">Max</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each mgmt as m}
+												<tr class="border-t">
+													<td class="px-2 py-0.5">{m.name}</td>
+													<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
+													<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
+													<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
+													<td class="text-right px-2 py-0.5">
+														{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
+													</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							</div>
+						{/if}
+
 						<!-- Latency Histogram: type별 탭 -->
 						{#if statsResult.latencyHistograms.length > 0}
 							{@const histTypes = [...new Set(statsResult.latencyHistograms.map(h => h.latencyType))]}
@@ -966,6 +1216,49 @@
 						</div>
 					{/if}
 				</Tabs.Content>
+
+				<!-- Raw Data Tab — 행 단위 표 -->
+				<Tabs.Content value="table" class="pt-2">
+					{#if loadingRaw}
+						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
+					{:else if rawResult && rawResult.events.length > 0}
+						<div class="flex items-center gap-2 mb-1">
+							<div class="text-[9px] text-muted-foreground">
+								{tableRows.length.toLocaleString()} 행
+								{#if rawResult.isSampled}
+									· 전체 {rawResult.totalEvents.toLocaleString()} 중 샘플
+								{/if}
+								{#if activeTraceType}· {activeTraceType}{/if}
+							</div>
+							<div class="text-[9px] text-muted-foreground ml-auto">
+								셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사
+							</div>
+						</div>
+						<DataTable
+							data={tableRows}
+							columns={columnsFor(activeTraceType ?? 'ufs')}
+							enableCellCopy={true}
+							showPagination={false}
+							compact
+							scrollHeight="calc(100vh - 260px)"
+						/>
+					{:else}
+						<div class="text-center text-xs text-muted-foreground py-8">데이터 없음</div>
+					{/if}
+				</Tabs.Content>
+
+				<!-- Attribution Tab (fsio 전용) -->
+				{#if isFsio}
+					<Tabs.Content value="attribution" class="pt-2">
+						<AgentAttributionView
+							serverId={serverId ?? 0}
+							jobIds={activeJobIds}
+							traceType={activeTraceType}
+							filter={attributionFilter}
+							onDrillDown={handleAttrDrillDown}
+						/>
+					</Tabs.Content>
+				{/if}
 			</Tabs.Root>
 		</div>
 	</Sheet.Content>

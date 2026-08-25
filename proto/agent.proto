@@ -24,6 +24,8 @@ service DeviceAgent {
   rpc StopTrace(StopTraceRequest) returns (StopTraceResponse);
   rpc GetTraceResult(GetTraceResultRequest) returns (GetTraceResultResponse);
   rpc GetTraceRawData(GetTraceRawDataRequest) returns (GetTraceRawDataResponse);
+  // I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
+  rpc GetIoAttribution(GetIoAttributionRequest) returns (GetIoAttributionResponse);
 
   // Upload
   rpc UploadTraceToMinio(UploadTraceRequest) returns (UploadTraceResponse);
@@ -338,6 +340,36 @@ message TraceFilter {
   repeated string cmd_list = 14;
   repeated uint32 size_list = 15;
   repeated string action_list = 16;   // "send_req", "complete_rsp", "block_rq_issue", "block_rq_complete"
+
+  // ── fsio_* 전용 cross-layer 필터 ──────────────────────────────────────────
+  //
+  // "dd 프로세스가 낸 IO 만", "이 파일에 대한 IO 만" 처럼 bpftrace 가 실어 온 귀속
+  // 정보로 좁힌다. Attribution 행 클릭(드릴다운)이 이걸로 흘러 Charts/Statistics/
+  // Raw Data/Attribution 이 **같은 모수**를 보게 된다.
+  //
+  // 해당 컬럼이 없는 parquet(ftrace 계열)에서는 서버가 조건을 조용히 skip 한다 —
+  // 없는 컬럼을 참조하면 쿼리 자체가 깨지기 때문.
+  repeated string comm_list    = 17;
+  repeated uint32 pid_list     = 18;
+  repeated string syscall_list = 19;
+  repeated string fs_list      = 20;
+  repeated string name_list    = 21;  // 정확 일치
+  repeated uint64 ino_list     = 22;
+  repeated uint32 lun_list     = 23;  // fsio_ufs
+  repeated string dev_list     = 24;  // fsio_block — "major:minor" (예 "8:0")
+
+  // 파일명 부분일치. name_list 는 목록에 있는 값만 고를 수 있어서, 상위 N 밖의
+  // 파일을 찾으려면 이쪽이 필요하다.
+  string name_contains = 25;
+
+  // io_flags 비트 마스크 필터.
+  //
+  // ⚠ **문자열이다.** u64 를 JSON number 로 실으면 2^53 넘는 f2fs 힌트 비트가
+  // 조용히 반올림된다 (raw 이벤트의 io_flags 를 문자열로 보내는 것과 같은 이유).
+  // 빈 문자열 = 미적용.
+  string io_flags_any  = 26;  // (io_flags & mask) != 0
+  string io_flags_all  = 27;  // (io_flags & mask) == mask
+  string io_flags_none = 28;  // (io_flags & mask) == 0
 }
 
 message GetTraceResultRequest {
@@ -369,6 +401,35 @@ message TraceStats {
   uint64 write_total_bytes = 15;
   uint64 discard_total_bytes = 16;
   int64 send_count = 17;           // send/issue 이벤트 수 (연속성 분모)
+  // UFS management 이벤트 집계 (fsio_ufs 전용, mgmt 행이 없으면 빈 배열).
+  repeated MgmtStats mgmt_stats = 18;
+}
+
+// UFS management 이벤트(Query/TM UPIU, UIC) 집계.
+//
+// CmdStats 를 재사용하지 않는 이유 — total_size_bytes/continuous_* 가 mgmt 에 무의미하고,
+// 반대로 total_time_ms 는 mgmt 에만 필요하다. mgmt 는 데이터 전송이 아니라 **링크 점유**라
+// "hibern8 에 몇 초 있었나" 가 핵심 질문이고, 그건 합계 없이는 답이 안 나온다.
+// 특히 idle 구간에서는 데이터 IO 가 거의 없고 mgmt(hibern8 enter/exit 쌍, BKOPS 폴링 등)가
+// 행의 대부분을 차지해서, 이 집계가 그 구간의 사실상 유일한 산출물이 된다.
+//
+// 집계 축은 cmd 가 아니라 name(표시 이름) — mgmt 는 SCSI opcode 가 없어 cmd 축에서는
+// 전부 '0x00' 으로 뭉친다.
+message MgmtStats {
+  // 표시 이름 — "Read Descriptor(geometry)" / "Abort Task" / "DME_HIBER_EXIT".
+  // 파싱 시점에 구워둔 mgmt_name 컬럼 값.
+  string name = 1;
+  // 종류 — "query" | "tm" | "uic" | "other". UI 그룹핑용.
+  string kind = 2;
+  // 이 이름의 전체 행 수 (send + complete 양쪽).
+  int64 count = 3;
+  // 짝지어져 latency 가 계산된 건수 (complete 쪽만).
+  int64 paired_count = 4;
+  // **핵심 필드** — dtoc 합계(ms). 링크 점유 시간.
+  // duration_seconds 와 비교하면 "관측 기간 중 몇 %" 가 나온다.
+  double total_time_ms = 5;
+  // 왕복 latency. 합계 중심 질문이 1순위지만 같은 스캔에서 나오므로 같이 채운다.
+  LatencyStats dtoc = 6;
 }
 
 message LatencyStats {
@@ -416,6 +477,82 @@ message CmdSizeCount {
   int64 count = 3;
 }
 
+// ==================== I/O Attribution (귀속 집계) ====================
+//
+// 기존 stats 는 GROUP BY cmd 하나로 고정이라 "어떤 프로세스가/어떤 파일에/어떤 경로로"
+// 라는 질문에 답할 수 없다. bpftrace 가 각 행에 붙인 cross-layer 메타를 집계 축으로
+// 승격시킨다. CmdStats 를 재사용하지 않는 이유는 cmd 문자열 기반 read/write 분류가
+// 프로세스명 같은 값에서 깨지고, 고카디널리티 축엔 정확 percentile 6종이 과하기 때문
+// (여기선 p50/p99 2종만).
+
+enum AttributionDim {
+  ATTR_DIM_UNSPECIFIED = 0;
+  ATTR_DIM_COMM        = 1;  // 프로세스 이름
+  ATTR_DIM_PID         = 2;
+  ATTR_DIM_TID         = 3;
+  ATTR_DIM_SYSCALL     = 4;  // vfs_write / vfs_read / "-"
+  ATTR_DIM_FS          = 5;  // ext4 / f2fs
+  ATTR_DIM_FILE        = 6;  // name (이름을 아는 파일만)
+  ATTR_DIM_INO         = 7;
+  ATTR_DIM_FLOW        = 8;  // io_flags 파생 — GC/Journal/Writeback/Buffered 등
+  ATTR_DIM_CMD         = 9;  // 기존 stats 와 동일 축 (비교용)
+  ATTR_DIM_LUN         = 10; // UFS logical unit — LU 마다 LBA 주소공간 독립
+  ATTR_DIM_DEVICE      = 11; // block device major:minor — 섹터 주소공간 독립
+}
+
+enum AttributionSort {
+  ATTR_SORT_COUNT       = 0;
+  ATTR_SORT_BYTES       = 1;
+  // sum(dtoc) — "누가 장치 시간을 가장 많이 썼나". count 는 작은 metadata IO 를
+  // 과대평가하므로 지연 원인 추적엔 이쪽이 맞다.
+  ATTR_SORT_LATENCY_SUM = 2;
+}
+
+message GetIoAttributionRequest {
+  repeated string job_ids = 1;
+  TraceFilter filter = 2;
+  repeated AttributionDim dims = 3;  // 여러 축을 한 번의 base 스캔으로 집계
+  uint32 top_n = 4;                  // 축당 상위 N (기본 20, 서버가 200 으로 clamp)
+  AttributionSort sort_by = 5;
+}
+
+message AttributionEntry {
+  string key = 1;           // 표시값. 롤업 행은 "(other)", 빈 값은 "(none)"
+  int64 count = 2;
+  int64 send_count = 3;
+  double ratio = 4;         // count / total_events * 100
+  uint64 read_bytes = 5;
+  uint64 write_bytes = 6;
+  uint64 total_bytes = 7;
+  double dtoc_sum_ms = 8;   // 이 키에 귀속된 총 장치 시간
+
+  // (other) 롤업 행은 percentile 이 무의미하므로 비어 있다.
+  // ⚠️ 클라이언트는 이걸 0 으로 폴백하면 안 된다 — 0ms p99 는 "빠름" 으로 읽혀서
+  // unknown 의 정반대 의미가 된다. "—" 로 렌더할 것.
+  optional double dtoc_avg_ms = 9;
+  optional double dtoc_p50_ms = 10;
+  optional double dtoc_p99_ms = 11;
+
+  double dtoc_max_ms = 12;
+  optional int64 distinct_files = 13;  // comm/pid/tid 축에서만 채워짐
+  bool is_other = 14;
+}
+
+message AttributionGroup {
+  AttributionDim dim = 1;
+  repeated AttributionEntry entries = 2;
+  // top-N 자르기 **전** 전체 카디널리티. UI 가 "전체 N개 중 상위 20개" 를 표시해
+  // 롤업 사실을 숨기지 않게 한다.
+  int64 distinct_keys = 3;
+}
+
+message GetIoAttributionResponse {
+  int64 total_events = 1;
+  repeated AttributionGroup groups = 2;
+  // parquet 에 컬럼이 없어 건너뛴 축 — 에러 대신 "못 했다" 를 알린다.
+  repeated AttributionDim unsupported_dims = 3;
+}
+
 message GetTraceRawDataRequest {
   repeated string job_ids = 1;             // 여러 job의 parquet를 합쳐서 조회
   TraceFilter filter = 2;
@@ -427,6 +564,12 @@ message GetTraceRawDataResponse {
   int64 sampled_events = 3;
   bool is_sampled = 4;
   repeated TraceEvent events = 5;
+  // 조회된 잡의 trace_type ("ufs"/"block"/"both"/"ufscustom"/"fsio_ufs"/"fsio_block").
+  //
+  // 클라이언트가 컬럼 세트와 fsio 전용 UI 노출을 결정하는 데 쓴다. 시나리오 경유가
+  // 아닌 단독 trace 실행에는 mappings 가 없어서, 이 값이 없으면 프론트가 타입을
+  // 알 방법이 아예 없다.
+  string trace_type = 6;
 }
 
 message TraceEvent {
@@ -441,6 +584,42 @@ message TraceEvent {
   uint32 size = 9;
   bool continuous = 10;
   string action = 11;          // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+
+  // ── 아래는 fsio_* (bpftrace) 전용. ftrace 산출물에서는 전부 비어 있다. ──
+  //
+  // Raw Data 표가 "이 IO 를 누가/어느 파일에" 를 행 단위로 보여주려면 필요하다.
+  // 39개 is_* 불리언은 싣지 않는다 — io_flags 원본 u64 하나면 클라이언트가 같은
+  // 비트 정의로 풀 수 있고, 그쪽이 전송량도 작고 비트 추가에도 안 깨진다.
+  bool  aligned      = 12;
+  uint64 line_number = 13;  // 원본 로그 라인 번호 (1-based)
+  uint32 pid         = 14;
+  uint32 tid         = 15;
+  string comm        = 16;
+  string syscall     = 17;  // "vfs_write" / "-" (VFS 안 거침)
+  string fs          = 18;  // "ext4" / "f2fs"
+  uint64 ino         = 19;
+  string name        = 20;  // 풀패스 / "ino:N" / "(라벨)" — 뒤 둘은 파일명 부재의 표현
+  uint64 io_flags    = 21;  // 39비트 마스크. 클라이언트가 이름으로 푼다
+
+  // fsio_ufs 전용
+  uint32 tag     = 22;
+  uint32 opcode  = 23;  // SCSI opcode (parquet 은 u8)
+  uint32 lun     = 24;  // 255 = 미상(LunUnknown). LU 마다 LBA 주소공간 독립
+  uint32 groupid = 25;
+  int32  hwqid   = 26;
+  // UPIU 헤더 — send_req 에만 붙는다(응답 UPIU 는 stash 안 함). 없으면 미설정.
+  optional uint32 txn        = 27;
+  optional uint32 upiu_flags = 28;
+  optional uint32 upiu_func  = 29;
+  string upiu_attr           = 30;  // "Simple"/"Ordered"/"HoQ"/"ACA"
+  optional uint32 upiu_cp    = 31;
+
+  // fsio_block 전용
+  uint32 devmajor = 32;
+  uint32 devminor = 33;
+  string rwbs     = 34;  // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
+  string flags    = 35;  // ftrace trace flag string. bpftrace 엔 없어 빈 값
+  uint32 extra    = 36;  // bpftrace 엔 없어 0
 }
 
 // ==================== Upload to MinIO ====================

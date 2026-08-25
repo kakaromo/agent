@@ -2,6 +2,7 @@ package server
 
 import (
 	pb "agent/pb"
+	"strconv"
 )
 
 // portal AgentController 와 동일한 enum 문자열 변환.
@@ -234,9 +235,22 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 			"count": c.GetCount(),
 		})
 	}
+	// mgmt 는 fsio_ufs 에만 있다. 없으면 빈 배열 — 프론트가 `?? []` 안 해도 되게.
+	mgmt := make([]map[string]any, 0, len(s.GetMgmtStats()))
+	for _, m := range s.GetMgmtStats() {
+		mgmt = append(mgmt, map[string]any{
+			"name":        m.GetName(),
+			"kind":        m.GetKind(),
+			"count":       m.GetCount(),
+			"pairedCount": m.GetPairedCount(),
+			"totalTimeMs": m.GetTotalTimeMs(),
+			"dtoc":        latencyStatsToMap(m.GetDtoc()),
+		})
+	}
 	return map[string]any{
 		"totalEvents":       s.GetTotalEvents(),
 		"durationSeconds":   s.GetDurationSeconds(),
+		"mgmtStats":         mgmt,
 		"dtoc":              latencyStatsToMap(s.GetDtoc()),
 		"ctod":              latencyStatsToMap(s.GetCtod()),
 		"ctoc":              latencyStatsToMap(s.GetCtoc()),
@@ -255,8 +269,135 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 	}
 }
 
-func traceEventToMap(e *pb.TraceEvent) map[string]any {
+// attributionDimName — proto enum → portal 프론트가 쓰는 소문자 축 이름.
+func attributionDimName(d pb.AttributionDim) string {
+	switch d {
+	case pb.AttributionDim_ATTR_DIM_COMM:
+		return "comm"
+	case pb.AttributionDim_ATTR_DIM_PID:
+		return "pid"
+	case pb.AttributionDim_ATTR_DIM_TID:
+		return "tid"
+	case pb.AttributionDim_ATTR_DIM_SYSCALL:
+		return "syscall"
+	case pb.AttributionDim_ATTR_DIM_FS:
+		return "fs"
+	case pb.AttributionDim_ATTR_DIM_FILE:
+		return "file"
+	case pb.AttributionDim_ATTR_DIM_INO:
+		return "ino"
+	case pb.AttributionDim_ATTR_DIM_FLOW:
+		return "flow"
+	case pb.AttributionDim_ATTR_DIM_CMD:
+		return "cmd"
+	case pb.AttributionDim_ATTR_DIM_LUN:
+		return "lun"
+	case pb.AttributionDim_ATTR_DIM_DEVICE:
+		return "device"
+	}
+	return "unspecified"
+}
+
+// attributionDimFromName — 위의 역변환. 모르는 이름은 UNSPECIFIED (호출부가 건너뛴다).
+func attributionDimFromName(n string) pb.AttributionDim {
+	switch n {
+	case "comm":
+		return pb.AttributionDim_ATTR_DIM_COMM
+	case "pid":
+		return pb.AttributionDim_ATTR_DIM_PID
+	case "tid":
+		return pb.AttributionDim_ATTR_DIM_TID
+	case "syscall":
+		return pb.AttributionDim_ATTR_DIM_SYSCALL
+	case "fs":
+		return pb.AttributionDim_ATTR_DIM_FS
+	case "file":
+		return pb.AttributionDim_ATTR_DIM_FILE
+	case "ino":
+		return pb.AttributionDim_ATTR_DIM_INO
+	case "flow":
+		return pb.AttributionDim_ATTR_DIM_FLOW
+	case "cmd":
+		return pb.AttributionDim_ATTR_DIM_CMD
+	case "lun":
+		return pb.AttributionDim_ATTR_DIM_LUN
+	case "device":
+		return pb.AttributionDim_ATTR_DIM_DEVICE
+	}
+	return pb.AttributionDim_ATTR_DIM_UNSPECIFIED
+}
+
+func attributionSortFromName(n string) pb.AttributionSort {
+	switch n {
+	case "bytes":
+		return pb.AttributionSort_ATTR_SORT_BYTES
+	case "latency":
+		return pb.AttributionSort_ATTR_SORT_LATENCY_SUM
+	default:
+		return pb.AttributionSort_ATTR_SORT_COUNT
+	}
+}
+
+func attributionToMap(r *pb.GetIoAttributionResponse) map[string]any {
+	if r == nil {
+		return nil
+	}
+	groups := make([]map[string]any, 0, len(r.GetGroups()))
+	for _, g := range r.GetGroups() {
+		entries := make([]map[string]any, 0, len(g.GetEntries()))
+		for _, e := range g.GetEntries() {
+			m := map[string]any{
+				"key":        e.GetKey(),
+				"count":      e.GetCount(),
+				"sendCount":  e.GetSendCount(),
+				"ratio":      e.GetRatio(),
+				"readBytes":  e.GetReadBytes(),
+				"writeBytes": e.GetWriteBytes(),
+				"totalBytes": e.GetTotalBytes(),
+				"dtocSumMs":  e.GetDtocSumMs(),
+				"dtocMaxMs":  e.GetDtocMaxMs(),
+				"isOther":    e.GetIsOther(),
+			}
+			// optional 필드는 **없으면 아예 안 넣는다** — JSON null 로 나가야
+			// 프론트가 "—" 로 렌더한다. 0 으로 채우면 "0ms = 빠름" 으로 오독된다.
+			if e.DtocAvgMs != nil {
+				m["dtocAvgMs"] = e.GetDtocAvgMs()
+			}
+			if e.DtocP50Ms != nil {
+				m["dtocP50Ms"] = e.GetDtocP50Ms()
+			}
+			if e.DtocP99Ms != nil {
+				m["dtocP99Ms"] = e.GetDtocP99Ms()
+			}
+			if e.DistinctFiles != nil {
+				m["distinctFiles"] = e.GetDistinctFiles()
+			}
+			entries = append(entries, m)
+		}
+		groups = append(groups, map[string]any{
+			"dim":          attributionDimName(g.GetDim()),
+			"entries":      entries,
+			"distinctKeys": g.GetDistinctKeys(),
+		})
+	}
+	unsupported := make([]string, 0, len(r.GetUnsupportedDims()))
+	for _, d := range r.GetUnsupportedDims() {
+		unsupported = append(unsupported, attributionDimName(d))
+	}
 	return map[string]any{
+		"totalEvents":     r.GetTotalEvents(),
+		"groups":          groups,
+		"unsupportedDims": unsupported,
+	}
+}
+
+// traceEventToMap — raw 이벤트 한 행.
+//
+// fsio 확장 필드는 **값이 있을 때만** 넣는다. ftrace 산출물에서 전부 빈 값으로 채우면
+// 표에 의미 없는 0/빈칸 컬럼이 20개 생기고, 클라이언트가 "이 trace_type 에 이 컬럼이
+// 있나" 를 값으로 판단할 수 없게 된다.
+func traceEventToMap(e *pb.TraceEvent) map[string]any {
+	m := map[string]any{
 		"time":       e.GetTime(),
 		"lba":        e.GetLba(),
 		"qd":         e.GetQd(),
@@ -269,6 +410,55 @@ func traceEventToMap(e *pb.TraceEvent) map[string]any {
 		"continuous": e.GetContinuous(),
 		"action":     e.GetAction(),
 	}
+	// line_number 는 fsio 산출물에만 채워진다 — 이걸 fsio 여부의 신호로 쓴다.
+	if e.GetLineNumber() == 0 && e.GetComm() == "" && e.GetIoFlags() == 0 {
+		return m
+	}
+	m["aligned"] = e.GetAligned()
+	m["line_number"] = e.GetLineNumber()
+	m["pid"] = e.GetPid()
+	m["tid"] = e.GetTid()
+	m["comm"] = e.GetComm()
+	m["process"] = e.GetComm() // portal 표의 process 컬럼 = comm 별칭
+	m["syscall"] = e.GetSyscall()
+	m["fs"] = e.GetFs()
+	m["ino"] = e.GetIno()
+	m["name"] = e.GetName()
+	// io_flags 는 u64 라 JSON number 로 보내면 2^53 넘는 f2fs 비트가 깨진다.
+	// 문자열로 보내고 클라이언트가 BigInt 로 푼다.
+	m["io_flags"] = strconv.FormatUint(e.GetIoFlags(), 10)
+
+	if e.GetRwbs() != "" || e.GetDevmajor() != 0 || e.GetDevminor() != 0 {
+		// fsio_block
+		m["devmajor"] = e.GetDevmajor()
+		m["devminor"] = e.GetDevminor()
+		m["rwbs"] = e.GetRwbs()
+		m["flags"] = e.GetFlags()
+		m["extra"] = e.GetExtra()
+		m["sector"] = e.GetLba() // block 은 lba 자리에 sector 가 온다
+	} else {
+		// fsio_ufs
+		m["tag"] = e.GetTag()
+		m["opcode"] = e.GetOpcode()
+		m["lun"] = e.GetLun()
+		m["groupid"] = e.GetGroupid()
+		m["hwqid"] = e.GetHwqid()
+		m["upiu_attr"] = e.GetUpiuAttr()
+		// UPIU 헤더는 없으면 키를 빼 JSON null 로 — 0 과 "없음" 을 구분한다.
+		if e.Txn != nil {
+			m["txn"] = e.GetTxn()
+		}
+		if e.UpiuFlags != nil {
+			m["upiu_flags"] = e.GetUpiuFlags()
+		}
+		if e.UpiuFunc != nil {
+			m["upiu_func"] = e.GetUpiuFunc()
+		}
+		if e.UpiuCp != nil {
+			m["upiu_cp"] = e.GetUpiuCp()
+		}
+	}
+	return m
 }
 
 // ---------- TraceFilter body → proto ----------
@@ -342,6 +532,67 @@ func buildTraceFilter(f map[string]any) *pb.TraceFilter {
 			if s, ok := x.(string); ok {
 				out.ActionList = append(out.ActionList, s)
 			}
+		}
+	}
+
+	// ── fsio cross-layer 필터 ──
+	// Attribution 드릴다운이 여기로 흘러 모든 탭이 같은 모수를 보게 된다.
+	out.CommList = jsonStrings(f["commList"])
+	out.SyscallList = jsonStrings(f["syscallList"])
+	out.FsList = jsonStrings(f["fsList"])
+	out.NameList = jsonStrings(f["nameList"])
+	out.DevList = jsonStrings(f["devList"])
+	for _, v := range jsonNumbers(f["pidList"]) {
+		out.PidList = append(out.PidList, uint32(v))
+	}
+	for _, v := range jsonNumbers(f["inoList"]) {
+		out.InoList = append(out.InoList, uint64(v))
+	}
+	for _, v := range jsonNumbers(f["lunList"]) {
+		out.LunList = append(out.LunList, uint32(v))
+	}
+	if s, ok := f["nameContains"].(string); ok {
+		out.NameContains = s
+	}
+	// io_flags 마스크는 **문자열**로 받는다 — u64 를 JSON number 로 실으면
+	// 2^53 넘는 f2fs 힌트 비트가 조용히 반올림된다.
+	if s, ok := f["ioFlagsAny"].(string); ok {
+		out.IoFlagsAny = s
+	}
+	if s, ok := f["ioFlagsAll"].(string); ok {
+		out.IoFlagsAll = s
+	}
+	if s, ok := f["ioFlagsNone"].(string); ok {
+		out.IoFlagsNone = s
+	}
+	return out
+}
+
+// jsonStrings — JSON 배열에서 문자열만 뽑는다.
+func jsonStrings(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, x := range arr {
+		if s, ok := x.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// jsonNumbers — JSON 배열에서 숫자만 뽑는다.
+func jsonNumbers(v any) []float64 {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []float64
+	for _, x := range arr {
+		if n, ok := numberOf(x); ok {
+			out = append(out, n)
 		}
 	}
 	return out

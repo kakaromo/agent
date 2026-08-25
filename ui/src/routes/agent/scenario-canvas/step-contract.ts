@@ -101,7 +101,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		requiresTool: false,
 		aiUsable: true,
 		params: [
-			{ name: "trace_type", required: false, enum: ["ufs", "block", "both"], default: "ufs", desc: "트레이스 종류" },
+			{ name: "trace_type", required: false, enum: ["ufs", "block", "both", "fsio_ufs", "fsio_block"], default: "ufs", desc: "트레이스 종류 (fsio_* 는 eBPF 기반 — root 필요, 파일명/프로세스 귀속 제공)" },
 			{ name: "window_seconds", required: false, default: "1", desc: "수집 윈도우 (초)" },
 		]
 	},
@@ -115,7 +115,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		requiresTool: false,
 		aiUsable: true,
 		params: [
-			{ name: "trace_type", required: false, enum: ["ufs", "block", "both"], default: "ufs", desc: "trace_start 와 같은 값" },
+			{ name: "trace_type", required: false, enum: ["ufs", "block", "both", "fsio_ufs", "fsio_block"], default: "ufs", desc: "trace_start 와 같은 값" },
 		]
 	},
 	{

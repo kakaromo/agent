@@ -33,6 +33,7 @@ const (
 	DeviceAgent_StopTrace_FullMethodName              = "/agent.DeviceAgent/StopTrace"
 	DeviceAgent_GetTraceResult_FullMethodName         = "/agent.DeviceAgent/GetTraceResult"
 	DeviceAgent_GetTraceRawData_FullMethodName        = "/agent.DeviceAgent/GetTraceRawData"
+	DeviceAgent_GetIoAttribution_FullMethodName       = "/agent.DeviceAgent/GetIoAttribution"
 	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
 	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
 	DeviceAgent_UploadTraceArchive_FullMethodName     = "/agent.DeviceAgent/UploadTraceArchive"
@@ -74,6 +75,8 @@ type DeviceAgentClient interface {
 	StopTrace(ctx context.Context, in *StopTraceRequest, opts ...grpc.CallOption) (*StopTraceResponse, error)
 	GetTraceResult(ctx context.Context, in *GetTraceResultRequest, opts ...grpc.CallOption) (*GetTraceResultResponse, error)
 	GetTraceRawData(ctx context.Context, in *GetTraceRawDataRequest, opts ...grpc.CallOption) (*GetTraceRawDataResponse, error)
+	// I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
+	GetIoAttribution(ctx context.Context, in *GetIoAttributionRequest, opts ...grpc.CallOption) (*GetIoAttributionResponse, error)
 	// Upload
 	UploadTraceToMinio(ctx context.Context, in *UploadTraceRequest, opts ...grpc.CallOption) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error)
@@ -254,6 +257,16 @@ func (c *deviceAgentClient) GetTraceRawData(ctx context.Context, in *GetTraceRaw
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTraceRawDataResponse)
 	err := c.cc.Invoke(ctx, DeviceAgent_GetTraceRawData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) GetIoAttribution(ctx context.Context, in *GetIoAttributionRequest, opts ...grpc.CallOption) (*GetIoAttributionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetIoAttributionResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_GetIoAttribution_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +486,8 @@ type DeviceAgentServer interface {
 	StopTrace(context.Context, *StopTraceRequest) (*StopTraceResponse, error)
 	GetTraceResult(context.Context, *GetTraceResultRequest) (*GetTraceResultResponse, error)
 	GetTraceRawData(context.Context, *GetTraceRawDataRequest) (*GetTraceRawDataResponse, error)
+	// I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
+	GetIoAttribution(context.Context, *GetIoAttributionRequest) (*GetIoAttributionResponse, error)
 	// Upload
 	UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error)
@@ -551,6 +566,9 @@ func (UnimplementedDeviceAgentServer) GetTraceResult(context.Context, *GetTraceR
 }
 func (UnimplementedDeviceAgentServer) GetTraceRawData(context.Context, *GetTraceRawDataRequest) (*GetTraceRawDataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTraceRawData not implemented")
+}
+func (UnimplementedDeviceAgentServer) GetIoAttribution(context.Context, *GetIoAttributionRequest) (*GetIoAttributionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetIoAttribution not implemented")
 }
 func (UnimplementedDeviceAgentServer) UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadTraceToMinio not implemented")
@@ -865,6 +883,24 @@ func _DeviceAgent_GetTraceRawData_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DeviceAgentServer).GetTraceRawData(ctx, req.(*GetTraceRawDataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_GetIoAttribution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIoAttributionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).GetIoAttribution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_GetIoAttribution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).GetIoAttribution(ctx, req.(*GetIoAttributionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1208,6 +1244,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTraceRawData",
 			Handler:    _DeviceAgent_GetTraceRawData_Handler,
+		},
+		{
+			MethodName: "GetIoAttribution",
+			Handler:    _DeviceAgent_GetIoAttribution_Handler,
 		},
 		{
 			MethodName: "UploadTraceToMinio",

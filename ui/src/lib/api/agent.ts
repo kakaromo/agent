@@ -359,6 +359,30 @@ export interface TraceFilter {
 	cmdList?: string[];
 	sizeList?: number[];
 	actionList?: string[];
+
+	/**
+	 * fsio_* 전용 cross-layer 필터. Attribution 드릴다운이 여기로 흘러
+	 * Charts / Statistics / Raw Data / Attribution 이 같은 모수를 본다.
+	 * 해당 컬럼이 없는 parquet(ftrace)에서는 서버가 조건을 조용히 skip 한다.
+	 */
+	commList?: string[];
+	pidList?: number[];
+	syscallList?: string[];
+	fsList?: string[];
+	nameList?: string[];
+	inoList?: number[];
+	lunList?: number[];
+	/** "major:minor" (예 "8:0") */
+	devList?: string[];
+	/** 파일명 부분일치 — 상위 N 밖의 파일을 찾을 때 */
+	nameContains?: string;
+	/**
+	 * io_flags 비트 마스크. **문자열이다** — u64 를 number 로 실으면 2^53 넘는
+	 * f2fs 힌트 비트가 조용히 반올림된다.
+	 */
+	ioFlagsAny?: string;
+	ioFlagsAll?: string;
+	ioFlagsNone?: string;
 }
 
 export interface LatencyStats {
@@ -395,6 +419,72 @@ export interface TraceStats {
 	alignedCount: number; alignedRatio: number;
 	readTotalBytes: number; writeTotalBytes: number; discardTotalBytes: number;
 	sendCount: number;
+	/** UFS management 이벤트 집계 (fsio_ufs 전용, 없으면 빈 배열). */
+	mgmtStats: MgmtStatsItem[];
+}
+
+/**
+ * UFS management 이벤트(Query/TM UPIU, UIC) 집계.
+ *
+ * 핵심은 `totalTimeMs` — 데이터 전송이 아니라 **링크 점유 시간**이다.
+ * durationSeconds 와 비교하면 "관측 기간 중 몇 %" 가 나온다. idle 구간에서는
+ * mgmt 가 행의 대부분이라 이 집계가 사실상 유일한 산출물이 된다.
+ */
+export interface MgmtStatsItem {
+	/** 표시 이름 — "Read Descriptor(geometry)" / "DME_HIBER_ENTER" */
+	name: string;
+	/** "query" | "tm" | "uic" | "other" — UI 그룹핑용 */
+	kind: string;
+	/** 전체 행 수 (send + complete 양쪽) */
+	count: number;
+	/** 짝지어져 latency 가 계산된 건수 */
+	pairedCount: number;
+	/** dtoc 합계(ms) = 링크 점유 시간 */
+	totalTimeMs: number;
+	dtoc: LatencyStats;
+}
+
+/** I/O 귀속 집계 축. */
+export type AttributionDim =
+	| 'comm' | 'pid' | 'tid' | 'syscall' | 'fs'
+	| 'file' | 'ino' | 'flow' | 'cmd' | 'lun' | 'device';
+
+export interface AttributionEntry {
+	/** 표시값. 롤업 행은 "(other)", 빈 값은 "(none)" */
+	key: string;
+	count: number;
+	sendCount: number;
+	ratio: number;
+	readBytes: number;
+	writeBytes: number;
+	totalBytes: number;
+	/** 이 키에 귀속된 총 장치 시간(ms) */
+	dtocSumMs: number;
+	dtocMaxMs: number;
+	/**
+	 * ⚠ (other) 롤업 행은 percentile 이 **undefined** 다.
+	 * 0 으로 폴백하면 "0ms = 빠름" 으로 읽혀 unknown 의 정반대 의미가 된다 — "—" 로 렌더할 것.
+	 */
+	dtocAvgMs?: number;
+	dtocP50Ms?: number;
+	dtocP99Ms?: number;
+	/** comm/pid/tid 축에서만 채워짐 */
+	distinctFiles?: number;
+	isOther: boolean;
+}
+
+export interface AttributionGroup {
+	dim: AttributionDim;
+	entries: AttributionEntry[];
+	/** top-N 자르기 **전** 전체 카디널리티 — "전체 N개 중 상위 20개" 표시용 */
+	distinctKeys: number;
+}
+
+export interface AttributionResult {
+	totalEvents: number;
+	groups: AttributionGroup[];
+	/** parquet 에 컬럼이 없어 건너뛴 축 — 에러가 아니라 "못 했다" 는 알림 */
+	unsupportedDims: AttributionDim[];
 }
 
 export interface TraceEvent {
@@ -406,6 +496,11 @@ export interface TraceEvent {
 
 export interface TraceRawDataResult {
 	jobId: string; totalEvents: number; sampledEvents: number; isSampled: boolean;
+	/**
+	 * 조회된 잡의 trace_type. 컬럼 세트와 fsio 전용 UI 노출 판단에 쓴다.
+	 * 시나리오 경유가 아닌 단독 trace 실행에는 mappings 가 없어 이 값이 유일한 출처다.
+	 */
+	traceType?: string;
 	events: TraceEvent[];
 }
 
@@ -427,6 +522,22 @@ export function getTraceResult(serverId: number, data: {
 	jobIds: string[]; filter?: TraceFilter; latencyRangesMs?: number[];
 }): Promise<{ jobId: string; stats: TraceStats }> {
 	return post(`/agent/trace/result?serverId=${serverId}`, data);
+}
+
+/**
+ * I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나".
+ *
+ * fsio_* 산출물에서만 의미가 있다. ftrace 산출물로 호출하면 대부분의 축이
+ * `unsupportedDims` 로 돌아온다 (에러가 아니다).
+ */
+export function getTraceAttribution(serverId: number, data: {
+	jobIds: string[];
+	filter?: TraceFilter;
+	dims: AttributionDim[];
+	topN?: number;
+	sortBy?: 'count' | 'bytes' | 'latency';
+}): Promise<AttributionResult> {
+	return post(`/agent/trace/attribution?serverId=${serverId}`, data);
 }
 
 export function getTraceRawData(serverId: number, data: {

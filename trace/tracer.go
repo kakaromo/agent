@@ -100,8 +100,15 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", err
 	}
 
+	traceType := req.TraceType
+	if traceType == "" {
+		traceType = "ufs"
+	}
+	isFsio := IsFsioTraceType(traceType)
+
+	// fsio 는 ftrace 를 안 쓰므로 tracingDir 이 없어도 된다.
 	tracingDir := md.TracingDir
-	if tracingDir == "" {
+	if tracingDir == "" && !isFsio {
 		return "", fmt.Errorf("tracing directory not found on device %s", req.DeviceId)
 	}
 
@@ -115,10 +122,6 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	}
 
 	logFile := filepath.Join(outputDir, "trace.log")
-	traceType := req.TraceType
-	if traceType == "" {
-		traceType = "ufs"
-	}
 
 	job := &TraceJob{
 		ID:         jobID,
@@ -135,34 +138,40 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Stop tracing and clear trace buffer
-	md.Device.Shell(setupCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
-	md.Device.Shell(setupCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
+	// fsio 는 eBPF 바이너리를 push 해 실행한다 — ftrace 이벤트 조작을 하지 않는다.
+	if isFsio {
+		job.notify(&pb.JobProgress{
+			JobId:    jobID,
+			DeviceId: req.DeviceId,
+			State:    pb.JobState_JOB_STATE_RUNNING,
+			Message:  "preparing fsiotrace (push + root check)",
+		})
+		if err := prepareFsioDevice(setupCtx, md.Device, m.toolsDir); err != nil {
+			m.mu.Lock()
+			delete(m.jobs, jobID)
+			m.mu.Unlock()
+			return "", err
+		}
+	} else {
+		// Stop tracing and clear trace buffer
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo > %s/trace", tracingDir))
 
-	// Enable selected events
-	job.notify(&pb.JobProgress{
-		JobId:    jobID,
-		DeviceId: req.DeviceId,
-		State:    pb.JobState_JOB_STATE_RUNNING,
-		Message:  fmt.Sprintf("enabling %s events", traceType),
-	})
+		// Enable selected events
+		job.notify(&pb.JobProgress{
+			JobId:    jobID,
+			DeviceId: req.DeviceId,
+			State:    pb.JobState_JOB_STATE_RUNNING,
+			Message:  fmt.Sprintf("enabling %s events", traceType),
+		})
 
-	switch traceType {
-	case "ufs":
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
-	case "block":
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
-	case "both":
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
-		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
+		enableFtraceEvents(setupCtx, md, tracingDir, traceType)
+
+		// Start tracing
+		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/tracing_on", tracingDir))
 	}
 
-	// Start tracing
-	md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/tracing_on", tracingDir))
-
-	// Start adb shell cat trace_pipe → log file
+	// Start collector → log file
 	adbCtx, adbCancel := context.WithCancel(context.Background())
 	logFd, err := os.Create(logFile)
 	if err != nil {
@@ -170,14 +179,46 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("create log file: %w", err)
 	}
 
-	adbCmd := exec.CommandContext(adbCtx, "adb", "-s", md.Serial, "shell",
-		fmt.Sprintf("cat %s/trace_pipe", tracingDir))
-	adbCmd.Stdout = logFd
-	if err := adbCmd.Start(); err != nil {
+	var adbCmd *exec.Cmd
+	if isFsio {
+		adbCmd, err = startFsioCollector(adbCtx, md.Serial, traceType, logFd)
+	} else {
+		adbCmd = exec.CommandContext(adbCtx, "adb", "-s", md.Serial, "shell",
+			fmt.Sprintf("cat %s/trace_pipe", tracingDir))
+		adbCmd.Stdout = logFd
+		err = adbCmd.Start()
+	}
+	if err != nil {
 		logFd.Close()
 		adbCancel()
-		return "", fmt.Errorf("start trace_pipe: %w", err)
+		return "", fmt.Errorf("start collector: %w", err)
 	}
+
+	return m.finishStart(job, adbCmd, adbCancel, logFd)
+}
+
+// enableFtraceEvents — ftrace 계열 trace_type 의 이벤트를 켠다.
+func enableFtraceEvents(ctx context.Context, md *adb.ManagedDevice, tracingDir, traceType string) {
+	switch traceType {
+	case "ufs":
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
+	case "block":
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
+	case "both":
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_issue/enable", tracingDir))
+		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/block/block_rq_complete/enable", tracingDir))
+	}
+}
+
+// finishStart — 수집 프로세스 등록 + 백그라운드 감시. ftrace/fsio 공통 뒷부분.
+//
+// 식별 정보는 전부 job 에 이미 들어 있으므로 따로 받지 않는다.
+func (m *Manager) finishStart(job *TraceJob, adbCmd *exec.Cmd, adbCancel context.CancelFunc,
+	logFd *os.File) (string, error) {
+
+	jobID, deviceID := job.ID, job.DeviceID
 
 	// Wait for log data to start flowing
 	time.Sleep(500 * time.Millisecond)
@@ -190,13 +231,13 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 
 	job.notify(&pb.JobProgress{
 		JobId:    jobID,
-		DeviceId: req.DeviceId,
+		DeviceId: deviceID,
 		State:    pb.JobState_JOB_STATE_RUNNING,
 		Message:  "trace collecting",
 	})
 
-	slog.Info("trace started", "job_id", jobID, "device", req.DeviceId, "type", traceType,
-		"output_dir", outputDir)
+	slog.Info("trace started", "job_id", jobID, "device", deviceID, "type", job.TraceType,
+		"output_dir", job.OutputDir)
 
 	// Wait for adb process in background.
 	// adbCancel 이 호출되면 exec.CommandContext 가 SIGKILL 을 보내므로 Wait 가 즉시 풀린다.
@@ -241,19 +282,28 @@ func (m *Manager) StopTrace(jobID string) error {
 	adbCancel := job.adbCancel
 	deviceID := job.DeviceID
 	tracingDir := job.TracingDir
+	traceType := job.TraceType
 	job.Mu.Unlock()
 
 	const shellTimeout = 10 * time.Second
 
-	// 1. Disable tracing on device (동기, 타임아웃)
+	// 1. 기기 측 수집 중지 (동기, 타임아웃)
 	if md, err := m.adbMgr.GetDevice(deviceID); err == nil {
 		shellCtx, shellCancel := context.WithTimeout(context.Background(), shellTimeout)
-		md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
-		md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
+		if IsFsioTraceType(traceType) {
+			// ⚠ pkill 이 **먼저**다. fsiotrace 는 SIGTERM 을 받으면 detach 후 ringbuf
+			// 잔여 이벤트를 배수하고 끝내서 마지막 몇 건이 안 잘린다. adb 를 먼저
+			// 죽이면 EPIPE 경로로 가는데 그건 fallback 이다 (fsio.go 주석 참고).
+			stopFsioOnDevice(shellCtx, md.Device)
+		} else {
+			md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
+			md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
+		}
 		shellCancel()
 	}
 
-	// 2. Stop adb trace_pipe (동기)
+	// 2. 수집 프로세스 종료 (동기). fsio 는 위 pkill 로 이미 끝났을 수 있고,
+	//    안 끝났으면 여기서 파이프가 닫혀 EPIPE 로 정리된다.
 	if adbCancel != nil {
 		adbCancel()
 	}
@@ -341,8 +391,12 @@ func (m *Manager) runParquetOnly(job *TraceJob, progressState pb.JobState) error
 		}
 	}
 
-	// Go 내장 파서 분기 — AGENT_PARSER=go 일 때만.
-	if os.Getenv("AGENT_PARSER") == "go" {
+	// Go 내장 파서 분기.
+	//
+	// fsio 는 **항상** Go 파서를 쓴다. 체크인된 tools/trace 바이너리에는 fsio 파싱이
+	// 없어서(bpftrace 지원은 그 뒤에 추가됨) Rust 로 보내면 산출물이 조용히 0건이 된다.
+	// AGENT_PARSER 설정과 무관하게 여기서 갈라야 한다.
+	if os.Getenv("AGENT_PARSER") == "go" || IsFsioTraceType(job.TraceType) {
 		slog.Info("using Go embedded parser", "job_id", jobID, "trace_type", job.TraceType)
 		progressFn := func(line string) {
 			job.notify(&pb.JobProgress{
@@ -461,10 +515,10 @@ func (m *Manager) GetTraceJobInfo(jobID string) (*TraceJobInfo, error) {
 		legacy := filepath.Join(baseDir, "realtime")
 		if _, err := os.Stat(legacy); err == nil {
 			if matches, _ := filepath.Glob(filepath.Join(baseDir, "*.parquet")); len(matches) == 0 {
-				return &TraceJobInfo{Dir: legacy, TraceType: "both"}, nil
+				return &TraceJobInfo{Dir: legacy, TraceType: detectTraceTypeFromDir(legacy)}, nil
 			}
 		}
-		return &TraceJobInfo{Dir: baseDir, TraceType: "both"}, nil
+		return &TraceJobInfo{Dir: baseDir, TraceType: detectTraceTypeFromDir(baseDir)}, nil
 	}
 	return nil, fmt.Errorf("trace job not found: %s", jobID)
 }
@@ -545,6 +599,12 @@ func (m *Manager) GetArchiveFiles(jobID string) (rawPath string, rawSize int64, 
 func detectTraceTypeFromFilename(name string) string {
 	lower := strings.ToLower(name)
 	switch {
+	// ⚠ fsio_* 를 먼저 본다. substring 매칭이라 "result_fsio_ufs.parquet" 이
+	// 아래 "ufs" 분기에 먼저 걸리면 ftrace UFS 로 오분류된다.
+	case strings.Contains(lower, "fsio_ufs"):
+		return "fsio_ufs"
+	case strings.Contains(lower, "fsio_block"):
+		return "fsio_block"
 	case strings.Contains(lower, "ufscustom"):
 		return "ufscustom"
 	case strings.Contains(lower, "ufs"):
@@ -553,6 +613,25 @@ func detectTraceTypeFromFilename(name string) string {
 		return "block"
 	}
 	return "unknown"
+}
+
+// detectTraceTypeFromDir — 디렉토리의 result_*.parquet 파일명으로 trace_type 을 추정한다.
+//
+// 메모리에 잡이 없을 때(agent 재시작 후) 쓰인다. 예전에는 무조건 "both" 로 뒀는데,
+// 그러면 fsio 잡을 reparse 할 때 ftrace 파서가 돌아 **아무것도 안 나온다.**
+// 산출물이 없으면(파싱 전) ftrace 기본값 "both" 로 폴백한다 — 기존 동작 유지.
+func detectTraceTypeFromDir(dir string) string {
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.parquet"))
+	for _, m := range matches {
+		if t := detectTraceTypeFromFilename(filepath.Base(m)); t != "unknown" {
+			// fsio 는 단일 선택이라 하나만 나오면 그게 답이다. ftrace 계열은
+			// ufs/block 이 섞일 수 있어 "both" 로 합쳐 읽는 기존 규칙을 따른다.
+			if strings.HasPrefix(t, "fsio_") {
+				return t
+			}
+		}
+	}
+	return "both"
 }
 
 // DeleteJob deletes a completed/failed trace job and its output files.
@@ -597,11 +676,13 @@ func (m *Manager) ReparseTrace(jobID string) error {
 		}
 
 		job = &TraceJob{
-			ID:        jobID,
-			State:     pb.JobState_JOB_STATE_COMPLETED,
+			ID:    jobID,
+			State: pb.JobState_JOB_STATE_COMPLETED,
+			// 메모리에 잡이 없으므로 산출물 파일명으로 종류를 되찾는다.
+			// "both" 로 고정하면 fsio 잡이 ftrace 파서를 타 아무것도 안 나온다.
 			OutputDir: baseDir,
 			LogFile:   logFile,
-			TraceType: "both",
+			TraceType: detectTraceTypeFromDir(baseDir),
 		}
 		m.mu.Lock()
 		m.jobs[jobID] = job
