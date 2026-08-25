@@ -102,6 +102,10 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	}
 	defer db.Close()
 
+	if err := checkMixedFamily(infos); err != nil {
+		return nil, err
+	}
+
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
@@ -190,6 +194,11 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	// (OUTPUT_FORMAT.md col 13). 아래 ×4096/×512 를 그대로 태우면 read/write 바이트가
 	// 4096배/512배 부풀어 오른다. Rust 도 fsio 일 때만 sector_bytes=1 로 둔다.
 	// fsio 는 1, ftrace UFS 는 4096(1 LBA), ftrace Block 은 512(1 sector).
+	//
+	// ⚠ 이 판정은 **쿼리 단위**라, fsio 잡과 ftrace 잡을 함께 조회하면 한쪽이 틀린다.
+	// 행별로 가르려면 집계 SQL 자체를 바꿔야 하는데, 두 계열을 섞어 보는 것 자체가
+	// 의미가 옅어서(단위·의미가 다른 값을 한 표에 합산) 그 조합은 **명시적으로 막고**
+	// 계수는 단일 계열 기준으로 둔다. mixedFamily 는 위에서 검사한다.
 	ufsUnit, blockUnit := uint64(4096), uint64(512)
 	if fsio.any() {
 		ufsUnit, blockUnit = 1, 1
@@ -252,7 +261,7 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	// 그 자체로 답해야 할 질문이라 별도 축으로 낸다. idle 구간에서는 이게 사실상
 	// 유일한 산출물이다.
 	if fsio.isUFS {
-		stats.MgmtStats, err = queryMgmtStats(db, glob)
+		stats.MgmtStats, err = queryMgmtStats(db, glob, where)
 		if err != nil {
 			return nil, fmt.Errorf("mgmt stats: %w", err)
 		}
@@ -793,12 +802,25 @@ func detectFsioSchema(db *sql.DB, glob string) fsioSchema {
 //     대신 `rwbs`("WS"/"R"/"D")가 분류 정보를 갖고 있다.
 func detectCmdColumn(db *sql.DB, glob string) string {
 	if f := detectFsioSchema(db, glob); f.any() {
+		// fsio_ufs 의 opcode 는 UInt8 이라 hex 문자열로 바꿔야 분류기와 맞는다.
+		//
+		// ⚠ 단, **ftrace 잡과 union 되면 opcode 가 VARCHAR 로 승격된다**
+		// (ftrace UFS 는 opcode 가 '0x2a' 문자열). 그 상태에서 to_hex 를 태우면
+		// 숫자가 아니라 **ASCII 바이트**를 인코딩한다 — '42' → '3432' → lpad(...,2)
+		// 로 잘려 '0x34' 라는 엉뚱한 cmd 가 나오고, 분류기가 전부 default 로 새서
+		// read/write 바이트가 0 이 된다. typeof 로 갈라 이미 문자열이면 그대로 쓴다.
+		// ⚠ CASE 의 두 갈래는 **둘 다 타입 검사를 통과해야 한다**. opcode 가 UTINYINT 일 때
+		// lower(opcode) 는 함수 매칭에 실패하므로 양쪽 모두 VARCHAR 로 캐스팅해 둔다.
+		// to_hex(VARCHAR) 는 ASCII 를 인코딩하지만 그 갈래는 실행되지 않는다.
+		hexOpcode := "CASE WHEN typeof(opcode) = 'VARCHAR' " +
+			"THEN lower(CAST(opcode AS VARCHAR)) " +
+			"ELSE '0x' || lpad(lower(to_hex(CAST(opcode AS UTINYINT))), 2, '0') END"
 		switch {
 		case f.isUFS && f.isBlock:
 			// 여러 잡을 합쳐 두 스키마가 섞인 경우 — 있는 쪽을 쓴다.
-			return "COALESCE('0x' || lpad(lower(to_hex(opcode)), 2, '0'), rwbs)"
+			return fmt.Sprintf("COALESCE(%s, rwbs)", hexOpcode)
 		case f.isUFS:
-			return "'0x' || lpad(lower(to_hex(opcode)), 2, '0')"
+			return hexOpcode
 		default:
 			return "rwbs"
 		}
@@ -819,6 +841,38 @@ func detectCmdColumn(db *sql.DB, glob string) string {
 		return "io_type"
 	}
 	return "opcode"
+}
+
+// traceFamily — trace_type 이 속한 계열. 섞이면 단위·의미가 달라 합산이 성립하지 않는다.
+//
+//   - "fsio"   : bpftrace 산출물 (size 가 bytes, opcode 가 UInt8)
+//   - "ftrace" : ufs/block/both/ufscustom (size 가 LBA/sector 단위, opcode 가 문자열)
+func traceFamily(traceType string) string {
+	if strings.HasPrefix(traceType, "fsio_") {
+		return "fsio"
+	}
+	return "ftrace"
+}
+
+// checkMixedFamily — fsio 잡과 ftrace 잡을 함께 조회하려 하면 에러.
+//
+// 조용히 합치면 **틀린 숫자가 그럴듯하게 나온다**:
+//   - size 계수가 쿼리 단위라 한쪽이 4096배 어긋난다
+//   - union 으로 opcode 가 VARCHAR 로 승격돼 cmd 축이 깨진다
+//
+// 둘 다 에러가 아니라 그럴듯한 값이라 사용자가 알아채기 어렵다. 애초에 단위와
+// 의미가 다른 값을 한 표에 합산하는 것 자체가 성립하지 않으므로 명시적으로 막는다.
+func checkMixedFamily(infos []*TraceJobInfo) error {
+	fams := make(map[string]bool)
+	for _, info := range infos {
+		fams[traceFamily(info.TraceType)] = true
+	}
+	if len(fams) > 1 {
+		return fmt.Errorf("fsio 잡과 ftrace 잡은 함께 조회할 수 없습니다 — " +
+			"size 단위(bytes vs LBA/sector)와 cmd 표현이 달라 합산이 성립하지 않습니다. " +
+			"같은 계열끼리 선택하세요")
+	}
+	return nil
 }
 
 // filterCols — cross-layer 필터가 참조하는 컬럼. 존재 검사용.

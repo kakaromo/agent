@@ -24,6 +24,10 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	}
 	defer db.Close()
 
+	if err := checkMixedFamily(infos); err != nil {
+		return nil, err
+	}
+
 	glob := buildGlobList(infos)
 	cmdCol := detectCmdColumn(db, glob)
 	lbaCol := detectLbaColumn(db, glob)

@@ -3,6 +3,7 @@ package trace
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	pb "agent/pb"
 )
@@ -34,7 +35,17 @@ const mgmtKindExpr = `CASE
 //
 // 집계 축이 cmd 가 아니라 name 인 이유 — mgmt 는 SCSI opcode 가 없어 cmd 축에서는
 // 전부 '0x00' 으로 뭉친다.
-func queryMgmtStats(db *sql.DB, glob string) ([]*pb.MgmtStats, error) {
+// where 는 현재 화면 필터. 이걸 안 받으면 사용자가 구간을 확대해도 mgmt 는 전체
+// 구간 합계를 유지해서, UI 가 `totalTimeMs / (durationSeconds*1000)` 으로 계산하는
+// "관측 기간의 N%" 가 100% 를 훌쩍 넘긴다(분자만 전체, 분모는 축소된 구간).
+func queryMgmtStats(db *sql.DB, glob, where string) ([]*pb.MgmtStats, error) {
+	// mgmt 행만 고른다. 호출부 where 는 데이터 IO 기준으로 만들어졌고
+	// COALESCE(is_mgmt,FALSE)=FALSE 가 들어 있을 수 있으므로 그 조건만 뺀다.
+	mgmtWhere := stripMgmtExclusion(where)
+	cond := "COALESCE(is_mgmt, FALSE) = TRUE AND mgmt_name IS NOT NULL AND mgmt_name != ''"
+	if mgmtWhere != "" {
+		cond = strings.TrimPrefix(mgmtWhere, "WHERE ") + " AND " + cond
+	}
 	// dtoc 는 complete 쪽 행에만 채워진다(send 는 0). 짝지어진 건수 = dtoc > 0 인 행.
 	q := fmt.Sprintf(`SELECT
 		mgmt_name,
@@ -50,9 +61,9 @@ func queryMgmtStats(db *sql.DB, glob string) ([]*pb.MgmtStats, error) {
 		percentile_cont(0.99) WITHIN GROUP (ORDER BY dtoc) FILTER (WHERE dtoc > 0),
 		percentile_cont(0.999) WITHIN GROUP (ORDER BY dtoc) FILTER (WHERE dtoc > 0)
 	FROM read_parquet(%s)
-	WHERE COALESCE(is_mgmt, FALSE) = TRUE AND mgmt_name IS NOT NULL AND mgmt_name != ''
+	WHERE %s
 	GROUP BY mgmt_name
-	ORDER BY total_ms DESC, cnt DESC`, mgmtKindExpr, glob)
+	ORDER BY total_ms DESC, cnt DESC`, mgmtKindExpr, glob, cond)
 
 	rows, err := db.Query(q)
 	if err != nil {
@@ -84,6 +95,25 @@ func queryMgmtStats(db *sql.DB, glob string) ([]*pb.MgmtStats, error) {
 		})
 	}
 	return out, rows.Err()
+}
+
+// stripMgmtExclusion — where 에서 mgmt 제외 조건만 걷어낸다.
+//
+// 데이터 IO 집계용 where 에는 `COALESCE(is_mgmt, FALSE) = FALSE` 가 붙어 있는데,
+// mgmt 집계에 그걸 그대로 쓰면 아무것도 안 남는다. 나머지 조건(시간/귀속 등)은
+// 유지해야 확대 구간과 모수가 맞는다.
+func stripMgmtExclusion(where string) string {
+	const excl = "COALESCE(is_mgmt, FALSE) = FALSE"
+	if !strings.Contains(where, excl) {
+		return where
+	}
+	out := strings.ReplaceAll(where, " AND "+excl, "")
+	out = strings.ReplaceAll(out, excl+" AND ", "")
+	out = strings.ReplaceAll(out, "WHERE "+excl, "")
+	if strings.TrimSpace(out) == "WHERE" || strings.TrimSpace(out) == "" {
+		return ""
+	}
+	return out
 }
 
 // ==================== I/O 귀속 ====================
@@ -192,6 +222,10 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 	}
 	defer db.Close()
 
+	if err := checkMixedFamily(infos); err != nil {
+		return nil, err
+	}
+
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
@@ -201,14 +235,32 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
 	}
 
+	// action 이름과 size 단위는 계열·레이어마다 다르다.
+	//
+	//   fsio_ufs   : send_req/complete_rsp,        size = bytes            → ×1
+	//   fsio_block : block_rq_issue/complete,      size = bytes            → ×1
+	//   ftrace ufs : send_req/complete_rsp,        size = 4KB LBA 단위     → ×4096
+	//   ftrace blk : block_rq_issue/complete,      size = 512B sector 단위 → ×512
+	//
+	// 예전엔 `!fsio.any()` 면 무조건 4096 이라 **ftrace block 의 바이트가 8배**로
+	// 부풀었다. cmd 축은 needCols 가 없어 항상 지원되므로 ftrace block 조회로
+	// 실제 도달하는 경로였다.
+	isBlockLayer := fsio.isBlock
+	if !fsio.any() {
+		// ftrace 는 sector 컬럼 유무로 block 을 가른다 (ufs 는 lba).
+		isBlockLayer = hasColumns(db, glob, "sector")["sector"]
+	}
 	reqAction, compAction := "send_req", "complete_rsp"
-	if fsio.isBlock {
+	if isBlockLayer {
 		reqAction, compAction = "block_rq_issue", "block_rq_complete"
 	}
-	// bpftrace 의 size 는 이미 bytes (통계 경로와 동일 규칙).
 	sectorBytes := 1
 	if !fsio.any() {
-		sectorBytes = 4096
+		if isBlockLayer {
+			sectorBytes = 512
+		} else {
+			sectorBytes = 4096
+		}
 	}
 
 	resp := &pb.GetIoAttributionResponse{}

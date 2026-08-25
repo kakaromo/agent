@@ -454,3 +454,112 @@ func TestMixedFsioJobs(t *testing.T) {
 		t.Errorf("두 스키마가 합쳐지지 않았다: %+v", stats.CmdStats)
 	}
 }
+
+// fsio 잡과 ftrace 잡을 함께 조회하면 **에러여야 한다.**
+//
+// 조용히 합치면 틀린 숫자가 그럴듯하게 나온다: size 계수가 쿼리 단위라 한쪽이
+// 4096배 어긋나고, union 으로 opcode 가 VARCHAR 로 승격돼 to_hex 가 ASCII 를
+// 인코딩한 '0x34' 같은 값이 cmd 축에 나온다(그러면 분류기가 전부 default 로 새서
+// read/write 바이트가 0 이 된다). 단위·의미가 다른 값을 한 표에 합산하는 것 자체가
+// 성립하지 않으므로 명시적으로 막는다.
+func TestMixedFamilyRejected(t *testing.T) {
+	fsioDir := writeFsioParquet(t, "fsio_ufs")
+
+	ftDir := t.TempDir()
+	lf := filepath.Join(ftDir, "trace.log")
+	data := "  kworker/0:1H-123   [000] ....  1000.000000: ufshcd_command: send_req: 0:0:0:0: tag: 1, DB: 0x0, size: 4096, IS: 0, LBA: 100, opcode: 0x2a (WRITE_10), group_id: 0x0, hwq_id: 0\n"
+	if err := os.WriteFile(lf, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(lf, ftDir, "ufs", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	infos := []*TraceJobInfo{
+		{Dir: fsioDir, TraceType: "fsio_ufs"},
+		{Dir: ftDir, TraceType: "ufs"},
+	}
+	if _, err := ComputeStats(infos, nil, nil); err == nil {
+		t.Error("혼합 조회가 통과했다 — 틀린 숫자가 조용히 나온다")
+	}
+	if _, err := GetRawData(infos, nil); err == nil {
+		t.Error("raw 혼합 조회가 통과했다")
+	}
+	if _, err := ComputeAttribution(infos, &pb.GetIoAttributionRequest{
+		Dims: []pb.AttributionDim{pb.AttributionDim_ATTR_DIM_CMD},
+	}); err == nil {
+		t.Error("attribution 혼합 조회가 통과했다")
+	}
+	// 같은 계열끼리는 여전히 된다.
+	if _, err := ComputeStats([]*TraceJobInfo{infos[0]}, nil, nil); err != nil {
+		t.Errorf("단일 fsio 조회가 깨졌다: %v", err)
+	}
+}
+
+// ftrace block 의 attribution 바이트는 512 배수여야 한다 (4096 이면 8배 부풀어 오른다).
+// cmd 축은 needCols 가 없어 항상 지원되므로 ftrace block 조회로 실제 도달한다.
+func TestAttributionFtraceBlockByteUnit(t *testing.T) {
+	dir := t.TempDir()
+	lf := filepath.Join(dir, "trace.log")
+	data := "  fio-100   [000] ....  1000.000000: block_rq_issue: 8,0 WS 0 () 1000 + 8 [fio]\n" +
+		"  fio-100   [000] ....  1000.001000: block_rq_complete: 8,0 WS () 1000 + 8 [0]\n"
+	if err := os.WriteFile(lf, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(lf, dir, "block", nil); err != nil {
+		t.Fatal(err)
+	}
+	infos := []*TraceJobInfo{{Dir: dir, TraceType: "block"}}
+
+	resp, err := ComputeAttribution(infos, &pb.GetIoAttributionRequest{
+		Dims: []pb.AttributionDim{pb.AttributionDim_ATTR_DIM_CMD}, TopN: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := ComputeStats(infos, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attrBytes uint64
+	for _, g := range resp.Groups {
+		for _, e := range g.Entries {
+			attrBytes += e.TotalBytes
+		}
+	}
+	// 같은 데이터라 stats 의 write 합계와 일치해야 한다.
+	if attrBytes != st.WriteTotalBytes {
+		t.Errorf("attribution=%d != stats write=%d (단위 계수가 다르다)", attrBytes, st.WriteTotalBytes)
+	}
+}
+
+// 확대(시간 필터)하면 mgmt 합계도 같이 줄어야 한다.
+// 안 그러면 UI 의 "관측 기간의 N%" 가 100% 를 훌쩍 넘긴다.
+func TestMgmtRespectsTimeFilter(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	full, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fullMs float64
+	for _, m := range full.MgmtStats {
+		fullMs += m.TotalTimeMs
+	}
+
+	// query(12346.0005~.0082) 만 남기고 uic(12346.010~.0129) 는 제외
+	narrow, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.TraceFilter{StartTime: 12346.0, EndTime: 12346.009}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var narrowMs float64
+	for _, m := range narrow.MgmtStats {
+		narrowMs += m.TotalTimeMs
+	}
+
+	t.Logf("전체 mgmt=%.3fms (%d종) / 축소 mgmt=%.3fms (%d종)",
+		fullMs, len(full.MgmtStats), narrowMs, len(narrow.MgmtStats))
+	if narrowMs >= fullMs {
+		t.Errorf("축소해도 mgmt 가 안 줄었다: %.3f >= %.3f", narrowMs, fullMs)
+	}
+}
