@@ -658,6 +658,32 @@ message TraceEvent {
   string rwbs     = 34;  // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
   string flags    = 35;  // ftrace trace flag string. bpftrace 엔 없어 빈 값
   uint32 extra    = 36;  // bpftrace 엔 없어 0
+
+  // ── UFS management (Query/TM UPIU, UIC, exception) — fsio_ufs 전용 ──
+  //
+  // Raw Data 에 mgmt 행을 **일부러 남기기** 때문에 필요하다 (통계는 반대로 뺀다).
+  // "hibern8 도는 동안 IO 가 멈췄다" 는 두 종류가 같은 타임라인에 있어야 보인다.
+  //
+  // cmd 필드에는 이미 mgmt_name 이 들어간다(서버가 CASE 로 치환). 아래는 그
+  // 이름만으로는 부족한 경우 — Query 가 어느 IDN 을 건드렸는지, TM 이 성공했는지
+  // (resp/status) — 를 행 단위로 확인하기 위한 원본 값이다.
+  bool   is_mgmt   = 37;  // 이 행이 mgmt 인가. action 접두어로도 알 수 있지만 명시
+  string mgmt_name = 38;  // 파싱 시점에 구워둔 표시 이름. cmd 와 같은 값
+  optional uint32 upiu_resp     = 39;  // UPIU hdr[6] — 응답 방향 행의 성패
+  optional uint32 upiu_status   = 40;  // UPIU hdr[7]
+  optional uint32 query_opcode  = 41;  // tsf[0] — 0x01=Read Descriptor 등
+  optional uint32 query_idn     = 42;  // tsf[1] — ⚠ 값 공간이 query_opcode 에 따라 다르다
+  optional uint32 query_index   = 43;  // tsf[2]
+  optional uint32 query_selector = 44; // tsf[3]
+  optional uint32 uic_cmd       = 45;  // 0x16=HIBERNATE_ENTER, 0x17=EXIT 등
+
+  // 미완결 IO 표시 — complete 를 끝내 못 받아 파서가 닫은 send.
+  //
+  // bpftrace 는 IRQ 재진입 가드 때문에 complete 를 구조적으로 소수 놓치고,
+  // **IO 가 몰릴수록 그 비율이 오른다** (trace/parser/fsio_inflight.go).
+  // 이 행의 dtoc 는 0 인데 그건 "0ms" 가 아니라 **"모름"** 이다. 표에서
+  // 0ms 로 읽히면 "엄청 빠른 IO" 로 오해하므로 플래그로 구분한다.
+  bool is_unfinished = 46;
 }
 
 // ==================== Upload to MinIO ====================

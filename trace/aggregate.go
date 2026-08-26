@@ -201,10 +201,22 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 	lbaCol := detectLbaColumn(db, glob)
 	timeCol := detectTimeColumn(db, glob)
 
+	// mgmt(Query/TM UPIU, UIC) 행 제외 — ComputeStats 와 같은 조건(fsio_cols.go).
+	//
+	// 여기 집계들은 `action = send_req` 같은 필터가 없어 mgmt 행이 그대로 섞인다.
+	// mgmt 는 SCSI opcode 가 없어 cmd 축에서 전부 `0x00` 한 덩어리가 되고,
+	// **idle 구간에서는 mgmt 가 행의 대부분**이라 cmd_breakdown 의 비중,
+	// tail_latency 의 상위 행, histogram 의 분포가 통째로 오염된다.
+	//
+	// 이 결과는 LLM 이 근거로 읽는다 — 오염되면 "0x00 이 42%" 같은 존재하지 않는
+	// 패턴을 그럴듯하게 해석한다. 에러가 아니라 조용히 틀린 답이 나온다.
+	cols := newFsioCols(db, glob)
+	base := cols.ExcludeMgmt("")
+
 	switch spec.Name {
 	case AggTailLatency:
 		n := clampInt(paramInt(params, "n", 10), 1, MaxAggRows)
-		events, err := queryTailLatency(db, glob, "", cmdCol, timeCol, n)
+		events, err := queryTailLatency(db, glob, base, cmdCol, timeCol, n)
 		if err != nil {
 			return nil, fmt.Errorf("tail latency 집계 실패: %w", err)
 		}
@@ -219,7 +231,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 			return res, nil
 		}
 		bins := clampInt(paramInt(params, "bins", 12), 2, MaxAggRows)
-		series, err := queryTimeSeriesLatency(db, glob, "", timeCol, bins)
+		series, err := queryTimeSeriesLatency(db, glob, base, timeCol, bins)
 		if err != nil {
 			return nil, fmt.Errorf("구간별 latency 집계 실패: %w", err)
 		}
@@ -228,7 +240,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 		res.Query = fmt.Sprintf("SELECT bin, count(*), avg(dtoc), percentile_cont(0.99) ... \nFROM read_parquet(...)\nWHERE dtoc > 0\nGROUP BY floor(%s / binWidth)  -- bins=%d", timeCol, bins)
 
 	case AggCmdBreakdown:
-		cmds, err := queryCmdStats(db, glob, "")
+		cmds, err := queryCmdStats(db, glob, base)
 		if err != nil {
 			return nil, fmt.Errorf("command 집계 실패: %w", err)
 		}
@@ -242,7 +254,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 
 	case AggLatencyHist:
 		col := paramLatencyCol(params)
-		hists, err := queryLatencyHistograms(db, glob, "", col, defaultLatencyRanges)
+		hists, err := queryLatencyHistograms(db, glob, base, col, defaultLatencyRanges)
 		if err != nil {
 			return nil, fmt.Errorf("histogram 집계 실패: %w", err)
 		}
@@ -270,13 +282,16 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 			return res, nil
 		}
 		where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
+		// 좁힌 구간에도 같은 mgmt 제외를 건다 — 기준선(base)과 모수 정의가
+		// 어긋나면 "구간 vs 전체" 비교 자체가 무의미해진다.
+		where = cols.ExcludeMgmt(where)
 		scoped, err := querySliceSummary(db, glob, where, cmdCol)
 		if err != nil {
 			return nil, fmt.Errorf("구간 집계 실패: %w", err)
 		}
 		// 기준선(전체) — 필터 없이 같은 쿼리. 비교 없이는 "write 71.3%" 같은 수치가
 		// 높은지 낮은지 판단할 수 없다.
-		baseline, err := querySliceSummary(db, glob, "", cmdCol)
+		baseline, err := querySliceSummary(db, glob, base, cmdCol)
 		if err != nil {
 			return nil, fmt.Errorf("기준선 집계 실패: %w", err)
 		}

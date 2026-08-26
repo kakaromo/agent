@@ -555,18 +555,46 @@
 		{ key: 'cpu', label: 'CPU', yLabel: 'CPU', group: 'common' },
 		{ key: 'ctod', label: 'CtoD Latency', yLabel: 'CtoD (ms)', group: 'send' },
 		{ key: 'dtoc', label: 'DtoC Latency', yLabel: 'DtoC (ms)', group: 'complete' },
-		{ key: 'ctoc', label: 'CtoC Latency', yLabel: 'CtoC (ms)', group: 'complete' }
+		{ key: 'ctoc', label: 'CtoC Latency', yLabel: 'CtoC (ms)', group: 'complete' },
+		// mgmt(UIC/Query/TM) 전용 DtoC. 데이터 IO 와 지연 크기대가 달라 같은 축에
+		// 두면(µs 단위 IO 옆에 ms 단위 hibern8) 한쪽이 바닥에 깔려 안 보인다.
+		{ key: 'dtoc_mgmt', label: 'DtoC (mgmt)', yLabel: 'DtoC (ms)', group: 'complete' }
 	] as const;
 	let visibleCharts = $state<Set<string>>(new Set(['lba', 'qd', 'dtoc']));
 
 	// Action tab: Send vs Complete
 	let activeActionTab = $state('complete');
 
-	// Map action to tab: send_req/block_rq_issue → 'send', complete_rsp/block_rq_complete → 'complete'
-	function actionToTab(action: string): string {
-		if (action.includes('send') || action.includes('issue')) return 'send';
-		if (action.includes('complete') || action.includes('rsp')) return 'complete';
-		return 'other';
+	/**
+	 * 이 action 이 현재 탭에 보여야 하는가.
+	 *
+	 * ⚠ 예전엔 `action.includes('send')` 식의 부분일치로 'send'/'complete'/'other'
+	 * 를 돌려주고 'other' 는 어느 탭에도 안 넣었다. mgmt(UPIU/UIC) 에서 이게 깨진다:
+	 *   - 우연히 걸리는 것:  uic_send, upiu_query_rsp
+	 *   - 아예 안 걸리는 것: upiu_nop_out, upiu_data_out, upiu_rtt, upiu_reject,
+	 *                        exception, 방향 미상 uic
+	 * 후자는 'other' 가 되어 기본 탭(complete)에서 **영영 안 보였다.** All 탭으로
+	 * 가야만 나오는데, 안 보이는 게 필터 때문인지 데이터가 없어서인지 알 수 없다.
+	 *
+	 * mgmt 는 방향을 접미사로 명시 판정한다:
+	 *   send 쪽: *_send / *_req / *_out
+	 *   comp 쪽: *_complete / *_rsp / *_in
+	 * 어느 쪽도 아닌 단발 이벤트(exception, 방향 미상 uic)는 **양쪽에 다 보인다** —
+	 * 숨기면 그 시점을 영영 못 본다.
+	 *
+	 * portal `routes/trace/TraceChartView.svelte` 의 actionMatchesTab 과 동일 규칙.
+	 */
+	function actionMatchesTab(action: string, tab: string): boolean {
+		if (tab === 'all') return true;
+		const low = (action || '').toLowerCase();
+		if (low.startsWith('upiu_') || low.startsWith('uic') || low === 'exception') {
+			const isSend = low.endsWith('_send') || low.endsWith('_req') || low.endsWith('_out');
+			const isComp = low.endsWith('_complete') || low.endsWith('_rsp') || low.endsWith('_in');
+			if (!isSend && !isComp) return true; // 단발 — 항상 표시
+			return tab === 'send' ? isSend : isComp;
+		}
+		if (tab === 'send') return low.includes('send') || low.includes('issue');
+		return low.includes('complete') || low.includes('rsp');
 	}
 
 	// Filtered events by action tab
@@ -577,7 +605,7 @@
 		if (!rawResult) return [];
 		let evts = activeActionTab === 'all'
 			? rawResult.events
-			: rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
+			: rawResult.events.filter(e => actionMatchesTab(e.action, activeActionTab));
 		// 구간을 고르면 **데이터 자체**를 그 범위로 좁힌다.
 		//
 		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
@@ -594,13 +622,19 @@
 	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
 	// Available chart items based on action tab
-	let availableChartItems = $derived(
-		activeActionTab === 'send'
+	let availableChartItems = $derived.by(() => {
+		let items = activeActionTab === 'send'
 			? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'send')
 			: activeActionTab === 'complete'
 				? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'complete')
-				: CHART_ITEMS // all
-	);
+				: [...CHART_ITEMS]; // all
+		// mgmt(UPIU/UIC)는 UFS 프로토콜 계층 개념이라 fsio_ufs 에만 존재한다.
+		// 다른 타입에서 빈 차트를 띄우면 "데이터가 없다" 로 오해하게 된다.
+		if (activeTraceType !== 'fsio_ufs') {
+			items = items.filter(c => c.key !== 'dtoc_mgmt');
+		}
+		return items;
+	});
 
 	function toggleChart(key: string) {
 		const next = new Set(visibleCharts);
@@ -643,12 +677,124 @@
 		// Discard/Trim/Unmap 계열 (보라)
 		discard: ['#a855f7', '#9333ea', '#7c3aed', '#c084fc', '#d8b4fe'],
 		// 기타 (회색/청록)
-		other: ['#64748b', '#475569', '#6b7280', '#94a3b8', '#78716c']
+		other: ['#64748b', '#475569', '#6b7280', '#94a3b8', '#78716c'],
+		// ── UFS management ──
+		// 데이터 IO 가 아니라 링크 점유·장치 제어다. 전용 차트(DtoC (mgmt))를 따로
+		// 두면서 "같은 mgmt" 로 뭉뚱그리지 않고 **성질별로** 색을 가른다. 차트만 봐도
+		// "링크가 자주 잠들었다" vs "WB 를 계속 건드린다" 가 구분되도록.
+		//
+		// mgmt_link  링크 전원/상태 (UIC: hibern8 enter/exit, link startup) — 보라
+		// mgmt_read  장치 상태 조회 (Read Attribute/Descriptor/Flag)        — 청록
+		// mgmt_write 장치 설정 변경 (Set/Clear/Toggle Flag, Write ...)      — 주황
+		// mgmt_tm    Task Management (Abort Task, LU Reset 등)              — 빨강(이상 신호)
+		mgmt_link: ['#8b5cf6', '#7c3aed', '#6d28d9', '#a78bfa', '#c4b5fd'],
+		mgmt_read: ['#06b6d4', '#0891b2', '#0e7490', '#22d3ee', '#67e8f9'],
+		mgmt_write: ['#f59e0b', '#d97706', '#b45309', '#fbbf24', '#fcd34d'],
+		mgmt_tm: ['#ef4444', '#dc2626', '#b91c1c', '#f87171', '#fca5a5'],
+		// 종류를 특정 못 한 mgmt (producer 가 정보를 안 준 폴백) — 회청색
+		mgmt: ['#64748b', '#94a3b8', '#475569', '#cbd5e1', '#78716c']
 	};
 
 	// cmd별 계열 인덱스 카운터
 	const cmdColorAssigned: Record<string, string> = {};
-	const groupCounters: Record<string, number> = { read: 0, write: 0, flush: 0, discard: 0, other: 0 };
+	const groupCounters: Record<string, number> = {
+		read: 0, write: 0, flush: 0, discard: 0, other: 0,
+		mgmt_link: 0, mgmt_read: 0, mgmt_write: 0, mgmt_tm: 0, mgmt: 0
+	};
+
+	/**
+	 * UFS management 이벤트 이름인가?
+	 *
+	 * 아래 getCmdGroup 의 문자열 스니핑보다 **먼저** 판정해야 한다. 그냥 두면
+	 * "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard(보라), "Read Flag(...)" 는
+	 * 'read' 포함으로 read(파랑) 가 되어 **데이터 IO 와 구분이 안 된다.**
+	 * 깨지는 게 아니라 그럴듯하게 틀려서 더 위험하다.
+	 *
+	 * 판정 기준은 서버가 굽는 mgmt_name 의 형태다 (trace/parser/ufs_names.go).
+	 * 데이터 IO 의 cmd 는 항상 '0x28' 같은 hex 라 겹칠 일이 없다.
+	 */
+	function isMgmtCmd(cmd: string): boolean {
+		const s = (cmd ?? '').trim();
+		if (!s || s.startsWith('0x')) return false; // 데이터 IO 는 hex opcode
+		if (s.startsWith('DME_')) return true; // UIC
+		// Query — opcode 이름 + 괄호 안 IDN
+		if (/^(Read|Write|Set|Clear|Toggle)\s+(Descriptor|Attribute|Flag)\b/.test(s)) return true;
+		// Task Management
+		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) return true;
+		// 파서가 못 푼 값은 "Unknown(0x..)" 로 온다. 데이터 IO 색을 뺏지 않도록 mgmt 로.
+		if (s.startsWith('Unknown(')) return true;
+		// Query NOP — QueryDisplay(0x00) 은 idn 없이 이름만 돌려줘 "NOP" 이 된다
+		// (trace/parser/ufs_names.go). 아래 소문자 규칙에 안 걸려서 예전엔 데이터
+		// IO 로 샜다.
+		if (/^NOP\b/i.test(s)) return true;
+		// producer 가 qop/idn/uic_cmd 를 안 준 경우 mgmt_name 이 action 으로 폴백된다
+		// (uic / upiu_send / upiu_response / nop_out / rtt / exception).
+		// 대소문자 무시 — producer/파서가 대문자로 낼 수 있다.
+		if (/^(uic|upiu_|nop_|rtt|exception)/i.test(s)) return true;
+		return false;
+	}
+
+	/**
+	 * mgmt 이벤트의 **성질** 판정. 색 그룹 키를 그대로 돌려준다.
+	 *
+	 * 판정 순서가 중요하다:
+	 *   - TM 을 먼저 — "Query Task" 는 TM 인데 뒤의 Read/Write 규칙에 걸리면 안 된다.
+	 *   - 그 다음 UIC(DME_) — 이름에 다른 키워드가 없어 안전.
+	 *   - Query 는 opcode 이름이 앞에 오므로(Read Attribute / Set Flag) 그걸로 구분.
+	 */
+	function getMgmtGroup(cmd: string): string {
+		const s = (cmd ?? '').trim();
+		// Task Management — 이상 신호라 가장 먼저, 그리고 눈에 띄는 색으로.
+		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) {
+			return 'mgmt_tm';
+		}
+		// UIC / NOP (링크 계층) — DME_HIBER_ENTER/EXIT, DME_LINK_STARTUP, NOP(링크 확인)
+		if (s.startsWith('DME_') || /^uic(_|$)/i.test(s) || /^(NOP|nop_)/i.test(s)) return 'mgmt_link';
+		// Query — 장치 설정을 **바꾸는** 쪽
+		if (/^(Write Descriptor|Write Attribute|Set Flag|Clear Flag|Toggle Flag)\b/.test(s)) {
+			return 'mgmt_write';
+		}
+		// Query — 장치 상태를 **읽는** 쪽
+		if (/^(Read Descriptor|Read Attribute|Read Flag)\b/.test(s)) return 'mgmt_read';
+		// 폴백(upiu_send / nop_out / rtt / exception / Unknown(0x..))
+		return 'mgmt';
+	}
+
+	/**
+	 * 이 이벤트가 mgmt 인가 — **서버가 준 is_mgmt 가 정본**이다.
+	 *
+	 * 이름 스니핑(isMgmtCmd)은 폴백일 뿐이다. mgmt_name 이 "NOP" 처럼 어떤
+	 * 규칙에도 안 걸리는 값일 수 있고, 그러면 mgmt 행이 데이터 IO 로 분류돼
+	 * lba/qd 가 0 인 채로 LBA/QD 차트에 가짜 가로줄을 그린다.
+	 *
+	 * is_mgmt 가 없는 경로(ftrace, 구버전 응답)를 위해 이름 폴백을 남긴다.
+	 */
+	function isMgmtEvent(e: TraceEvent): boolean {
+		const v = (e as unknown as Record<string, unknown>).is_mgmt;
+		if (typeof v === 'boolean') return v;
+		return isMgmtCmd(e.cmd);
+	}
+
+	/**
+	 * 차트에서 감출 mgmt 이벤트.
+	 *
+	 * 요청/응답이 1:1 로 붙는 mgmt 는 차트에 둘 다 그리면 같은 왕복이 두 번
+	 * 보인다. 통계/Raw Data 에는 그대로 남기고 **차트 시리즈에서만** 뺀다.
+	 *
+	 * ⚠ 판정은 **action** 으로 한다. 예전엔 cmd 에 upiu_response 정규식을
+	 * 걸었는데, cmd 에는 mgmt_name("Read Descriptor(geometry)")이 들어가지
+	 * 실제 action 이 안 들어간다. 게다가 producer 가 내는 이름은 upiu_response
+	 * 가 아니라 query_rsp / tm_rsp / nop_in 이라 **어떤 행에도 안 맞아 dedup 이
+	 * 아예 동작하지 않았다.**
+	 *
+	 * 빼는 쪽은 **요청**이다 — dtoc(왕복 시간)는 응답 행에만 실리므로 응답을
+	 * 빼면 mgmt latency 가 통째로 사라진다.
+	 */
+	function isHiddenInChart(e: TraceEvent): boolean {
+		if (!isMgmtEvent(e)) return false;
+		const a = (e.action ?? '').toLowerCase();
+		return a.endsWith('_req') || a.endsWith('_out') || a === 'uic_send';
+	}
 
 	// SCSI opcode → group 매핑 (UFS)
 	const SCSI_CMD_GROUPS: Record<string, string> = {
@@ -674,6 +820,11 @@
 	function getCmdGroup(cmd: string): string {
 		const lower = cmd.toLowerCase().trim();
 		if (!lower) return 'other';
+
+		// ⚠ mgmt 판정이 **아래 문자열 스니핑보다 먼저**여야 한다. 그냥 두면
+		// "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard, "Read Flag(...)" 는 'read'
+		// 포함으로 read 가 되어 데이터 IO 와 색이 겹친다 — 그럴듯하게 틀린다.
+		if (isMgmtCmd(cmd)) return getMgmtGroup(cmd);
 
 		// SCSI hex opcode: 0x28, 0x2a 등
 		if (lower.startsWith('0x')) {
@@ -1031,13 +1182,27 @@
 	// latency 필드는 0값 제외 (send 이벤트의 latency는 0)
 	const LATENCY_FIELDS = new Set(['dtoc', 'ctod', 'ctoc']);
 
-	function buildScatter(events: TraceEvent[], yField: keyof TraceEvent, yLabel: string) {
+	function buildScatter(events: TraceEvent[], yKey: string, yLabel: string) {
+		// dtoc_mgmt 는 **가상 키** — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
+		// mgmt latency 는 데이터 IO 와 자릿수가 달라(µs IO vs ms hibern8) 같은 축에
+		// 두면 한쪽이 바닥에 깔려 안 보인다. 그래서 축을 분리한다.
+		const isMgmtChart = yKey === 'dtoc_mgmt';
+		const yField = (isMgmtChart ? 'dtoc' : yKey) as keyof TraceEvent;
 		const excludeZero = LATENCY_FIELDS.has(yField);
-		const cmdSet = [...new Set(events.map(e => e.cmd))];
+		// mgmt 요청/응답 쌍 중 요청 쪽을 뺀다 — 안 그러면 같은 왕복이 두 번 그려진다.
+		const visible = events.filter(e => !isHiddenInChart(e));
+		// mgmt 차트에는 mgmt 만, 나머지 차트에는 데이터 IO 만.
+		//
+		// ⚠ 판정은 서버가 준 **is_mgmt 필드**로 한다 (isMgmtEvent). 이름 스니핑만
+		// 쓰면 Query NOP(mgmt_name="NOP") 처럼 규칙에 안 걸리는 mgmt 가 데이터 IO 로
+		// 분류돼, lba/qd 가 NULL(→0)인 채로 LBA/QD 차트에 **Y=0 가짜 가로줄**을
+		// 그린다 — mgmtNullExpr 로 없애려던 바로 그 현상이다.
+		const scoped = visible.filter(e => isMgmtEvent(e) === isMgmtChart);
+		const cmdSet = [...new Set(scoped.map(e => e.cmd))];
 		const series = cmdSet.map(cmd => ({
 			name: cmd,
 			type: 'scatter' as const,
-			data: events
+			data: scoped
 				.filter(e => e.cmd === cmd && (!excludeZero || (e[yField] as number) > 0))
 				.map(e => [e.time, e[yField]]),
 			symbolSize: 2,
@@ -1109,7 +1274,7 @@
 		if (events.length === 0) return null;
 		const item = CHART_ITEMS.find(c => c.key === key);
 		if (!item) return null;
-		return buildScatter(events, key as keyof TraceEvent, item.yLabel);
+		return buildScatter(events, key, item.yLabel);
 	}
 
 	// ── Stats helpers ──
@@ -1663,38 +1828,85 @@
 										링크 점유 {fmtLatency(mgmtTotalMs)}ms · 관측 기간의 {mgmtRatio.toFixed(1)}%
 									</span>
 								</div>
-								<div class="border rounded-md overflow-x-auto">
-									<table class="w-full text-[10px]">
-										<thead class="bg-muted/50">
-											<tr>
-												<th class="text-left px-2 py-1 font-medium">Event</th>
-												<th class="text-left px-2 py-1 font-medium">Kind</th>
-												<th class="text-right px-2 py-1 font-medium">Count</th>
-												<th class="text-right px-2 py-1 font-medium">Paired</th>
-												<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
-												<th class="text-right px-2 py-1 font-medium">Share</th>
-												<th class="text-right px-2 py-1 font-medium">Avg</th>
-												<th class="text-right px-2 py-1 font-medium">Max</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each mgmt as m}
-												<tr class="border-t">
-													<td class="px-2 py-0.5">{m.name}</td>
-													<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
-													<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
-													<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
-													<td class="text-right px-2 py-0.5">
-														{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
-													</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
+								<!-- Overview(점유 시간 중심) / DtoC(분포 중심) 두 축.
+								     합계만 보면 "가끔 아주 느린 게 있나" 를 못 본다 — hibern8 exit 이
+								     평소 2ms 인데 p99.9 가 50ms 면 그게 stall 의 원인이다. -->
+								<Tabs.Root value="overview">
+									<Tabs.List class="flex gap-0.5 mb-1">
+										<Tabs.Trigger value="overview" class="text-[10px] px-2 py-0.5">Overview</Tabs.Trigger>
+										<Tabs.Trigger value="dtoc" class="text-[10px] px-2 py-0.5">DtoC 분포</Tabs.Trigger>
+									</Tabs.List>
+									<Tabs.Content value="overview">
+										<div class="border rounded-md overflow-x-auto">
+											<table class="w-full text-[10px]">
+												<thead class="bg-muted/50">
+													<tr>
+														<th class="text-left px-2 py-1 font-medium">Event</th>
+														<th class="text-left px-2 py-1 font-medium">Kind</th>
+														<th class="text-right px-2 py-1 font-medium">Count</th>
+														<th class="text-right px-2 py-1 font-medium">Paired</th>
+														<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
+														<th class="text-right px-2 py-1 font-medium">Share</th>
+														<th class="text-right px-2 py-1 font-medium">Avg</th>
+														<th class="text-right px-2 py-1 font-medium">Max</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each mgmt as m}
+														<tr class="border-t">
+															<td class="px-2 py-0.5">{m.name}</td>
+															<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
+															<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
+															<td class="text-right px-2 py-0.5">
+																{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
+															</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</Tabs.Content>
+									<Tabs.Content value="dtoc">
+										<!-- 모수는 Paired(짝지어진 건수) 다. send 만 있고 complete 를 못 받은
+										     mgmt 는 dtoc 가 0(=모름)이라 백분위 계산에서 빠진다. -->
+										<div class="border rounded-md overflow-x-auto">
+											<table class="w-full text-[10px]">
+												<thead class="bg-muted/50">
+													<tr>
+														<th class="text-left px-2 py-1 font-medium">Event</th>
+														<th class="text-right px-2 py-1 font-medium">Paired</th>
+														<th class="text-right px-2 py-1 font-medium">Min</th>
+														<th class="text-right px-2 py-1 font-medium">Max</th>
+														<th class="text-right px-2 py-1 font-medium">Avg</th>
+														<th class="text-right px-2 py-1 font-medium">StdDev</th>
+														<th class="text-right px-2 py-1 font-medium">Median</th>
+														<th class="text-right px-2 py-1 font-medium">P99</th>
+														<th class="text-right px-2 py-1 font-medium">P99.9</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each mgmt as m}
+														<tr class="border-t">
+															<td class="px-2 py-0.5">{m.name}</td>
+															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.min ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.stddev ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.median ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p99 ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p999 ?? 0)}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</Tabs.Content>
+								</Tabs.Root>
 							</div>
 						{/if}
 

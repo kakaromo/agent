@@ -102,8 +102,11 @@ func queryMgmtStats(db *sql.DB, glob, where string) ([]*pb.MgmtStats, error) {
 // 데이터 IO 집계용 where 에는 `COALESCE(is_mgmt, FALSE) = FALSE` 가 붙어 있는데,
 // mgmt 집계에 그걸 그대로 쓰면 아무것도 안 남는다. 나머지 조건(시간/귀속 등)은
 // 유지해야 확대 구간과 모수가 맞는다.
+// ⚠ 조건 문자열은 fsio_cols.go 의 mgmtExclusion 상수를 그대로 쓴다. 리터럴을
+// 복사해 두면 한쪽만 바뀌었을 때 여기가 **조용히 no-op** 이 되어 mgmt 집계가
+// 빈 결과를 내는데, 에러가 아니라 "mgmt 이벤트가 없었다" 로 보인다.
 func stripMgmtExclusion(where string) string {
-	const excl = "COALESCE(is_mgmt, FALSE) = FALSE"
+	const excl = mgmtExclusion
 	if !strings.Contains(where, excl) {
 		return where
 	}
@@ -228,13 +231,12 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
+	cols := newFsioCols(db, glob)
+	fsio := cols.schema
 	cmdCol := detectCmdColumn(db, glob)
-	fsio := detectFsioSchema(db, glob)
 	timeCol := detectTimeColumn(db, glob)
 	where := buildFilterWhereCols(req.GetFilter(), lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
-	if fsio.isUFS {
-		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
-	}
+	where = cols.ExcludeMgmt(where)
 
 	// action 이름과 size 단위는 계열·레이어마다 다르다.
 	//
