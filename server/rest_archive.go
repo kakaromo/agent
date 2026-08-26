@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pb "agent/pb"
+	"agent/trace"
 )
 
 // registerArchiveRoutes — portal /api/agent/upload/* 호환.
@@ -139,7 +140,12 @@ func registerArchiveRoutes(mux *http.ServeMux, agent *DeviceAgentServer, archive
 	})
 }
 
-// copyParquetDir — srcDir 의 *.parquet (+ trace.log) 를 dstDir 로 복사하고 결과 파일 경로 반환.
+// copyParquetDir — srcDir 의 *.parquet (+ trace.log, clocksync.json) 를 dstDir 로
+// 복사하고 결과 파일 경로 반환.
+//
+// clocksync.json 을 함께 옮기는 이유: 이 파일이 없으면 archive 쪽 parquet 은 스텝
+// 구간으로 나눌 수 없다 (호스트 시각 ↔ 기기 monotonic 변환에 필요). parquet 만 옮기면
+// **데이터는 갔는데 구간 분할만 조용히 안 되는** 상태가 된다.
 func copyParquetDir(srcDir, dstDir string) ([]string, error) {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return nil, err
@@ -154,9 +160,9 @@ func copyParquetDir(srcDir, dstDir string) ([]string, error) {
 			continue
 		}
 		name := e.Name()
-		// parquet + raw trace.log 만 옮긴다 (다른 부산물은 제외)
+		// parquet + raw trace.log + clocksync.json 만 옮긴다 (다른 부산물은 제외)
 		ext := filepath.Ext(name)
-		if ext != ".parquet" && name != "trace.log" {
+		if ext != ".parquet" && name != "trace.log" && name != trace.ClockSyncFileName {
 			continue
 		}
 		src := filepath.Join(srcDir, name)
