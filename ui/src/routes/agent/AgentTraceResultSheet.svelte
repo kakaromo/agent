@@ -709,10 +709,14 @@
 			const lat = inRange.map(e => e.dtoc).filter(v => v > 0).sort((a, c) => a - c);
 			let readBytes = 0, writeBytes = 0;
 			for (const e of inRange) {
-				// cmd 문자열로 read/write 를 가른다 — UFS(READ/WRITE)·Block(R/W) 모두 커버.
-				const c = (e.cmd || '').toUpperCase();
-				if (c.includes('READ') || c === 'R') readBytes += e.size;
-				else if (c.includes('WRITE') || c === 'W') writeBytes += e.size;
+				// ⚠ read/write 판정은 **getCmdGroup 을 그대로 쓴다.** UFS 의 cmd 는
+				// "READ" 가 아니라 SCSI hex opcode(0x28/0x2a)라, 문자열에 "read" 가
+				// 들어있는지 보는 방식은 UFS 에서 통째로 0 이 된다. 이 함수는 opcode·
+				// 키워드·Block prefix(R/W/D/F) 를 모두 처리하고 차트 색도 같은 기준이라
+				// 표와 그래프가 어긋나지 않는다.
+				const g = getCmdGroup(e.cmd);
+				if (g === 'read') readBytes += e.size;
+				else if (g === 'write') writeBytes += e.size;
 			}
 			return {
 				key: `${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`,
