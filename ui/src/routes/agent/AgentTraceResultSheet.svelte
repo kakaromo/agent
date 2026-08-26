@@ -838,13 +838,26 @@
 				markArea: {
 					silent: true,
 					itemStyle: { opacity: 1 },
-					label: { show: false },
+					// 라벨을 **항상 보여 준다.** 예전엔 hover 로만 두려 했는데 silent:true
+					// 라 hover 자체가 안 먹어서 **어느 구간인지 확인할 방법이 아예 없었다.**
+					// 밴드만 있고 이름이 없으면 "여기서 뭔가 있었다" 이상을 못 읽는다.
+					label: {
+						show: true,
+						position: 'insideTop',
+						rotate: 90,          // 세로쓰기 — 좁은 구간에서도 글자가 안 잘린다
+						align: 'left',
+						verticalAlign: 'middle',
+						offset: [4, 4],
+						fontSize: 8,
+						color: '#64748b',
+						overflow: 'truncate',
+						width: 90            // 너무 길면 자른다 (전체 이름은 Behavior 탭에)
+					},
 					emphasis: { disabled: true },
 					data: usableBoundaries.map((b, i) => [
 						{
 							xAxis: b.startedMono,
 							itemStyle: { color: behaviorColor(i) },
-							// hover 로만 라벨 — 구간이 많으면(loop 반복) 빽빽해진다.
 							name: behaviorLabel(b)
 						},
 						{ xAxis: b.finishedMono }
@@ -853,7 +866,17 @@
 			} as any);
 		}
 		return {
-			tooltip: { trigger: 'item' as const, formatter: (p: any) => `${p.seriesName}<br/>time: ${p.data[0]}<br/>${yLabel}: ${p.data[1]}` },
+			tooltip: {
+				trigger: 'item' as const,
+				// 점을 짚으면 **그 IO 가 어느 스텝 구간인지**까지 알려준다. 밴드 라벨은
+				// 구간이 촘촘하면 읽기 어려워서, 확실한 확인 수단이 하나 더 필요하다.
+				formatter: (p: any) => {
+					const t = p.data[0];
+					const base = `${p.seriesName}<br/>time: ${t}<br/>${yLabel}: ${p.data[1]}`;
+					const b = usableBoundaries.find(x => t >= x.startedMono && t <= x.finishedMono);
+					return b ? `${base}<br/><b>구간: ${behaviorLabel(b)}</b>` : base;
+				}
+			},
 			legend: { data: cmdSet, top: 0, right: 0, textStyle: { fontSize: 9 }, selected: legendSelected },
 			xAxis: { type: 'value' as const, name: 'Time (s)', min: 'dataMin', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 } },
 			yAxis: { type: 'value' as const, name: yLabel, nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 } },
@@ -1099,6 +1122,23 @@
 								틀린 위치에 그리면 그래프가 정상으로 보여 오히려 잘못된 결론으로
 								이어지므로 표시하지 않습니다.
 							</div>
+						</div>
+					{/if}
+
+					{#if hasBehavior}
+						<!-- 구간 범례 — 차트의 밴드 색이 어느 스텝인지 한눈에 잇는다.
+						     밴드 안 라벨은 구간이 촘촘하면 읽기 어려워서 여기서 한 번 더 준다. -->
+						<div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px]">
+							<span class={captionMuted}>구간</span>
+							{#each behaviorRows as row, i (row.key)}
+								<span class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5"
+									title="{row.durationSec.toFixed(2)}s · {row.events.toLocaleString()} events">
+									<span class="inline-block size-2 rounded-sm"
+										style="background:{behaviorColor(i).replace('0.10', '0.6')}"></span>
+									{row.label}
+									{#if !row.success}<span class="text-red-500">실패</span>{/if}
+								</span>
+							{/each}
 						</div>
 					{/if}
 					{#if loadingRaw}
