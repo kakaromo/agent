@@ -209,6 +209,13 @@ var fsioUfsExtraCols = []string{
 	"aligned", "line_number", "pid", "tid", "comm", "syscall", "fs", "ino", "name", "io_flags",
 	"tag", "opcode", "lun", "groupid", "hwqid",
 	"txn", "upiu_flags", "upiu_func", "upiu_attr", "upiu_cp",
+	// mgmt 원본값 — cmd 에는 이미 mgmt_name 이 들어가지만, Query 가 어느 IDN 을
+	// 건드렸는지 / TM 이 성공했는지(resp/status)는 이름만으로 알 수 없다.
+	"is_mgmt", "mgmt_name",
+	"upiu_resp", "upiu_status",
+	"query_opcode", "query_idn", "query_index", "query_selector", "uic_cmd",
+	// 미완결 IO — 이 행의 dtoc=0 은 "0ms" 가 아니라 "모름" 이다.
+	"is_unfinished",
 }
 
 var fsioBlockExtraCols = []string{
@@ -269,10 +276,16 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 		var upiuAttr sql.NullString
 		var devmajor, devminor, extra sql.NullInt64
 		var rwbs, flags sql.NullString
+		var isMgmt, isUnfinished sql.NullBool
+		var mgmtName sql.NullString
+		var upiuResp, upiuStatus sql.NullInt64
+		var qOpcode, qIdn, qIndex, qSelector, uicCmd sql.NullInt64
 
 		if f.isUFS {
 			dest = append(dest, &tag, &opcode, &lun, &groupid, &hwqid,
-				&txn, &upiuFlags, &upiuFunc, &upiuAttr, &upiuCp)
+				&txn, &upiuFlags, &upiuFunc, &upiuAttr, &upiuCp,
+				&isMgmt, &mgmtName, &upiuResp, &upiuStatus,
+				&qOpcode, &qIdn, &qIndex, &qSelector, &uicCmd, &isUnfinished)
 		} else if f.isBlock {
 			dest = append(dest, &devmajor, &devminor, &rwbs, &flags, &extra)
 		}
@@ -326,6 +339,19 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 				v := uint32(upiuCp.Int64)
 				e.UpiuCp = &v
 			}
+			e.IsMgmt = isMgmt.Bool
+			e.MgmtName = mgmtName.String
+			e.IsUnfinished = isUnfinished.Bool
+			// mgmt 원본값도 같은 규칙 — 없으면 안 채운다. 0 은 유효값이다
+			// (query_idn 0x00 = bBootLunEn, uic_cmd 는 0 이 없지만 resp/status 는
+			// 0 이 "성공" 이라 부재와 반드시 구분돼야 한다).
+			setOptU32(&e.UpiuResp, upiuResp)
+			setOptU32(&e.UpiuStatus, upiuStatus)
+			setOptU32(&e.QueryOpcode, qOpcode)
+			setOptU32(&e.QueryIdn, qIdn)
+			setOptU32(&e.QueryIndex, qIndex)
+			setOptU32(&e.QuerySelector, qSelector)
+			setOptU32(&e.UicCmd, uicCmd)
 		} else if f.isBlock {
 			e.Devmajor = uint32(devmajor.Int64)
 			e.Devminor = uint32(devminor.Int64)
@@ -392,4 +418,16 @@ func detectLbaColumn(db *sql.DB, glob string) string {
 		return "sector"
 	}
 	return "lba"
+}
+
+// setOptU32 — nullable 정수를 proto optional 필드에 옮긴다.
+//
+// 0 과 "값 없음" 을 구분해야 하는 필드 전용이다. upiu_status 는 **0 이 성공**이라
+// 부재와 섞이면 실패한 TM 을 성공으로 읽는다.
+func setOptU32(dst **uint32, v sql.NullInt64) {
+	if !v.Valid {
+		return
+	}
+	u := uint32(v.Int64)
+	*dst = &u
 }

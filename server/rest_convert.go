@@ -479,7 +479,39 @@ func traceEventToMap(e *pb.TraceEvent) map[string]any {
 		if e.UpiuCp != nil {
 			m["upiu_cp"] = e.GetUpiuCp()
 		}
+
+		// ── mgmt (Query/TM UPIU, UIC) ──
+		// cmd 에는 이미 mgmt_name 이 들어가지만, Query 가 어느 IDN 을 건드렸는지 /
+		// TM 이 성공했는지(resp/status)는 이름만으로 알 수 없다.
+		m["is_mgmt"] = e.GetIsMgmt()
+		m["mgmt_name"] = e.GetMgmtName()
+		// ⚠ 0 이 유효값이라 위 UPIU 헤더와 같은 규칙으로 키를 뺀다.
+		// upiu_status 는 **0 이 성공**이라 부재와 섞이면 실패한 TM 을 성공으로 읽는다.
+		if e.UpiuResp != nil {
+			m["upiu_resp"] = e.GetUpiuResp()
+		}
+		if e.UpiuStatus != nil {
+			m["upiu_status"] = e.GetUpiuStatus()
+		}
+		if e.QueryOpcode != nil {
+			m["query_opcode"] = e.GetQueryOpcode()
+		}
+		if e.QueryIdn != nil {
+			m["query_idn"] = e.GetQueryIdn()
+		}
+		if e.QueryIndex != nil {
+			m["query_index"] = e.GetQueryIndex()
+		}
+		if e.QuerySelector != nil {
+			m["query_selector"] = e.GetQuerySelector()
+		}
+		if e.UicCmd != nil {
+			m["uic_cmd"] = e.GetUicCmd()
+		}
 	}
+	// 미완결 IO — dtoc=0 이 "0ms" 가 아니라 "모름" 임을 표에서 구분하기 위한 플래그.
+	// fsio_block 에도 있으므로 위 if/else 밖이다.
+	m["is_unfinished"] = e.GetIsUnfinished()
 	return m
 }
 

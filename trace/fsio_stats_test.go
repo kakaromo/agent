@@ -412,3 +412,72 @@ func TestRawDataNamesMgmtAndNullsNumerics(t *testing.T) {
 		}
 	}
 }
+
+// TestRawDataCarriesMgmtDetail — mgmt 원본값과 미완결 플래그가 Raw Data 까지
+// 실려 오는지 고정한다.
+//
+// cmd 에 mgmt_name 이 들어가도 "Query 가 **어느 IDN 을** 읽었나" 와 "TM 이
+// 성공했나(resp/status)" 는 이름만으로 알 수 없다. 이 값들이 parquet 에만
+// 있고 wire 로 안 나오면 행 단위 확인이 불가능하다.
+func TestRawDataCarriesMgmtDetail(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawQuery, sawUic, sawUnfinished bool
+	for _, e := range resp.Events {
+		switch {
+		case strings.HasPrefix(e.Action, "upiu_query"):
+			sawQuery = true
+			if !e.IsMgmt {
+				t.Errorf("query 행의 is_mgmt 가 false 다: %s", e.Action)
+			}
+			if e.MgmtName == "" {
+				t.Errorf("query 행의 mgmt_name 이 비었다: %s", e.Action)
+			}
+			// 로그의 query 행은 qop=0x01(Read Descriptor), idn=0x07(Geometry).
+			if e.QueryOpcode == nil || *e.QueryOpcode != 0x01 {
+				t.Errorf("query_opcode = %v, want 0x01 (%s)", e.QueryOpcode, e.Action)
+			}
+			if e.QueryIdn == nil || *e.QueryIdn != 0x07 {
+				t.Errorf("query_idn = %v, want 0x07 (%s)", e.QueryIdn, e.Action)
+			}
+		case strings.HasPrefix(e.Action, "uic"):
+			sawUic = true
+			// uic_cmd=0x17 = DME_HIBERNATE_EXIT.
+			if e.UicCmd == nil || *e.UicCmd != 0x17 {
+				t.Errorf("uic_cmd = %v, want 0x17 (%s)", e.UicCmd, e.Action)
+			}
+		}
+		if e.IsUnfinished {
+			sawUnfinished = true
+			// 미완결 행의 dtoc 는 0 이어야 한다 — 지연을 지어내지 않는다.
+			if e.Dtoc != 0 {
+				t.Errorf("미완결 행에 dtoc 가 채워졌다: %f", e.Dtoc)
+			}
+		}
+	}
+	if !sawQuery {
+		t.Error("query 행이 Raw Data 에 없다")
+	}
+	if !sawUic {
+		t.Error("uic 행이 Raw Data 에 없다")
+	}
+	// 로그의 tag=12 send 는 complete 가 없다 → 파서가 IsUnfinished 로 닫아야 한다.
+	if !sawUnfinished {
+		t.Error("미완결 IO 가 is_unfinished 로 표시되지 않았다")
+	}
+
+	// 데이터 IO 행에는 mgmt 값이 새어 들어오면 안 된다.
+	for _, e := range resp.Events {
+		if e.Action == "send_req" || e.Action == "complete_rsp" {
+			if e.IsMgmt || e.MgmtName != "" {
+				t.Errorf("데이터 IO 행에 mgmt 값이 붙었다: %s is_mgmt=%v name=%q",
+					e.Action, e.IsMgmt, e.MgmtName)
+			}
+		}
+	}
+}

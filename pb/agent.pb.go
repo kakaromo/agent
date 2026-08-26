@@ -4329,11 +4329,35 @@ type TraceEvent struct {
 	UpiuAttr  string  `protobuf:"bytes,30,opt,name=upiu_attr,json=upiuAttr,proto3" json:"upiu_attr,omitempty"` // "Simple"/"Ordered"/"HoQ"/"ACA"
 	UpiuCp    *uint32 `protobuf:"varint,31,opt,name=upiu_cp,json=upiuCp,proto3,oneof" json:"upiu_cp,omitempty"`
 	// fsio_block 전용
-	Devmajor      uint32 `protobuf:"varint,32,opt,name=devmajor,proto3" json:"devmajor,omitempty"`
-	Devminor      uint32 `protobuf:"varint,33,opt,name=devminor,proto3" json:"devminor,omitempty"`
-	Rwbs          string `protobuf:"bytes,34,opt,name=rwbs,proto3" json:"rwbs,omitempty"`    // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
-	Flags         string `protobuf:"bytes,35,opt,name=flags,proto3" json:"flags,omitempty"`  // ftrace trace flag string. bpftrace 엔 없어 빈 값
-	Extra         uint32 `protobuf:"varint,36,opt,name=extra,proto3" json:"extra,omitempty"` // bpftrace 엔 없어 0
+	Devmajor uint32 `protobuf:"varint,32,opt,name=devmajor,proto3" json:"devmajor,omitempty"`
+	Devminor uint32 `protobuf:"varint,33,opt,name=devminor,proto3" json:"devminor,omitempty"`
+	Rwbs     string `protobuf:"bytes,34,opt,name=rwbs,proto3" json:"rwbs,omitempty"`    // "WS"/"R"/"D" — 첫 글자가 종류, 뒤는 flag(F=FUA)
+	Flags    string `protobuf:"bytes,35,opt,name=flags,proto3" json:"flags,omitempty"`  // ftrace trace flag string. bpftrace 엔 없어 빈 값
+	Extra    uint32 `protobuf:"varint,36,opt,name=extra,proto3" json:"extra,omitempty"` // bpftrace 엔 없어 0
+	// ── UFS management (Query/TM UPIU, UIC, exception) — fsio_ufs 전용 ──
+	//
+	// Raw Data 에 mgmt 행을 **일부러 남기기** 때문에 필요하다 (통계는 반대로 뺀다).
+	// "hibern8 도는 동안 IO 가 멈췄다" 는 두 종류가 같은 타임라인에 있어야 보인다.
+	//
+	// cmd 필드에는 이미 mgmt_name 이 들어간다(서버가 CASE 로 치환). 아래는 그
+	// 이름만으로는 부족한 경우 — Query 가 어느 IDN 을 건드렸는지, TM 이 성공했는지
+	// (resp/status) — 를 행 단위로 확인하기 위한 원본 값이다.
+	IsMgmt        bool    `protobuf:"varint,37,opt,name=is_mgmt,json=isMgmt,proto3" json:"is_mgmt,omitempty"`                            // 이 행이 mgmt 인가. action 접두어로도 알 수 있지만 명시
+	MgmtName      string  `protobuf:"bytes,38,opt,name=mgmt_name,json=mgmtName,proto3" json:"mgmt_name,omitempty"`                       // 파싱 시점에 구워둔 표시 이름. cmd 와 같은 값
+	UpiuResp      *uint32 `protobuf:"varint,39,opt,name=upiu_resp,json=upiuResp,proto3,oneof" json:"upiu_resp,omitempty"`                // UPIU hdr[6] — 응답 방향 행의 성패
+	UpiuStatus    *uint32 `protobuf:"varint,40,opt,name=upiu_status,json=upiuStatus,proto3,oneof" json:"upiu_status,omitempty"`          // UPIU hdr[7]
+	QueryOpcode   *uint32 `protobuf:"varint,41,opt,name=query_opcode,json=queryOpcode,proto3,oneof" json:"query_opcode,omitempty"`       // tsf[0] — 0x01=Read Descriptor 등
+	QueryIdn      *uint32 `protobuf:"varint,42,opt,name=query_idn,json=queryIdn,proto3,oneof" json:"query_idn,omitempty"`                // tsf[1] — ⚠ 값 공간이 query_opcode 에 따라 다르다
+	QueryIndex    *uint32 `protobuf:"varint,43,opt,name=query_index,json=queryIndex,proto3,oneof" json:"query_index,omitempty"`          // tsf[2]
+	QuerySelector *uint32 `protobuf:"varint,44,opt,name=query_selector,json=querySelector,proto3,oneof" json:"query_selector,omitempty"` // tsf[3]
+	UicCmd        *uint32 `protobuf:"varint,45,opt,name=uic_cmd,json=uicCmd,proto3,oneof" json:"uic_cmd,omitempty"`                      // 0x16=HIBERNATE_ENTER, 0x17=EXIT 등
+	// 미완결 IO 표시 — complete 를 끝내 못 받아 파서가 닫은 send.
+	//
+	// bpftrace 는 IRQ 재진입 가드 때문에 complete 를 구조적으로 소수 놓치고,
+	// **IO 가 몰릴수록 그 비율이 오른다** (trace/parser/fsio_inflight.go).
+	// 이 행의 dtoc 는 0 인데 그건 "0ms" 가 아니라 **"모름"** 이다. 표에서
+	// 0ms 로 읽히면 "엄청 빠른 IO" 로 오해하므로 플래그로 구분한다.
+	IsUnfinished  bool `protobuf:"varint,46,opt,name=is_unfinished,json=isUnfinished,proto3" json:"is_unfinished,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4618,6 +4642,76 @@ func (x *TraceEvent) GetExtra() uint32 {
 		return x.Extra
 	}
 	return 0
+}
+
+func (x *TraceEvent) GetIsMgmt() bool {
+	if x != nil {
+		return x.IsMgmt
+	}
+	return false
+}
+
+func (x *TraceEvent) GetMgmtName() string {
+	if x != nil {
+		return x.MgmtName
+	}
+	return ""
+}
+
+func (x *TraceEvent) GetUpiuResp() uint32 {
+	if x != nil && x.UpiuResp != nil {
+		return *x.UpiuResp
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetUpiuStatus() uint32 {
+	if x != nil && x.UpiuStatus != nil {
+		return *x.UpiuStatus
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetQueryOpcode() uint32 {
+	if x != nil && x.QueryOpcode != nil {
+		return *x.QueryOpcode
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetQueryIdn() uint32 {
+	if x != nil && x.QueryIdn != nil {
+		return *x.QueryIdn
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetQueryIndex() uint32 {
+	if x != nil && x.QueryIndex != nil {
+		return *x.QueryIndex
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetQuerySelector() uint32 {
+	if x != nil && x.QuerySelector != nil {
+		return *x.QuerySelector
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetUicCmd() uint32 {
+	if x != nil && x.UicCmd != nil {
+		return *x.UicCmd
+	}
+	return 0
+}
+
+func (x *TraceEvent) GetIsUnfinished() bool {
+	if x != nil {
+		return x.IsUnfinished
+	}
+	return false
 }
 
 type UploadTraceRequest struct {
@@ -8420,7 +8514,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"is_sampled\x18\x04 \x01(\bR\tisSampled\x12)\n" +
 	"\x06events\x18\x05 \x03(\v2\x11.agent.TraceEventR\x06events\x12\x1d\n" +
 	"\n" +
-	"trace_type\x18\x06 \x01(\tR\ttraceType\"\xf9\x06\n" +
+	"trace_type\x18\x06 \x01(\tR\ttraceType\"\xc2\n" +
+	"\n" +
 	"\n" +
 	"TraceEvent\x12\x12\n" +
 	"\x04time\x18\x01 \x01(\x01R\x04time\x12\x10\n" +
@@ -8463,13 +8558,36 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\bdevminor\x18! \x01(\rR\bdevminor\x12\x12\n" +
 	"\x04rwbs\x18\" \x01(\tR\x04rwbs\x12\x14\n" +
 	"\x05flags\x18# \x01(\tR\x05flags\x12\x14\n" +
-	"\x05extra\x18$ \x01(\rR\x05extraB\x06\n" +
+	"\x05extra\x18$ \x01(\rR\x05extra\x12\x17\n" +
+	"\ais_mgmt\x18% \x01(\bR\x06isMgmt\x12\x1b\n" +
+	"\tmgmt_name\x18& \x01(\tR\bmgmtName\x12 \n" +
+	"\tupiu_resp\x18' \x01(\rH\x04R\bupiuResp\x88\x01\x01\x12$\n" +
+	"\vupiu_status\x18( \x01(\rH\x05R\n" +
+	"upiuStatus\x88\x01\x01\x12&\n" +
+	"\fquery_opcode\x18) \x01(\rH\x06R\vqueryOpcode\x88\x01\x01\x12 \n" +
+	"\tquery_idn\x18* \x01(\rH\aR\bqueryIdn\x88\x01\x01\x12$\n" +
+	"\vquery_index\x18+ \x01(\rH\bR\n" +
+	"queryIndex\x88\x01\x01\x12*\n" +
+	"\x0equery_selector\x18, \x01(\rH\tR\rquerySelector\x88\x01\x01\x12\x1c\n" +
+	"\auic_cmd\x18- \x01(\rH\n" +
+	"R\x06uicCmd\x88\x01\x01\x12#\n" +
+	"\ris_unfinished\x18. \x01(\bR\fisUnfinishedB\x06\n" +
 	"\x04_txnB\r\n" +
 	"\v_upiu_flagsB\f\n" +
 	"\n" +
 	"_upiu_funcB\n" +
 	"\n" +
-	"\b_upiu_cp\"N\n" +
+	"\b_upiu_cpB\f\n" +
+	"\n" +
+	"_upiu_respB\x0e\n" +
+	"\f_upiu_statusB\x0f\n" +
+	"\r_query_opcodeB\f\n" +
+	"\n" +
+	"_query_idnB\x0e\n" +
+	"\f_query_indexB\x11\n" +
+	"\x0f_query_selectorB\n" +
+	"\n" +
+	"\b_uic_cmd\"N\n" +
 	"\x12UploadTraceRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12\x1f\n" +
 	"\vremote_path\x18\x02 \x01(\tR\n" +

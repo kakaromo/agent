@@ -15,6 +15,10 @@ const intFmt = (v: unknown) => {
 
 const strFmt = (v: unknown) => (v == null ? '' : String(v));
 
+// true 일 때만 표시한다. false 를 전부 찍으면 열이 노이즈가 되는데, 여기서 중요한
+// 건 "예외적으로 참인 행" 을 눈에 띄게 하는 것이다.
+const boolFmt = (v: unknown) => (v === true || v === 'true' ? 'Y' : '');
+
 const hexFmt = (digits: number) => (v: unknown) => {
 	if (v == null) return '';
 	const n = typeof v === 'number' ? v : Number(v);
@@ -109,7 +113,23 @@ export const fsioUfsColumns: ColumnDef<AnyRow>[] = [
 	col('upiu_flags', 'upiuFlg', hexFmt(2), 80),
 	col('upiu_func', 'upiuFn', hexFmt(2), 80),
 	col('upiu_attr', 'upiuAttr', strFmt, 90),
-	col('upiu_cp', 'upiuCp', intFmt, 70)
+	col('upiu_cp', 'upiuCp', intFmt, 70),
+	// ── mgmt (Query/TM UPIU, UIC) ──
+	// cmd 열에 이미 mgmt_name 이 들어가지만, Query 가 **어느 IDN 을** 건드렸는지와
+	// TM 이 성공했는지(resp/status)는 이름만으로 알 수 없다.
+	// ⚠ query_idn 은 **query_opcode 에 따라 값 공간이 다르다** — descriptor 면
+	// 0x07=Geometry, attribute 면 0x05=bBackgroundOpStatus. 둘을 같이 봐야 한다.
+	col('mgmt_name', 'mgmt', strFmt, 200),
+	col('query_opcode', 'qop', hexFmt(2), 70),
+	col('query_idn', 'idn', hexFmt(2), 70),
+	col('query_index', 'qIdx', intFmt, 60),
+	col('query_selector', 'qSel', intFmt, 60),
+	col('uic_cmd', 'uicCmd', hexFmt(2), 80),
+	col('upiu_resp', 'resp', hexFmt(2), 70),
+	col('upiu_status', 'status', hexFmt(2), 70),
+	// 미완결 IO — 이 행의 DtoC 0 은 "0ms" 가 아니라 "모름" 이다. 표에서 0ms 로
+	// 읽히면 "엄청 빠른 IO" 로 오해하므로 플래그를 눈에 보이게 둔다.
+	col('is_unfinished', 'unfin', boolFmt, 70)
 ];
 
 // bpftrace `-x` (--decode) 출력의 비트 이름 풀이와 동일.
@@ -243,7 +263,10 @@ export const fsioBlockColumns: ColumnDef<AnyRow>[] = [
 		cell: ({ row }) => ioFlagsText(row.original as AnyRow),
 		meta: { copyText: (row: AnyRow) => ioFlagsText(row) },
 		size: 360
-	}
+	},
+	// 미완결 IO — block 은 (dev, sector, rwbs) 로 짝짓는데 sector 는 재사용 신호가
+	// 없어 시간 만료로 닫는다. UFS 와 마찬가지로 이 행의 DtoC 0 은 "모름" 이다.
+	col('is_unfinished', 'unfin', boolFmt, 70)
 ];
 
 export function columnsFor(traceType: string): ColumnDef<AnyRow>[] {
