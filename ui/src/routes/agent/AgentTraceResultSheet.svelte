@@ -562,11 +562,36 @@
 	// Action tab: Send vs Complete
 	let activeActionTab = $state('complete');
 
-	// Map action to tab: send_req/block_rq_issue → 'send', complete_rsp/block_rq_complete → 'complete'
-	function actionToTab(action: string): string {
-		if (action.includes('send') || action.includes('issue')) return 'send';
-		if (action.includes('complete') || action.includes('rsp')) return 'complete';
-		return 'other';
+	/**
+	 * 이 action 이 현재 탭에 보여야 하는가.
+	 *
+	 * ⚠ 예전엔 `action.includes('send')` 식의 부분일치로 'send'/'complete'/'other'
+	 * 를 돌려주고 'other' 는 어느 탭에도 안 넣었다. mgmt(UPIU/UIC) 에서 이게 깨진다:
+	 *   - 우연히 걸리는 것:  uic_send, upiu_query_rsp
+	 *   - 아예 안 걸리는 것: upiu_nop_out, upiu_data_out, upiu_rtt, upiu_reject,
+	 *                        exception, 방향 미상 uic
+	 * 후자는 'other' 가 되어 기본 탭(complete)에서 **영영 안 보였다.** All 탭으로
+	 * 가야만 나오는데, 안 보이는 게 필터 때문인지 데이터가 없어서인지 알 수 없다.
+	 *
+	 * mgmt 는 방향을 접미사로 명시 판정한다:
+	 *   send 쪽: *_send / *_req / *_out
+	 *   comp 쪽: *_complete / *_rsp / *_in
+	 * 어느 쪽도 아닌 단발 이벤트(exception, 방향 미상 uic)는 **양쪽에 다 보인다** —
+	 * 숨기면 그 시점을 영영 못 본다.
+	 *
+	 * portal `routes/trace/TraceChartView.svelte` 의 actionMatchesTab 과 동일 규칙.
+	 */
+	function actionMatchesTab(action: string, tab: string): boolean {
+		if (tab === 'all') return true;
+		const low = (action || '').toLowerCase();
+		if (low.startsWith('upiu_') || low.startsWith('uic') || low === 'exception') {
+			const isSend = low.endsWith('_send') || low.endsWith('_req') || low.endsWith('_out');
+			const isComp = low.endsWith('_complete') || low.endsWith('_rsp') || low.endsWith('_in');
+			if (!isSend && !isComp) return true; // 단발 — 항상 표시
+			return tab === 'send' ? isSend : isComp;
+		}
+		if (tab === 'send') return low.includes('send') || low.includes('issue');
+		return low.includes('complete') || low.includes('rsp');
 	}
 
 	// Filtered events by action tab
@@ -577,7 +602,7 @@
 		if (!rawResult) return [];
 		let evts = activeActionTab === 'all'
 			? rawResult.events
-			: rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
+			: rawResult.events.filter(e => actionMatchesTab(e.action, activeActionTab));
 		// 구간을 고르면 **데이터 자체**를 그 범위로 좁힌다.
 		//
 		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
