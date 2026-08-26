@@ -9,6 +9,7 @@ import (
 	"agent/config"
 	"agent/schedule"
 	"agent/storage/sqlitedb"
+	"agent/trace"
 )
 
 // HTTPRouter 옵션
@@ -27,6 +28,8 @@ type HTTPRouterOptions struct {
 	ArchiveBase string
 	// TraceBase — trace 잡 출력 디렉토리 (cfg.Server.TraceDir). fs/open 의 target=trace 가 사용.
 	TraceBase string
+	// LogcatMgr — logcat 수집기. nil 이면 /api/agent/logcat/* 미등록.
+	LogcatMgr *trace.LogcatManager
 	// AI — 로컬 ollama 기반 결과 해석. Enabled=true 일 때만 /api/agent/ai/* endpoint 활성화
 	// (사무실/standalone 무관, DB 없어도 라이브 잡 해석은 동작).
 	AI config.AIConfig
@@ -99,6 +102,12 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 		registerScheduleRoutes(mux, opts.DB, opts.ScheduleRunner)
 		installJobExecutionHook(opts.Agent, opts.DB, opts.ArchiveBase)
 	}
+	// logcat 탐색/파싱 — DB 없이도 탐색은 되어야 한다 (사무실 모드에서 형식 조사).
+	// profileId 로 파싱하려면 DB 가 필요하지만 그건 핸들러가 개별 판단한다.
+	if opts.LogcatMgr != nil {
+		registerLogcatRoutes(mux, opts.LogcatMgr, opts.DB)
+	}
+
 	// Archive 업로드 (로컬 디스크 복사). archiveBase 가 비어있으면 등록 안 함.
 	if opts.ArchiveBase != "" {
 		registerArchiveRoutes(mux, opts.Agent, opts.ArchiveBase)
