@@ -360,18 +360,44 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 	// Detect cmd column: opcode (ufs) or io_type (block)
 	cmdCol := detectCmdColumn(db, glob)
 
+	// ⚠ latency 3종은 **모든 지표에** `> 0` 가드를 건다 (min 만이 아니라).
+	//
+	// dtoc/ctod/ctoc 가 0 인 행은 두 종류이고 **둘 다 "0ms" 가 아니라 "모름"** 이다:
+	//   1. 짝의 반대편 행 — dtoc 는 complete 행에만, ctod 는 send 행에만 실린다.
+	//   2. 미완결 IO — complete 를 끝내 못 받아 파서가 IsUnfinished 로 닫은 send
+	//      (trace/parser/fsio_inflight.go). bpftrace 는 IRQ 재진입 가드 때문에
+	//      complete 를 구조적으로 소수 놓치고, **IO 가 몰릴수록 그 비율이 오른다.**
+	//
+	// 이 0 들을 모수에 넣으면 avg/p99 가 아래로 끌려 내려간다 — 즉 **부하가 높을수록
+	// latency 를 낮게 보고하는** 방향으로 조용히 틀린다. 실측으로 avg 가 정확히
+	// 절반이 되는 경우를 확인했다 (TestFsioCmdStatsExcludesUnfinishedFromLatency).
+	//
+	// 예전엔 min 에만 `CASE WHEN dtoc > 0` 가드가 있었다. min 만 맞고 max/avg/stddev/
+	// 백분위가 틀려서 표를 봐도 눈치채기 어려웠다.
+	//
+	// Rust 쪽도 동일하다 — `../trace/src/output/stats_rpc_duckdb.rs:713` 의
+	// `dtoc_w = "action = '{comp}' AND dtoc > 0"` 가 모든 지표에 걸린다.
+	// overview 경로(queryLatencyStats)도 같은 조건을 WHERE 로 이미 걸고 있다.
+	//
+	// FILTER 를 쓰는 이유 — 여기는 GROUP BY cmd 라 WHERE 로 걸면 latency 가 없는
+	// cmd 의 행 자체가 사라져 count/ratio/size 까지 같이 틀어진다. 집계별로
+	// 모수를 따로 거는 FILTER 가 맞다.
+
 	q := fmt.Sprintf(`SELECT
 		%s as cmd, count(*) as cnt,
 		count(*) * 100.0 / sum(count(*)) OVER () as ratio,
-		min(CASE WHEN dtoc > 0 THEN dtoc END), max(dtoc), avg(dtoc), stddev_pop(dtoc),
-		percentile_cont(0.99) WITHIN GROUP (ORDER BY dtoc),
-		percentile_cont(0.999) WITHIN GROUP (ORDER BY dtoc),
-		min(CASE WHEN ctod > 0 THEN ctod END), max(ctod), avg(ctod), stddev_pop(ctod),
-		percentile_cont(0.99) WITHIN GROUP (ORDER BY ctod),
-		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctod),
-		min(CASE WHEN ctoc > 0 THEN ctoc END), max(ctoc), avg(ctoc), stddev_pop(ctoc),
-		percentile_cont(0.99) WITHIN GROUP (ORDER BY ctoc),
-		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctoc),
+		min(dtoc) FILTER (WHERE dtoc > 0), max(dtoc) FILTER (WHERE dtoc > 0),
+		avg(dtoc) FILTER (WHERE dtoc > 0), stddev_pop(dtoc) FILTER (WHERE dtoc > 0),
+		percentile_cont(0.99) WITHIN GROUP (ORDER BY dtoc) FILTER (WHERE dtoc > 0),
+		percentile_cont(0.999) WITHIN GROUP (ORDER BY dtoc) FILTER (WHERE dtoc > 0),
+		min(ctod) FILTER (WHERE ctod > 0), max(ctod) FILTER (WHERE ctod > 0),
+		avg(ctod) FILTER (WHERE ctod > 0), stddev_pop(ctod) FILTER (WHERE ctod > 0),
+		percentile_cont(0.99) WITHIN GROUP (ORDER BY ctod) FILTER (WHERE ctod > 0),
+		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctod) FILTER (WHERE ctod > 0),
+		min(ctoc) FILTER (WHERE ctoc > 0), max(ctoc) FILTER (WHERE ctoc > 0),
+		avg(ctoc) FILTER (WHERE ctoc > 0), stddev_pop(ctoc) FILTER (WHERE ctoc > 0),
+		percentile_cont(0.99) WITHIN GROUP (ORDER BY ctoc) FILTER (WHERE ctoc > 0),
+		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctoc) FILTER (WHERE ctoc > 0),
 		min(qd), max(qd), avg(qd), stddev_pop(qd),
 		percentile_cont(0.99) WITHIN GROUP (ORDER BY qd),
 		COALESCE(sum(CAST(size AS BIGINT)) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as total_size,

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	pb "agent/pb"
 	"agent/trace/parser"
 )
 
@@ -213,5 +214,57 @@ func TestFsioDurationIsSeconds(t *testing.T) {
 	if stats.DurationSeconds != 30.0 {
 		t.Errorf("duration = %v, want 30 (초 단위 그대로 — 1000 으로 나누면 안 된다)",
 			stats.DurationSeconds)
+	}
+}
+
+// TestFsioCmdStatsExcludesUnfinishedFromLatency — CMD 별 latency 모수에서
+// dtoc=0 행(send 행 + 미완결 IO)이 빠지는지 고정한다.
+//
+// **이게 왜 조용히 틀리는가** — 파서는 complete 를 못 받은 send 를 IsUnfinished 로
+// 표시하고 dtoc 를 0 으로 둔다. 0 은 "0ms" 가 아니라 **"모름"** 이다
+// (trace/parser/fsio_inflight.go 참고). 그런데 집계가 그 0 을 모수에 넣으면
+// avg/p99 가 아래로 끌려 내려간다. IO 가 몰릴수록 complete 누락률이 올라가므로
+// **부하가 높을수록 latency 를 낮게 보고하는** 방향으로 틀린다.
+//
+// min 에만 가드가 있으면 min 만 맞고 나머지가 틀려서 표를 봐도 눈치채기 어렵다.
+func TestFsioCmdStatsExcludesUnfinishedFromLatency(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byCmd := map[string]*pb.CmdStats{}
+	for _, c := range stats.CmdStats {
+		byCmd[c.Cmd] = c
+	}
+
+	// 0x2a — send + complete 2행. dtoc 가 실린 건 complete 1행뿐이고 값은 0.275ms.
+	// send 행의 dtoc=0 이 섞이면 avg 가 절반(0.1375)으로 내려간다.
+	w := byCmd["0x2a"]
+	if w == nil {
+		t.Fatalf("cmd 0x2a 가 없다 (got %v)", byCmd)
+	}
+	const wantDtoc = 0.275
+	if diff := w.Dtoc.Avg - wantDtoc; diff < -0.001 || diff > 0.001 {
+		t.Errorf("0x2a dtoc avg = %.4f, want ~%.4f — send 행의 dtoc=0 이 모수에 섞였다",
+			w.Dtoc.Avg, wantDtoc)
+	}
+	if diff := w.Dtoc.P99 - wantDtoc; diff < -0.001 || diff > 0.001 {
+		t.Errorf("0x2a dtoc p99 = %.4f, want ~%.4f — 백분위 모수에 0 이 섞였다",
+			w.Dtoc.P99, wantDtoc)
+	}
+
+	// 0x28 — 미완결 send 1행뿐. dtoc 를 아는 행이 **하나도 없으므로** 통계는
+	// 0 이 아니라 "값 없음"(0 으로 남김)이어야 한다. 여기서 max/avg 가 0 이 아닌
+	// 값을 내면 미완결 IO 를 완료된 것처럼 집계한 것이다.
+	r := byCmd["0x28"]
+	if r == nil {
+		t.Fatalf("cmd 0x28 가 없다 (got %v)", byCmd)
+	}
+	if r.Dtoc.Max != 0 || r.Dtoc.Avg != 0 {
+		t.Errorf("0x28 dtoc max/avg = %.4f/%.4f, want 0/0 — 미완결 IO 가 모수에 들어갔다",
+			r.Dtoc.Max, r.Dtoc.Avg)
 	}
 }
