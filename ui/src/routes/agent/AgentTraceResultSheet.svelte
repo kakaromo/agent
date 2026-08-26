@@ -60,13 +60,36 @@
 	const boundariesUnusable = $derived(boundaries.length > 0 && usableBoundaries.length === 0);
 	const hasBehavior = $derived(usableBoundaries.length > 0);
 
-	// 스텝 타입별 밴드 색. 같은 타입이 같은 색이어야 레인이 읽힌다.
-	const BEHAVIOR_COLORS = [
-		'rgba(59,130,246,0.10)', 'rgba(16,185,129,0.10)', 'rgba(245,158,11,0.10)',
-		'rgba(139,92,246,0.10)', 'rgba(236,72,153,0.10)', 'rgba(20,184,166,0.10)'
-	];
-	function behaviorColor(i: number) {
-		return BEHAVIOR_COLORS[i % BEHAVIOR_COLORS.length];
+	// 스텝 **타입별** 고정색. 순번대로 돌리면 같은 종류(scroll 3회)가 매번 다른 색이라
+	// "무슨 동작이었나" 가 색으로 안 읽힌다 — 목업이 종류별로 색을 고정한 이유다.
+	const BEHAVIOR_HUES: Record<string, string> = {
+		launch_app: '59,130,246',   // 파랑 — 앱 실행
+		app_macro: '139,92,246',    // 보라 — 조작(스크롤 등)
+		benchmark: '217,48,37',     // 빨강 — 인위적 부하
+		iotest: '217,48,37',
+		shell: '245,158,11',        // 주황 — 임의 명령
+		trace_start: '154,160,166', // 회색 — 계측 자체
+		trace_stop: '154,160,166',
+		sleep: '154,160,166',       // 회색 — 의도적 대기(idle)
+		cleanup: '154,160,166'
+	};
+	const BEHAVIOR_FALLBACK = '20,184,166';
+
+	function behaviorRgb(type: string): string {
+		return BEHAVIOR_HUES[type] ?? BEHAVIOR_FALLBACK;
+	}
+	/** 차트 밴드용 — 옅게. */
+	function behaviorColor(i: number): string {
+		const b = usableBoundaries[i];
+		return `rgba(${behaviorRgb(b?.type ?? '')},0.10)`;
+	}
+	/** 레인 바·범례용 — 진하게. */
+	function behaviorSolid(type: string): string {
+		return `rgb(${behaviorRgb(type)})`;
+	}
+	/** sleep/trace 처럼 "아무것도 안 한" 구간은 목업처럼 점선 빈 바로. */
+	function isIdleStep(type: string): boolean {
+		return type === 'sleep' || type === 'trace_start' || type === 'trace_stop';
 	}
 	function behaviorLabel(b: StepBoundary) {
 		const base = b.label || b.type || `step ${b.stepIndex}`;
@@ -620,6 +643,21 @@
 		}
 	}
 
+	// 경계 불확실 폭(± 초). 조회된 잡 중 **가장 나쁜 쪽**을 택한다 — 낙관적으로 잡으면
+	// "경계 모호" 로 표시해야 할 구간을 놓친다.
+	//
+	// 이 값이 곧 "이 구간 경계를 어디까지 믿을 수 있나" 다. 없으면 화면이 ±10ms 짜리
+	// 측정과 ±250ms 짜리를 **똑같이** 그리게 된다.
+	const edgeUncertaintySec = $derived.by<number>(() => {
+		if (!clockSync) return 0;
+		let worst = 0;
+		for (const id of activeJobIds) {
+			const u = clockSync[id]?.uncertaintySec;
+			if (typeof u === 'number' && u > worst) worst = u;
+		}
+		return worst;
+	});
+
 	// 조회된 잡 중 하나라도 못 믿으면 그 이유를 보여 준다.
 	const clockSyncReason = $derived.by<string>(() => {
 		if (!clockSync) return '';
@@ -910,6 +948,27 @@
 		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 	}
 
+	// ── Behavior 레인 (목업 스타일) ──
+	//
+	// 스텝마다 한 줄. 트랙 안에서 시각을 % 로 환산해 바를 놓는다. 차트 밴드와 달리
+	// 여기는 zoom 이 없어 어긋날 일이 없다 — 그래서 목업 형태를 그대로 쓸 수 있다.
+	const laneSpan = $derived.by(() => {
+		if (usableBoundaries.length === 0) return { t0: 0, t1: 1 };
+		let t0 = Infinity, t1 = -Infinity;
+		for (const b of usableBoundaries) {
+			if (b.startedMono < t0) t0 = b.startedMono;
+			if (b.finishedMono > t1) t1 = b.finishedMono;
+		}
+		// 폭이 0 이면 나눗셈이 깨진다 (스텝 하나가 순간에 끝난 경우).
+		if (!(t1 > t0)) t1 = t0 + 1;
+		return { t0, t1 };
+	});
+
+	function lanePct(t: number): number {
+		const { t0, t1 } = laneSpan;
+		return ((t - t0) / (t1 - t0)) * 100;
+	}
+
 	function fmtLatency(v: number): string {
 		if (v < 0.001) return v.toFixed(6);
 		if (v < 1) return v.toFixed(3);
@@ -1134,7 +1193,7 @@
 								<span class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5"
 									title="{row.durationSec.toFixed(2)}s · {row.events.toLocaleString()} events">
 									<span class="inline-block size-2 rounded-sm"
-										style="background:{behaviorColor(i).replace('0.10', '0.6')}"></span>
+										style="background:{behaviorSolid(row.type)}"></span>
 									{row.label}
 									{#if !row.success}<span class="text-red-500">실패</span>{/if}
 								</span>
@@ -1518,6 +1577,68 @@
 
 				{#if hasBehavior}
 					<Tabs.Content value="behavior" class="pt-2 space-y-3">
+						<!-- 스텝 레인 (목업 형태) — 스텝마다 한 줄, 시간축 공유.
+						     Charts 밴드와 달리 zoom 이 없어 어긋날 일이 없다. -->
+						<div class="rounded border p-2">
+							<div class="flex items-center justify-between mb-1.5">
+								<span class="text-[10px] font-semibold">스텝 구간</span>
+								<span class="{captionMuted} text-[9px] font-mono">
+									{laneSpan.t0.toFixed(2)}s → {laneSpan.t1.toFixed(2)}s
+									({(laneSpan.t1 - laneSpan.t0).toFixed(2)}s)
+								</span>
+							</div>
+
+							{#each usableBoundaries as b, i (`${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`)}
+								{@const left = lanePct(b.startedMono)}
+								{@const width = Math.max(lanePct(b.finishedMono) - left, 0.4)}
+								{@const idle = isIdleStep(b.type)}
+								<div class="grid grid-cols-[92px_1fr] items-center gap-0 min-h-[24px]">
+									<div class="pr-2 text-right text-[9px] font-mono text-muted-foreground truncate"
+										title={behaviorLabel(b)}>
+										{behaviorLabel(b)}
+									</div>
+									<div class="relative h-[20px] rounded bg-muted/50">
+										<!-- 경계 불확실(±RTT/2) — 해칭. **강조가 아니라 "모름" 으로 읽혀야 한다.**
+										     이게 없으면 ±10ms 측정과 ±250ms 측정이 화면상 똑같아 보인다. -->
+										{#if edgeUncertaintySec > 0}
+											{@const ew = (edgeUncertaintySec * 2 / (laneSpan.t1 - laneSpan.t0)) * 100}
+											{#each [b.startedMono, b.finishedMono] as edge}
+												<div class="absolute top-0 bottom-0 pointer-events-none"
+													style="left:{lanePct(edge - edgeUncertaintySec)}%; width:{ew}%;
+														background-image: repeating-linear-gradient(45deg,
+															rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"
+													title="경계 불확실 ±{(edgeUncertaintySec * 1000).toFixed(0)}ms — 이 안의 IO 는 어느 구간인지 단정할 수 없습니다"
+												></div>
+											{/each}
+										{/if}
+
+										<div class="absolute top-[2px] bottom-[2px] rounded-sm flex items-center px-1.5 overflow-hidden whitespace-nowrap text-[9px]"
+											style="left:{left}%; width:{width}%;
+												{idle
+													? 'border:1px dashed var(--border); color:var(--muted-foreground);'
+													: `background:${behaviorSolid(b.type)}; color:#fff;`}"
+											title="{behaviorLabel(b)} — {b.startedMono.toFixed(2)}s → {b.finishedMono.toFixed(2)}s">
+											<span class="truncate">{b.type}</span>
+											<span class="ml-auto pl-1.5 font-mono opacity-80">
+												{(b.finishedMono - b.startedMono).toFixed(2)}s
+											</span>
+										</div>
+									</div>
+								</div>
+							{/each}
+
+							{#if edgeUncertaintySec > 0}
+								<div class="mt-1.5 flex items-center gap-1.5 {captionMuted} text-[9px]">
+									<span class="inline-block w-6 h-2 rounded-sm"
+										style="background-image: repeating-linear-gradient(45deg,
+											rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"></span>
+									경계 불확실 ±{(edgeUncertaintySec * 1000).toFixed(0)}ms —
+									이 안에 걸친 IO 는 어느 구간인지 단정할 수 없습니다
+									(호스트↔기기 시각 측정의 원리적 한계, adb 왕복의 절반).
+								</div>
+							{/if}
+						</div>
+
 						<!-- 지표 읽는 법 — 숫자만 주면 장식이 된다.
 						     이 화면을 보는 사람이 성능 분석 경험이 없을 수 있다. -->
 						<div class="rounded border bg-muted/30 p-2 text-[9px] leading-relaxed">
@@ -1554,7 +1675,7 @@
 										<tr class="border-b border-border/40">
 											<td class="py-1 pr-2 font-sans">
 												<span class="inline-block w-2 h-2 rounded-sm mr-1 align-middle"
-													style="background:{behaviorColor(i).replace('0.10', '0.6')}"></span>
+													style="background:{behaviorSolid(row.type)}"></span>
 												{row.label}
 												{#if !row.success}
 													<span class="ml-1 text-red-500" title="이 스텝은 실패했습니다">실패</span>
