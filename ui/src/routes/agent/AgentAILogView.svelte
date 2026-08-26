@@ -1,0 +1,656 @@
+<script lang="ts">
+	/**
+	 * on-device AI (LLM) 측정 — logcat 패턴 기반 TTFT/TPOT.
+	 *
+	 * 3단계 흐름을 그대로 화면으로 옮긴다:
+	 *   ① 탐색  — 런타임의 로그 형식을 모를 때 후보 태그를 찾는다
+	 *   ② 프로파일 — 확인된 패턴을 저장해 재사용한다
+	 *   ③ 측정  — 저장된 패턴으로 지표를 뽑는다
+	 *
+	 * ⚠ 이 화면의 설계 원칙: **모르는 것을 아는 척하지 않는다.**
+	 * 탐색 결과가 빈약하면 빈약하다고, 매칭이 0건이면 왜 0건인지 화면에 그대로 쓴다.
+	 * 측정 도구에서 "그럴듯하게 틀린 값" 이 가장 나쁘기 때문이다.
+	 */
+	import { toast } from 'svelte-sonner';
+	import {
+		fetchAILogProfiles, createAILogProfile, updateAILogProfile, deleteAILogProfile,
+		exploreLogcat, parseLogcat,
+		type AILogProfile, type AILogPatterns,
+		type LogcatExploreResult, type LogcatParseResult
+	} from '$lib/api/agent.js';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+	import TrashIcon from '@lucide/svelte/icons/trash-2';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import PlayIcon from '@lucide/svelte/icons/play';
+	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
+	import AlertTriangleIcon from '@lucide/svelte/icons/triangle-alert';
+	import InfoIcon from '@lucide/svelte/icons/info';
+	import CheckIcon from '@lucide/svelte/icons/check';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+
+	interface Props {
+		/** 최근 잡의 logcat job id (있으면 탐색/측정 대상 기본값). */
+		logcatJobId?: string | null;
+	}
+	let { logcatJobId = null }: Props = $props();
+
+	type Stage = 'explore' | 'profiles' | 'measure';
+	let stage = $state<Stage>('explore');
+
+	// ── 공통 입력 (로그 출처) ──
+	let sourceJobId = $state(logcatJobId ?? '');
+	let sourcePath = $state('');
+
+	function sourcePayload() {
+		const jid = sourceJobId.trim();
+		if (jid) return { jobId: jid };
+		const p = sourcePath.trim();
+		if (p) return { path: p };
+		return null;
+	}
+
+	// ── ① 탐색 ──
+	let exploring = $state(false);
+	let exploreRes = $state<LogcatExploreResult | null>(null);
+	let explorePath = $state('');
+	// 구간 지정 — 유휴/추론을 나눠주면 "추론 때만 나타난 태그" 를 가려낼 수 있다.
+	let idleFrom = $state('');
+	let idleTo = $state('');
+	let runFrom = $state('');
+	let runTo = $state('');
+	let expandedTag = $state<string | null>(null);
+
+	async function runExplore() {
+		const src = sourcePayload();
+		if (!src) { toast.error('logcat job id 또는 파일 경로가 필요합니다'); return; }
+		exploring = true;
+		exploreRes = null;
+		try {
+			const num = (s: string) => { const v = parseFloat(s); return isNaN(v) ? undefined : v; };
+			const { path, result } = await exploreLogcat({
+				...src,
+				idleFrom: num(idleFrom), idleTo: num(idleTo),
+				runFrom: num(runFrom), runTo: num(runTo)
+			});
+			explorePath = path;
+			exploreRes = result;
+			if (result.candidates.length === 0) toast.warning('후보를 찾지 못했습니다');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '탐색 실패');
+		} finally {
+			exploring = false;
+		}
+	}
+
+	/** 후보를 프로파일 초안으로 옮긴다 — 사람이 확인한 것만 저장된다. */
+	function seedProfileFromTag(tag: string, samples: string[]) {
+		form.name = form.name || `${tag} profile`;
+		const tags = new Set((parsePatterns(form.patternsJson).tags ?? []).filter(Boolean));
+		tags.add(tag);
+		const cur = parsePatterns(form.patternsJson);
+		cur.tags = [...tags];
+		form.patternsJson = JSON.stringify(cur, null, 2);
+		stage = 'profiles';
+		editOpen = true;
+		toast.info(`태그 "${tag}" 를 초안에 넣었습니다. 원문을 보고 정규식을 채우세요.`, {
+			description: samples[0]?.slice(0, 120)
+		});
+	}
+
+	// ── ② 프로파일 ──
+	let profiles = $state<AILogProfile[]>([]);
+	let loadingProfiles = $state(false);
+	let editOpen = $state(false);
+	let editingId = $state<number | null>(null);
+	let saving = $state(false);
+	let confirmOpen = $state(false);
+	let confirmDesc = $state('');
+	let confirmAction = $state<() => Promise<void>>(async () => {});
+
+	const emptyPatterns: AILogPatterns = { tags: [], marks: [], series: [] };
+	let form = $state({
+		name: '', description: '', runtime: 'qnn', soc: '',
+		patternsJson: JSON.stringify(emptyPatterns, null, 2)
+	});
+
+	function parsePatterns(s: string): AILogPatterns {
+		try { return JSON.parse(s) as AILogPatterns; } catch { return { ...emptyPatterns }; }
+	}
+
+	/** 저장 전에 화면에서 먼저 잡아준다 — 서버도 막지만 왕복 전에 알려주는 편이 낫다. */
+	const patternIssues = $derived.by(() => {
+		const out: string[] = [];
+		let p: AILogPatterns;
+		try { p = JSON.parse(form.patternsJson) as AILogPatterns; }
+		catch (e) { return [`JSON 형식이 아닙니다: ${e instanceof Error ? e.message : ''}`]; }
+		const marks = p.marks ?? [], series = p.series ?? [];
+		if (marks.length === 0 && series.length === 0)
+			out.push('marks 또는 series 중 최소 하나는 있어야 합니다 (없으면 매칭이 항상 0건입니다)');
+		const seen = new Set<string>();
+		for (const m of [...marks, ...series]) {
+			if (!m.key) out.push('key 가 빈 항목이 있습니다');
+			else if (seen.has(m.key)) out.push(`key 중복: ${m.key} — 나중 것이 앞의 것을 덮어씁니다`);
+			else seen.add(m.key);
+			if (!m.regex) { out.push(`${m.key || '(이름없음)'}: regex 가 없습니다`); continue; }
+			try { new RegExp(m.regex); }
+			catch { out.push(`${m.key}: 정규식이 잘못됐습니다`); }
+		}
+		for (const s of series) {
+			if (s.regex && !s.regex.includes('('))
+				out.push(`${s.key}: 값을 뽑을 캡처 그룹 () 이 없습니다 (예: \`TTFT ([0-9.]+) ms\`)`);
+		}
+		return out;
+	});
+
+	async function loadProfiles() {
+		loadingProfiles = true;
+		try { profiles = await fetchAILogProfiles(); }
+		catch (e) { toast.error(e instanceof Error ? e.message : '프로파일 로드 실패'); }
+		finally { loadingProfiles = false; }
+	}
+
+	function openCreate() {
+		editingId = null;
+		form = { name: '', description: '', runtime: 'qnn', soc: '',
+			patternsJson: JSON.stringify(examplePatterns, null, 2) };
+		editOpen = true;
+	}
+
+	function openEdit(p: AILogProfile) {
+		editingId = p.id;
+		let pretty = p.patternsJson;
+		try { pretty = JSON.stringify(JSON.parse(p.patternsJson), null, 2); } catch { /* 원문 유지 */ }
+		form = { name: p.name, description: p.description ?? '', runtime: p.runtime,
+			soc: p.soc ?? '', patternsJson: pretty };
+		editOpen = true;
+	}
+
+	async function saveProfile() {
+		if (!form.name.trim() || !form.runtime.trim()) { toast.error('이름과 runtime 은 필수입니다'); return; }
+		saving = true;
+		try {
+			const data = { name: form.name.trim(), description: form.description.trim(),
+				runtime: form.runtime.trim(), soc: form.soc.trim(), patternsJson: form.patternsJson };
+			if (editingId == null) await createAILogProfile(data);
+			else await updateAILogProfile(editingId, data);
+			toast.success('저장했습니다');
+			editOpen = false;
+			await loadProfiles();
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '저장 실패');
+		} finally { saving = false; }
+	}
+
+	function askDelete(p: AILogProfile) {
+		confirmDesc = `프로파일 "${p.name}" 을 삭제할까요?`;
+		confirmAction = async () => {
+			await deleteAILogProfile(p.id);
+			toast.success('삭제했습니다');
+			await loadProfiles();
+		};
+		confirmOpen = true;
+	}
+
+	const examplePatterns: AILogPatterns = {
+		tags: ['Genie', 'QnnHtp'],
+		marks: [{ key: 'load_start', regex: 'model load start' }],
+		series: [
+			{ key: 'ttft_ms', regex: 'TTFT ([0-9.]+) ms', unit: 'ms' },
+			{ key: 'tpot_ms', regex: 'decode ([0-9.]+) ms/tok', unit: 'ms' }
+		]
+	};
+
+	// ── ③ 측정 ──
+	let measuring = $state(false);
+	let parseRes = $state<LogcatParseResult | null>(null);
+	let selectedProfileId = $state<number | null>(null);
+
+	async function runMeasure() {
+		const src = sourcePayload();
+		if (!src) { toast.error('logcat job id 또는 파일 경로가 필요합니다'); return; }
+		if (selectedProfileId == null) { toast.error('프로파일을 고르세요'); return; }
+		measuring = true;
+		parseRes = null;
+		try {
+			const { result } = await parseLogcat({ ...src, profileId: selectedProfileId });
+			parseRes = result;
+			if (result.totalHits === 0) toast.error('매칭 0건 — 아래 진단을 확인하세요');
+			else if (result.partial) toast.warning('일부 패턴만 맞았습니다');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '측정 실패');
+		} finally { measuring = false; }
+	}
+
+	const seriesList = $derived(parseRes ? Object.values(parseRes.series).filter((s) => s.count > 0) : []);
+
+	function fmt(n: number): string {
+		if (!isFinite(n)) return '-';
+		return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(2);
+	}
+
+	$effect(() => { if (stage === 'profiles' || stage === 'measure') { if (profiles.length === 0) loadProfiles(); } });
+</script>
+
+<div class="flex h-full flex-col gap-3 overflow-hidden p-3">
+	<!-- 단계 탭 -->
+	<div class="flex shrink-0 items-center gap-1 border-b pb-2">
+		{#each [['explore', '① 탐색'], ['profiles', '② 프로파일'], ['measure', '③ 측정']] as [key, label] (key)}
+			<button
+				class="rounded px-3 py-1.5 text-xs font-medium transition-colors {stage === key
+					? 'bg-primary text-primary-foreground'
+					: 'text-muted-foreground hover:bg-muted'}"
+				onclick={() => (stage = key as Stage)}
+			>{label}</button>
+		{/each}
+		<div class="ml-auto text-[11px] text-muted-foreground">
+			on-device AI (TTFT / TPOT)
+		</div>
+	</div>
+
+	<!-- 로그 출처 (모든 단계 공통) -->
+	<div class="shrink-0 rounded border bg-muted/30 p-2">
+		<div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+			<InfoIcon class="size-3" /> 로그 출처
+		</div>
+		<div class="flex flex-wrap items-center gap-2">
+			<input
+				class="h-7 w-64 rounded border bg-background px-2 text-xs"
+				placeholder="logcat job id"
+				bind:value={sourceJobId}
+			/>
+			<span class="text-[11px] text-muted-foreground">또는</span>
+			<input
+				class="h-7 flex-1 min-w-48 rounded border bg-background px-2 text-xs font-mono"
+				placeholder="logcat.log 파일 경로 (수집 폴더 안)"
+				bind:value={sourcePath}
+			/>
+		</div>
+		<p class="mt-1 text-[10px] text-muted-foreground">
+			시나리오 잡 파라미터에 <code class="rounded bg-muted px-1">logcat=on</code> 을 넣으면 수집됩니다.
+			태그를 아직 모르면 <code class="rounded bg-muted px-1">logcat_tags</code> 를 비워 넓게 받으세요.
+		</p>
+	</div>
+
+	<!-- ① 탐색 -->
+	{#if stage === 'explore'}
+		<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+			<div class="shrink-0 rounded border p-2">
+				<p class="mb-2 text-[11px] text-muted-foreground">
+					런타임이 어떤 태그·문구로 찍는지 모를 때 후보를 찾습니다.
+					<strong>유휴 구간</strong>을 함께 지정하면 "추론 때만 나타난 태그" 를 가려낼 수 있어
+					정확도가 크게 올라갑니다 (벤더 이름을 몰라도 걸립니다).
+				</p>
+				<div class="flex flex-wrap items-end gap-2">
+					{#each [['유휴 시작', idleFrom, (v: string) => (idleFrom = v)], ['유휴 끝', idleTo, (v: string) => (idleTo = v)], ['추론 시작', runFrom, (v: string) => (runFrom = v)], ['추론 끝', runTo, (v: string) => (runTo = v)]] as [label, val, set] (label)}
+						<div class="flex flex-col gap-0.5">
+							<span class="text-[10px] text-muted-foreground">{label}</span>
+							<input
+								class="h-7 w-28 rounded border bg-background px-2 text-xs font-mono"
+								placeholder="초"
+								value={val as string}
+								oninput={(e) => (set as (v: string) => void)(e.currentTarget.value)}
+							/>
+						</div>
+					{/each}
+					<button
+						class="ml-auto flex h-7 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+						onclick={runExplore}
+						disabled={exploring}
+					>
+						{#if exploring}<LoaderIcon class="size-3 animate-spin" />{:else}<SearchIcon class="size-3" />{/if}
+						탐색
+					</button>
+				</div>
+			</div>
+
+			{#if exploreRes}
+				<div class="min-h-0 flex-1 overflow-auto rounded border">
+					<!-- 요약 -->
+					<div class="sticky top-0 z-10 border-b bg-background p-2 text-[11px]">
+						<span class="text-muted-foreground">
+							{exploreRes.totalLines.toLocaleString()}줄 수집 ·
+							{exploreRes.parsedLines.toLocaleString()}줄 파싱 ·
+							태그 {exploreRes.distinctTags.toLocaleString()}개 ·
+							후보 <strong class="text-foreground">{exploreRes.candidates.length}</strong>개
+						</span>
+						{#if explorePath}
+							<span class="ml-2 font-mono text-[10px] text-muted-foreground">{explorePath}</span>
+						{/if}
+					</div>
+
+					<!-- ⚠ 약한 신호 경고 — 목록이 있다는 것만으로 답이 있다고 읽히면 안 된다 -->
+					{#if exploreRes.weakOnly}
+						<div class="m-2 rounded border border-amber-500/50 bg-amber-500/10 p-2">
+							<div class="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+								<AlertTriangleIcon class="size-3.5" /> LLM 고유 신호가 없습니다
+							</div>
+							<p class="mt-1 text-[11px] leading-relaxed text-amber-800/90 dark:text-amber-300/90">
+								아래 후보는 <strong>낱말만 겹치는 다른 온디바이스 ML</strong> 일 수 있습니다.
+								음성 wakeword·얼굴인식·사진 분류도 똑같이 "모델 로드" 와 "추론" 을 찍습니다.
+								원문(샘플)을 반드시 눈으로 확인하세요 — <strong>토큰 단위가 안 보이면 LLM 이 아닐 가능성이 높습니다.</strong>
+							</p>
+						</div>
+					{/if}
+
+					{#if exploreRes.diagnosis.length > 0}
+						<div class="m-2 rounded border bg-muted/40 p-2">
+							{#each exploreRes.diagnosis as d (d)}
+								<div class="text-[11px] leading-relaxed text-muted-foreground">{d}</div>
+							{/each}
+						</div>
+					{/if}
+
+					<!-- 후보 목록 -->
+					{#each exploreRes.candidates as c (c.tag)}
+						<div class="border-b last:border-b-0">
+							<button
+								class="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/50"
+								onclick={() => (expandedTag = expandedTag === c.tag ? null : c.tag)}
+							>
+								<ChevronDownIcon class="size-3 shrink-0 text-muted-foreground transition-transform {expandedTag === c.tag ? '' : '-rotate-90'}" />
+								<span class="font-mono text-xs font-medium">{c.tag}</span>
+								{#if c.strongHits > 0}
+									<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+										LLM 신호 {c.strongHits}
+									</span>
+								{/if}
+								{#if c.onlyDuringRun}
+									<span class="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-700 dark:text-blue-400">
+										추론 구간 전용
+									</span>
+								{/if}
+								<span class="ml-auto text-[10px] text-muted-foreground">
+									{c.lines}줄 · 숫자 {c.unitHits} · 단어 {c.keywordHits} · pid {c.pids.join(',')}
+								</span>
+							</button>
+							{#if expandedTag === c.tag}
+								<div class="bg-muted/30 px-2 pb-2">
+									<div class="mb-1 text-[10px] font-medium text-muted-foreground">
+										원문 샘플 — 이 줄을 보고 판단하세요
+									</div>
+									{#each c.samples as s (s)}
+										<pre class="overflow-x-auto whitespace-pre-wrap break-all rounded bg-background/70 p-1.5 text-[10px] font-mono leading-relaxed">{s}</pre>
+									{/each}
+									<button
+										class="mt-1.5 flex items-center gap-1 rounded border px-2 py-1 text-[11px] hover:bg-muted"
+										onclick={() => seedProfileFromTag(c.tag, c.samples)}
+									>
+										<PlusIcon class="size-3" /> 이 태그로 프로파일 만들기
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else if !exploring}
+				<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+					탐색을 실행하면 후보 태그가 여기 나옵니다
+				</div>
+			{/if}
+		</div>
+
+	<!-- ② 프로파일 -->
+	{:else if stage === 'profiles'}
+		<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+			<div class="flex shrink-0 items-center justify-between">
+				<p class="text-[11px] text-muted-foreground">
+					확인된 패턴을 저장해 재사용합니다. AP·런타임 버전마다 문구가 달라 프리셋으로 둡니다.
+				</p>
+				<button
+					class="flex h-7 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground"
+					onclick={openCreate}
+				><PlusIcon class="size-3" /> 새 프로파일</button>
+			</div>
+
+			<div class="min-h-0 flex-1 overflow-auto rounded border">
+				{#if loadingProfiles}
+					<div class="p-4 text-center text-xs text-muted-foreground">불러오는 중…</div>
+				{:else if profiles.length === 0}
+					<div class="p-4 text-center text-xs text-muted-foreground">
+						저장된 프로파일이 없습니다. 탐색으로 태그를 찾은 뒤 만들어 보세요.
+					</div>
+				{:else}
+					{#each profiles as p (p.id)}
+						{@const pat = parsePatterns(p.patternsJson)}
+						<div class="flex items-start gap-2 border-b p-2 last:border-b-0">
+							<div class="min-w-0 flex-1">
+								<div class="flex items-center gap-1.5">
+									<span class="text-xs font-medium">{p.name}</span>
+									<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{p.runtime}</span>
+									{#if p.soc}
+										<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{p.soc}</span>
+									{:else}
+										<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">런타임 공용</span>
+									{/if}
+								</div>
+								{#if p.description}
+									<div class="mt-0.5 text-[11px] text-muted-foreground">{p.description}</div>
+								{/if}
+								<div class="mt-1 flex flex-wrap gap-1">
+									{#each pat.marks ?? [] as m (m.key)}
+										<span class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-mono text-blue-700 dark:text-blue-400">mark:{m.key}</span>
+									{/each}
+									{#each pat.series ?? [] as s (s.key)}
+										<span class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-mono text-emerald-700 dark:text-emerald-400">
+											{s.key}{s.unit ? ` (${s.unit})` : ''}
+										</span>
+									{/each}
+								</div>
+							</div>
+							<button class="rounded p-1 hover:bg-muted" onclick={() => openEdit(p)} aria-label="수정">
+								<PencilIcon class="size-3.5 text-muted-foreground" />
+							</button>
+							<button class="rounded p-1 hover:bg-muted" onclick={() => askDelete(p)} aria-label="삭제">
+								<TrashIcon class="size-3.5 text-destructive" />
+							</button>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		</div>
+
+	<!-- ③ 측정 -->
+	{:else}
+		<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+			<div class="flex shrink-0 items-center gap-2 rounded border p-2">
+				<select class="h-7 min-w-48 rounded border bg-background px-2 text-xs" bind:value={selectedProfileId}>
+					<option value={null}>프로파일 선택…</option>
+					{#each profiles as p (p.id)}
+						<option value={p.id}>{p.name} ({p.runtime}{p.soc ? ` / ${p.soc}` : ''})</option>
+					{/each}
+				</select>
+				<button
+					class="flex h-7 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+					onclick={runMeasure}
+					disabled={measuring}
+				>
+					{#if measuring}<LoaderIcon class="size-3 animate-spin" />{:else}<PlayIcon class="size-3" />{/if}
+					측정
+				</button>
+			</div>
+
+			{#if parseRes}
+				<div class="min-h-0 flex-1 space-y-2 overflow-auto">
+					<!-- ⚠ 0건 / 부분 매칭을 가장 먼저, 가장 크게 보여준다 -->
+					{#if parseRes.totalHits === 0}
+						<div class="rounded border border-destructive/50 bg-destructive/10 p-2">
+							<div class="flex items-center gap-1.5 text-xs font-semibold text-destructive">
+								<AlertTriangleIcon class="size-3.5" /> 매칭 0건 — 측정하지 못했습니다
+							</div>
+							{#each parseRes.diagnosis as d (d)}
+								<div class="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-destructive/90">{d}</div>
+							{/each}
+						</div>
+					{:else if parseRes.partial}
+						<div class="rounded border border-amber-500/50 bg-amber-500/10 p-2">
+							<div class="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+								<AlertTriangleIcon class="size-3.5" /> 일부 패턴만 맞았습니다
+							</div>
+							<p class="mt-1 text-[11px] text-amber-800/90 dark:text-amber-300/90">
+								안 맞은 지표: <code class="font-mono">{parseRes.missingKeys.join(', ')}</code> —
+								<strong>이 값들은 없습니다.</strong> 아래 수치만 보고 정상이라 판단하지 마세요.
+							</p>
+						</div>
+					{/if}
+
+					<!-- 지표 카드 -->
+					{#if seriesList.length > 0}
+						<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+							{#each seriesList as s (s.key)}
+								<div class="rounded border p-2">
+									<div class="flex items-baseline justify-between">
+										<span class="font-mono text-[11px] font-medium">{s.key}</span>
+										<span class="text-[10px] text-muted-foreground">{s.count}건</span>
+									</div>
+									{#if s.count === 1}
+										<!-- 단일값 (TTFT·load 등) — 분포가 의미 없다 -->
+										<div class="mt-1 text-xl font-semibold tabular-nums">
+											{fmt(s.points[0].value)}<span class="ml-1 text-xs font-normal text-muted-foreground">{s.unit ?? ''}</span>
+										</div>
+									{:else}
+										<!-- 시계열 (TPOT 등) — 평균만 보면 "뒤로 갈수록 느려짐" 을 놓친다 -->
+										<div class="mt-1 text-xl font-semibold tabular-nums">
+											{fmt(s.median)}<span class="ml-1 text-xs font-normal text-muted-foreground">{s.unit ?? ''} (중앙값)</span>
+										</div>
+										<div class="mt-1 grid grid-cols-4 gap-1 text-[10px] text-muted-foreground">
+											<div>min<div class="font-medium tabular-nums text-foreground">{fmt(s.min)}</div></div>
+											<div>평균<div class="font-medium tabular-nums text-foreground">{fmt(s.mean)}</div></div>
+											<div>p99<div class="font-medium tabular-nums text-foreground">{fmt(s.p99)}</div></div>
+											<div>max<div class="font-medium tabular-nums text-foreground">{fmt(s.max)}</div></div>
+										</div>
+										<!-- 추세 스파크라인 — 뒤로 갈수록 느려지는지 눈으로 본다 -->
+										<svg class="mt-1.5 w-full" height="24" viewBox="0 0 100 24" preserveAspectRatio="none">
+											{#if s.max > s.min}
+												<polyline
+													fill="none" stroke="currentColor" stroke-width="1"
+													class="text-primary"
+													points={s.points.map((p, i) =>
+														`${(i / Math.max(1, s.points.length - 1)) * 100},${24 - ((p.value - s.min) / (s.max - s.min)) * 22}`
+													).join(' ')}
+												/>
+											{/if}
+										</svg>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<!-- 구간 마커 -->
+					{#if parseRes.marks.length > 0}
+						<div class="rounded border p-2">
+							<div class="mb-1 text-[11px] font-medium text-muted-foreground">구간 경계 (mark)</div>
+							{#each parseRes.marks as m (m.key + m.timeSec)}
+								<div class="flex items-center gap-2 border-b py-0.5 text-[11px] last:border-b-0">
+									<span class="font-mono tabular-nums text-muted-foreground">{m.timeSec.toFixed(3)}</span>
+									<span class="rounded bg-blue-500/10 px-1.5 text-[10px] font-mono text-blue-700 dark:text-blue-400">{m.key}</span>
+									<span class="truncate font-mono text-[10px] text-muted-foreground">{m.raw}</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<!-- 매칭 통계 — 무엇이 몇 건 걸렸는지 항상 보여준다 -->
+					<div class="rounded border p-2">
+						<div class="mb-1 text-[11px] font-medium text-muted-foreground">
+							매칭 통계 · {parseRes.parsedLines.toLocaleString()}줄 파싱
+							{#if parseRes.matchedTags.length > 0}
+								· 태그 {parseRes.matchedTags.join(', ')}
+							{/if}
+						</div>
+						{#each parseRes.stats as st (st.key)}
+							<div class="flex items-center gap-2 py-0.5 text-[11px]">
+								{#if st.hits > 0}
+									<CheckIcon class="size-3 text-emerald-600" />
+								{:else}
+									<AlertTriangleIcon class="size-3 text-amber-600" />
+								{/if}
+								<span class="font-mono">{st.key}</span>
+								<span class="text-[10px] text-muted-foreground">{st.kind}</span>
+								<span class="ml-auto tabular-nums {st.hits > 0 ? '' : 'text-amber-600'}">{st.hits}건</span>
+								{#if st.parseFailures > 0}
+									<span class="text-[10px] text-amber-600">캡처 실패 {st.parseFailures}</span>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				</div>
+			{:else if !measuring}
+				<div class="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+					프로파일을 고르고 측정을 실행하세요
+				</div>
+			{/if}
+		</div>
+	{/if}
+</div>
+
+<!-- 프로파일 편집 -->
+<Dialog.Root bind:open={editOpen}>
+	<Dialog.Content class="max-w-2xl">
+		<Dialog.Header>
+			<Dialog.Title>{editingId == null ? '새 프로파일' : '프로파일 수정'}</Dialog.Title>
+		</Dialog.Header>
+		<div class="space-y-2">
+			<div class="grid grid-cols-2 gap-2">
+				<label class="flex flex-col gap-1">
+					<span class="text-[11px] text-muted-foreground">이름 *</span>
+					<input class="h-8 rounded border bg-background px-2 text-xs" bind:value={form.name} placeholder="QNN / Genie" />
+				</label>
+				<label class="flex flex-col gap-1">
+					<span class="text-[11px] text-muted-foreground">runtime *</span>
+					<input class="h-8 rounded border bg-background px-2 text-xs" bind:value={form.runtime} placeholder="qnn / llamacpp / neuropilot" />
+				</label>
+			</div>
+			<div class="grid grid-cols-2 gap-2">
+				<label class="flex flex-col gap-1">
+					<span class="text-[11px] text-muted-foreground">SoC (비우면 런타임 공용)</span>
+					<input class="h-8 rounded border bg-background px-2 text-xs" bind:value={form.soc} placeholder="SM8975" />
+				</label>
+				<label class="flex flex-col gap-1">
+					<span class="text-[11px] text-muted-foreground">설명</span>
+					<input class="h-8 rounded border bg-background px-2 text-xs" bind:value={form.description} />
+				</label>
+			</div>
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-muted-foreground">
+					패턴 (JSON) — <strong>mark</strong> 는 시각만, <strong>series</strong> 는 캡처 그룹의 숫자를 뽑습니다
+				</span>
+				<textarea
+					class="h-56 rounded border bg-background p-2 font-mono text-[11px] leading-relaxed"
+					bind:value={form.patternsJson}
+					spellcheck="false"
+				></textarea>
+			</label>
+
+			{#if patternIssues.length > 0}
+				<div class="rounded border border-destructive/50 bg-destructive/10 p-2">
+					{#each patternIssues as issue (issue)}
+						<div class="text-[11px] text-destructive">{issue}</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+		<Dialog.Footer>
+			<button class="h-8 rounded border px-3 text-xs" onclick={() => (editOpen = false)}>취소</button>
+			<button
+				class="flex h-8 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+				onclick={saveProfile}
+				disabled={saving || patternIssues.length > 0}
+			>
+				{#if saving}<LoaderIcon class="size-3 animate-spin" />{/if}
+				저장
+			</button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<ConfirmDialog
+	bind:open={confirmOpen}
+	description={confirmDesc}
+	variant="destructive"
+	onConfirm={confirmAction}
+	onCancel={() => (confirmOpen = false)}
+/>
