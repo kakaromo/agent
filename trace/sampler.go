@@ -14,6 +14,11 @@ const maxEvents = 500000
 
 // maxEventsForTest — 샘플링 경로를 테스트에서 강제하기 위한 훅.
 // 운영에서는 maxEvents 와 같다.
+//
+// ⚠ 샘플링 쿼리의 **나눗수·버킷 수·LIMIT 이 전부 이 값을 따른다.** 예전엔
+// 임계값만 훅이고 나머지는 maxEvents 상수를 직접 썼는데, 그러면 테스트가
+// 샘플링 경로에 들어가도 나눗수가 1 이라 **아무것도 솎이지 않아서** 솎기
+// 동작을 검증할 수 없었다 (통과하지만 아무것도 증명 못 하는 테스트).
 var maxEventsForTest = maxEvents
 
 // GetRawData returns trace events, sampling if over maxEvents.
@@ -112,61 +117,108 @@ func querySampledEvents(db *sql.DB, glob, where string, cols fsioCols, cmdCol, l
 		filterCond = "WHERE 1=1"
 	}
 
+	// ⚠ mgmt 와 데이터 IO 를 **각자 예산으로** 샘플링한다.
+	//
+	// rn 은 전체 행에 걸친 하나의 연속 번호라, uniform 샘플링(`rn %% N = 0`)이
+	// 두 그룹에 **행 수 비율대로** 표본을 나눠 준다. idle 구간처럼 mgmt 가 행의
+	// 90%% 인 트레이스에서는 표본의 90%% 를 mgmt 가 가져가고, 정작 드문 데이터 IO 가
+	// 차트에서 사라진다. 반대로 IO 폭주 구간에서는 mgmt 가 통째로 없어져
+	// "hibern8 이 안 돌았다" 로 잘못 읽힌다.
+	//
+	// PARTITION BY 로 rn 을 그룹별로 따로 매기면 각 그룹이 독립적으로 1/N 로
+	// 솎이므로 둘 다 온전한 해상도로 남는다. mgmt 가 없는 스키마에서는
+	// grpExpr 이 상수라 기존 동작과 완전히 같다.
+	//
+	// ⚠ LIMIT 은 time 순 정렬 뒤에 걸리므로 한쪽이 통째로 잘리지는 않는다
+	// (Rust 는 그룹별 결과를 이어 붙인 뒤 다시 target 으로 깎아서 뒤에 붙은 mgmt 가
+	//  전멸하는 문제가 있었다 — chart_rpc_duckdb.rs:268 참고. 여기 구조는 그 함정이
+	//  없지만, 대신 총량이 예산의 최대 2배가 될 수 있어 maxEvents 로 상한을 둔다).
+	//
+	// 정본: Rust `../trace/src/output/chart_rpc_duckdb.rs` 의 decimate_split_mgmt.
+	grpExpr := "0"
+	groups := 1
+	if cols.schema.isUFS {
+		grpExpr = "CASE WHEN COALESCE(is_mgmt, FALSE) THEN 1 ELSE 0 END"
+		groups = 2
+	}
+	// 그룹당 예산 — 전체 예산을 그룹 수로 나눈다. 두 그룹이 각자 이 예산에 맞춰
+	// 솎이므로 합계는 대략 maxEventsForTest 를 유지한다.
+	groupBudget := maxEventsForTest / groups
+	if groupBudget < 1 {
+		groupBudget = 1
+	}
+
 	// The key insight: we use row_number + modulo for uniform sampling,
 	// then UNION with min/max extremes per time bucket, then DISTINCT + LIMIT
 	q := fmt.Sprintf(`
 WITH base AS (
-  SELECT *, row_number() OVER (ORDER BY time) as rn,
+  SELECT *, row_number() OVER (PARTITION BY %s ORDER BY time) as rn,
+    %s as grp,
+    -- ⚠ 나눗수는 **그룹마다 따로** 계산한다.
+    --
+    -- 합계 기준 하나로 쓰면 소수 그룹이 통째로 빠진다: 데이터 IO 20행에
+    -- 나눗수 21 이면 rn %% 21 = 0 이 **한 번도 안 맞아 0행**이 된다.
+    -- 그룹 크기에 비례한 나눗수를 써야 각 그룹이 자기 안에서 1/N 로 솎인다.
+    -- greatest(...,1) — 그룹이 예산보다 작으면 나눗수 1(전량 유지).
+    greatest(count(*) OVER (PARTITION BY %s) / %d, 1) as grp_div,
     NTILE(%d) OVER (ORDER BY time) as bucket
   FROM read_parquet(%s) %s
 ),
 -- Min/max events per bucket (must include)
+-- ⚠ rn 은 grp 안에서만 유일하다 (위 PARTITION BY). 아래 모든 곳에서
+-- **(grp, rn) 을 한 쌍으로** 다뤄야 한다. rn 만 쓰면 두 그룹의 같은 번호가
+-- 섞여 엉뚱한 행이 딸려 온다.
 extremes AS (
-  SELECT DISTINCT ON (bucket, metric) rn FROM (
-    SELECT bucket, rn, 'lba_min' as metric, %s as val, rank() OVER (PARTITION BY bucket ORDER BY %s ASC) as r FROM base
+  SELECT DISTINCT ON (bucket, metric) grp, rn FROM (
+    SELECT bucket, grp, rn, 'lba_min' as metric, %s as val, rank() OVER (PARTITION BY bucket ORDER BY %s ASC) as r FROM base
     UNION ALL
-    SELECT bucket, rn, 'lba_max', %s, rank() OVER (PARTITION BY bucket ORDER BY %s DESC) FROM base
+    SELECT bucket, grp, rn, 'lba_max', %s, rank() OVER (PARTITION BY bucket ORDER BY %s DESC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'qd_min', qd, rank() OVER (PARTITION BY bucket ORDER BY qd ASC) FROM base
+    SELECT bucket, grp, rn, 'qd_min', qd, rank() OVER (PARTITION BY bucket ORDER BY qd ASC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'qd_max', qd, rank() OVER (PARTITION BY bucket ORDER BY qd DESC) FROM base
+    SELECT bucket, grp, rn, 'qd_max', qd, rank() OVER (PARTITION BY bucket ORDER BY qd DESC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'dtoc_max', dtoc, rank() OVER (PARTITION BY bucket ORDER BY dtoc DESC) FROM base
+    SELECT bucket, grp, rn, 'dtoc_max', dtoc, rank() OVER (PARTITION BY bucket ORDER BY dtoc DESC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'dtoc_min', dtoc, rank() OVER (PARTITION BY bucket ORDER BY dtoc ASC) FROM base WHERE dtoc > 0
+    SELECT bucket, grp, rn, 'dtoc_min', dtoc, rank() OVER (PARTITION BY bucket ORDER BY dtoc ASC) FROM base WHERE dtoc > 0
     UNION ALL
-    SELECT bucket, rn, 'ctod_max', ctod, rank() OVER (PARTITION BY bucket ORDER BY ctod DESC) FROM base
+    SELECT bucket, grp, rn, 'ctod_max', ctod, rank() OVER (PARTITION BY bucket ORDER BY ctod DESC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'ctod_min', ctod, rank() OVER (PARTITION BY bucket ORDER BY ctod ASC) FROM base WHERE ctod > 0
+    SELECT bucket, grp, rn, 'ctod_min', ctod, rank() OVER (PARTITION BY bucket ORDER BY ctod ASC) FROM base WHERE ctod > 0
     UNION ALL
-    SELECT bucket, rn, 'ctoc_max', ctoc, rank() OVER (PARTITION BY bucket ORDER BY ctoc DESC) FROM base
+    SELECT bucket, grp, rn, 'ctoc_max', ctoc, rank() OVER (PARTITION BY bucket ORDER BY ctoc DESC) FROM base
     UNION ALL
-    SELECT bucket, rn, 'ctoc_min', ctoc, rank() OVER (PARTITION BY bucket ORDER BY ctoc ASC) FROM base WHERE ctoc > 0
+    SELECT bucket, grp, rn, 'ctoc_min', ctoc, rank() OVER (PARTITION BY bucket ORDER BY ctoc ASC) FROM base WHERE ctoc > 0
   ) sub WHERE r = 1
 ),
--- Uniform sampling for remaining slots
+-- Uniform sampling for remaining slots.
+-- rn 이 grp 별로 1부터 다시 시작하므로, 이 modulo 는 **각 그룹을 독립적으로**
+-- 1/N 로 솎는다 — 이게 분리 샘플링의 핵심이다.
 sampled AS (
-  SELECT rn FROM base WHERE rn %% %d = 0
+  SELECT grp, rn FROM base WHERE rn %% grp_div = 0
 ),
 -- Combine
 combined AS (
-  SELECT rn FROM extremes
+  SELECT grp, rn FROM extremes
   UNION
-  SELECT rn FROM sampled
+  SELECT grp, rn FROM sampled
 )
 SELECT b.time, %s, %s, b.cpu, b.dtoc, b.ctod, b.ctoc, %s, %s, b.continuous, b.action%s
 FROM base b
-JOIN combined c ON b.rn = c.rn
+JOIN combined c ON b.grp = c.grp AND b.rn = c.rn
 ORDER BY b.time
 LIMIT %d`,
-		maxEvents/10, // ~50k buckets for extremes
+		grpExpr,               // PARTITION BY — 그룹별로 rn 을 따로 매긴다
+		grpExpr,               // grp 컬럼
+		grpExpr,               // grp_div 의 PARTITION BY (그룹 크기)
+		groupBudget,           // 그룹당 표본 예산
+		maxEventsForTest/10+1, // ~50k buckets for extremes (테스트에선 훅을 따른다)
 		glob, filterCond,
 		lbaCol, lbaCol, lbaCol, lbaCol,
-		int(total)/maxEvents+1, // modulo for uniform sampling
 		cols.rawLbaExpr(lbaCol, "b."), cols.mgmtNullExpr("b.qd", "UINTEGER", "b."),
 		cols.rawCmdExpr(cmdCol, "b."), cols.mgmtNullExpr("b.size", "UINTEGER", "b."),
 		fsioExtraSelectPrefixed(fsio, "b."),
-		maxEvents)
+		maxEventsForTest)
 
 	if fsio.any() {
 		return scanEventsFsio(db, q, fsio)

@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -490,9 +491,10 @@ func TestRawDataCarriesMgmtDetail(t *testing.T) {
 func TestSampledPathHandlesMgmtNulls(t *testing.T) {
 	dir := writeFsioParquet(t, "fsio_ufs")
 
-	// 샘플링 경로 강제 — 로그가 7행이라 임계값을 1로 내린다.
+	// 샘플링 경로 강제 — 로그가 7행이라 예산을 4로 내린다.
+	// 1 로 내리면 LIMIT 1 이 되어 mgmt/데이터 구분 이전에 다 잘린다.
 	orig := maxEventsForTest
-	maxEventsForTest = 1
+	maxEventsForTest = 4
 	defer func() { maxEventsForTest = orig }()
 
 	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
@@ -519,5 +521,87 @@ func TestSampledPathHandlesMgmtNulls(t *testing.T) {
 	}
 	if !sawMgmt {
 		t.Error("샘플링 결과에 mgmt 행이 없다")
+	}
+}
+
+// writeSkewedFsioParquet — mgmt 가 압도적 다수인 트레이스. idle 구간에서
+// hibern8 쌍이 계속 도는 상황을 흉내낸다.
+func writeSkewedFsioParquet(t *testing.T, dataPairs, mgmtPairs int) string {
+	t.Helper()
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < dataPairs; i++ {
+		ts := 100.0 + float64(i)*0.01
+		b.WriteString(fmt.Sprintf("%.6f\tUFS\t100\t100\t0\tapp\tvfs_write\tufshcd_command:send_req\text4\t8\t32\t1\t4096\t%d\t/data/a\t0x2\tlun=0 tag=%d hwq=0 ufs_op=0x2a grp=0x0\n",
+			ts, 1000+i, i%32))
+		b.WriteString(fmt.Sprintf("%.6f\tUFS\t0\t0\t0\tswapper/0\t-\tufshcd_command:complete_rsp\t\t0\t0\t0\t4096\t%d\t\t0x2\tlun=0 tag=%d hwq=0 ufs_op=0x2a grp=0x0\n",
+			ts+0.001, 1000+i, i%32))
+	}
+	for i := 0; i < mgmtPairs; i++ {
+		ts := 100.0 + float64(i)*0.01
+		b.WriteString(fmt.Sprintf("%.6f\tUFS\t0\t0\t0\tswapper/0\t-\tufshcd_uic_command\t\t0\t0\t0\t0\t0\t\t0x0\tuic_cmd=0x17 a1=0x0 a2=0x0 a3=0x0 dir=send\n", ts))
+		b.WriteString(fmt.Sprintf("%.6f\tUFS\t0\t0\t0\tswapper/0\t-\tufshcd_uic_command\t\t0\t0\t0\t0\t0\t\t0x0\tuic_cmd=0x17 a1=0x0 a2=0x0 a3=0x0 dir=comp\n", ts+0.002))
+	}
+	logFile := filepath.Join(dir, "trace.log")
+	if err := os.WriteFile(logFile, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "fsio_ufs", nil); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestSampledPathSplitsMgmtBudget — mgmt 가 표본 예산을 독차지하지 않는지.
+//
+// rn 을 전체에 걸쳐 하나로 매기면 uniform 샘플링이 **행 수 비율대로** 표본을
+// 나눠 준다. idle 구간처럼 mgmt 가 행의 99% 인 트레이스에서는 정작 드문
+// 데이터 IO 가 차트에서 거의 사라진다.
+//
+// 실측(데이터 IO 20행 / mgmt 2000행, 예산 100):
+//
+//	분리 전: 데이터 IO 7행 (35%)
+//	분리 후: 데이터 IO 20행 (100%) — 소수 그룹이 온전히 남는다
+//
+// ⚠ 나눗수를 **그룹마다** 계산하는 게 핵심이다. 합계 기준 하나(=21)를 쓰면
+// 20행짜리 데이터 IO 는 rn % 21 = 0 이 한 번도 안 맞아 **0행**이 된다 —
+// 분리를 하고도 소수 그룹이 통째로 빠진다.
+func TestSampledPathSplitsMgmtBudget(t *testing.T) {
+	dir := writeSkewedFsioParquet(t, 10, 1000) // 데이터 IO 20행, mgmt 2000행
+
+	orig := maxEventsForTest
+	maxEventsForTest = 100
+	defer func() { maxEventsForTest = orig }()
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsSampled {
+		t.Fatal("샘플링 경로를 안 탔다 — 테스트가 무의미하다")
+	}
+
+	var dataIO, mgmt int
+	for _, e := range resp.Events {
+		if e.IsMgmt {
+			mgmt++
+		} else {
+			dataIO++
+		}
+	}
+	t.Logf("표본: 데이터 IO %d행 (원본 20), mgmt %d행 (원본 2000)", dataIO, mgmt)
+
+	// 소수 그룹이 예산 비율에 눌리지 않아야 한다. 분리 전 실측이 7행이었으므로
+	// 그보다 확실히 나은 선을 건다.
+	if dataIO < 15 {
+		t.Errorf("데이터 IO 표본 %d행 — mgmt 가 예산을 독차지했다 (want >= 15)", dataIO)
+	}
+	// mgmt 도 살아 있어야 한다 (한쪽만 남기는 게 목적이 아니다).
+	if mgmt == 0 {
+		t.Error("mgmt 가 표본에서 전멸했다")
+	}
+	// 총량이 예산을 크게 넘지 않아야 한다 — 그룹별 예산의 합이 상한이다.
+	if len(resp.Events) > maxEventsForTest {
+		t.Errorf("표본 총량 %d > 예산 %d", len(resp.Events), maxEventsForTest)
 	}
 }
