@@ -77,6 +77,23 @@
 		hiddenSteps = next;
 	}
 
+	// 구간 선택이 바뀌면 **Statistics 만** 다시 부른다.
+	//
+	// Charts/Raw/Behavior 는 이미 받아 둔 raw 를 filteredEvents 에서 잘라 쓰므로
+	// 서버 왕복이 필요 없다. 반면 Statistics 는 서버가 계산하는 값이라, 다시 안 부르면
+	// **표만 전 구간 기준으로 남아** 화면마다 숫자가 달라진다.
+	//
+	// zoomRange 값 자체를 의존성으로 둔다 — 토글해도 범위가 그대로면(예: 가운데 구간
+	// 하나를 껐다 켬) 굳이 다시 부르지 않는다.
+	let lastStatsRange = $state('');
+	$effect(() => {
+		const key = zoomRange ? `${zoomRange.min}:${zoomRange.max}` : '';
+		if (key === lastStatsRange) return;
+		lastStatsRange = key;
+		if (!open || serverId == null || activeJobIds.length === 0) return;
+		loadStats(buildFilter());
+	});
+
 	// 타임라인 구간 선택 — hiddenSteps(숨김)와 **다른 개념**이다.
 	//
 	//   hiddenSteps  : 차트/표에서 아예 빼기 (범례 토글)
@@ -90,6 +107,11 @@
 		else next.add(key);
 		selectedSteps = next;
 	}
+
+	// 화면에 실제로 그릴 구간. 토글로 숨긴 것을 뺀다.
+	const usableBoundaries = $derived(
+		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
+	);
 
 	// 구간을 골라 보면 차트도 **그 구간으로 확대**한다.
 	//
@@ -109,10 +131,6 @@
 		return { min: lo - pad, max: hi + pad };
 	});
 
-	// 화면에 실제로 그릴 구간. 토글로 숨긴 것을 뺀다.
-	const usableBoundaries = $derived(
-		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
-	);
 	// 구간 데이터는 왔는데 mono 가 없는 경우 — 왜 분할이 안 되는지 알려야 한다.
 	// ⚠ allBoundaries 기준이다 — 토글로 전부 숨긴 것과 "시계를 못 믿어서 못 그림" 은 다르다.
 	const boundariesUnusable = $derived(boundaries.length > 0 && allBoundaries.length === 0);
@@ -515,8 +533,18 @@
 	// `$derived.by` 가 이 형태의 올바른 룬이다.
 	const filteredEvents = $derived.by<TraceEvent[]>(() => {
 		if (!rawResult) return [];
-		if (activeActionTab === 'all') return rawResult.events;
-		return rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
+		let evts = activeActionTab === 'all'
+			? rawResult.events
+			: rawResult.events.filter(e => actionToTab(e.action) === activeActionTab);
+		// 구간을 고르면 **데이터 자체**를 그 범위로 좁힌다.
+		//
+		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
+		// Statistics 도 전체 기준이었다 — 화면마다 모수가 달라 "고른 구간의 p99" 를
+		// 물어도 답이 안 나왔다. 여기서 자르면 Raw/Behavior/차트가 같은 모수를 본다.
+		if (zoomRange) {
+			evts = evts.filter(e => e.time >= zoomRange.min && e.time <= zoomRange.max);
+		}
+		return evts;
 	});
 
 	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
@@ -652,6 +680,13 @@
 		const f: TraceFilter = {};
 		if (filterStartTime) f.startTime = Number(filterStartTime);
 		if (filterEndTime) f.endTime = Number(filterEndTime);
+		// 구간 선택을 서버 질의에도 싣는다 — Statistics 는 서버가 계산하므로 이게
+		// 없으면 **표는 전 구간 기준**인데 차트만 좁혀져 화면마다 모수가 달라진다.
+		// 사용자가 직접 넣은 Time min/max 가 있으면 그쪽을 존중한다(더 좁은 의도).
+		if (zoomRange) {
+			if (!filterStartTime) f.startTime = zoomRange.min;
+			if (!filterEndTime) f.endTime = zoomRange.max;
+		}
 		if (filterStartLba) f.startLba = Math.max(0, Number(filterStartLba));
 		if (filterEndLba) f.endLba = Math.max(0, Number(filterEndLba));
 		if (filterMinDtoc) f.minDtoc = Number(filterMinDtoc);
@@ -1348,6 +1383,10 @@
 							<div class="text-[9px] text-muted-foreground">
 								{filteredEvents.length.toLocaleString()} events
 								{#if rawResult.isSampled} (sampled from {rawResult.totalEvents.toLocaleString()}){/if}
+								{#if zoomRange}
+									<!-- 행 수가 줄어든 이유를 밝힌다 — 모르면 데이터가 없어진 줄 안다. -->
+									· 선택 구간만
+								{/if}
 							</div>
 							<!-- Action tabs: Send / Complete -->
 							<div class="flex gap-0.5 ml-auto">
@@ -1410,6 +1449,12 @@
 
 				<!-- Statistics Tab -->
 				<Tabs.Content value="stats" class="pt-2 space-y-3">
+					{#if zoomRange}
+						<div class="rounded border bg-muted/30 px-2 py-1 text-[9px] {captionMuted}">
+							아래 수치는 <b>선택한 구간</b>({(zoomRange.max - zoomRange.min).toFixed(2)}s)만
+							집계한 값입니다. 전체를 보려면 구간 범례에서 “전체 선택”.
+						</div>
+					{/if}
 					<!-- AI 채팅 패널 (근거 집계 표시 + 멀티턴) -->
 					<AiChatPanel
 						bind:this={aiPanel}
