@@ -201,7 +201,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 	lbaCol := detectLbaColumn(db, glob)
 	timeCol := detectTimeColumn(db, glob)
 
-	// mgmt(Query/TM UPIU, UIC) 행 제외 — ComputeStats 와 같은 조건.
+	// mgmt(Query/TM UPIU, UIC) 행 제외 — ComputeStats 와 같은 조건(fsio_cols.go).
 	//
 	// 여기 집계들은 `action = send_req` 같은 필터가 없어 mgmt 행이 그대로 섞인다.
 	// mgmt 는 SCSI opcode 가 없어 cmd 축에서 전부 `0x00` 한 덩어리가 되고,
@@ -210,13 +210,8 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 	//
 	// 이 결과는 LLM 이 근거로 읽는다 — 오염되면 "0x00 이 42%" 같은 존재하지 않는
 	// 패턴을 그럴듯하게 해석한다. 에러가 아니라 조용히 틀린 답이 나온다.
-	//
-	// COALESCE 인 이유 — 다른 trace_type parquet 과 union 하면 is_mgmt 가 NULL 이다.
-	// Rust 도 동일하다 (`../trace/src/output/ai_agg_duckdb.rs:356`).
-	base := ""
-	if detectFsioSchema(db, glob).isUFS {
-		base = addCondition("", "COALESCE(is_mgmt, FALSE) = FALSE")
-	}
+	cols := newFsioCols(db, glob)
+	base := cols.ExcludeMgmt("")
 
 	switch spec.Name {
 	case AggTailLatency:
@@ -289,9 +284,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 		where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
 		// 좁힌 구간에도 같은 mgmt 제외를 건다 — 기준선(base)과 모수 정의가
 		// 어긋나면 "구간 vs 전체" 비교 자체가 무의미해진다.
-		if base != "" {
-			where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
-		}
+		where = cols.ExcludeMgmt(where)
 		scoped, err := querySliceSummary(db, glob, where, cmdCol)
 		if err != nil {
 			return nil, fmt.Errorf("구간 집계 실패: %w", err)

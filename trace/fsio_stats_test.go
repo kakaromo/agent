@@ -3,6 +3,7 @@ package trace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	pb "agent/pb"
@@ -312,5 +313,39 @@ func TestFsioAggregationExcludesMgmt(t *testing.T) {
 		if e.Cmd == "0x00" {
 			t.Errorf("tail_latency 상위에 mgmt 행이 섞였다: %+v", e)
 		}
+	}
+}
+
+// TestMgmtExclusionRoundTrips — ExcludeMgmt 가 만든 조건을 stripMgmtExclusion 이
+// 정확히 되돌리는지 고정한다.
+//
+// 둘은 같은 문자열에 의존하는 **쌍**이다. 리터럴이 어긋나면 strip 이 조용히
+// no-op 이 되고, mgmt 집계 where 에 `is_mgmt = FALSE` 가 남아 결과가 0행이 된다.
+// 그런데 화면에는 에러가 아니라 "mgmt 이벤트가 없었다" 로 보인다 — 조용히 틀린다.
+func TestMgmtExclusionRoundTrips(t *testing.T) {
+	ufs := fsioCols{schema: fsioSchema{isUFS: true}}
+
+	cases := []struct{ name, in string }{
+		{"빈 where", ""},
+		{"기존 조건 있음", "WHERE time >= 1.0"},
+		{"조건 여러 개", "WHERE time >= 1.0 AND lba > 100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			excluded := ufs.ExcludeMgmt(tc.in)
+			if !strings.Contains(excluded, mgmtExclusion) {
+				t.Fatalf("ExcludeMgmt(%q) = %q — 제외 조건이 안 붙었다", tc.in, excluded)
+			}
+			if got := stripMgmtExclusion(excluded); got != tc.in {
+				t.Errorf("round-trip 실패: %q → %q → %q, want %q",
+					tc.in, excluded, got, tc.in)
+			}
+		})
+	}
+
+	// fsio_block / ftrace 에는 is_mgmt 컬럼이 없다 — 조건을 붙이면 Binder Error.
+	blk := fsioCols{schema: fsioSchema{isBlock: true}}
+	if got := blk.ExcludeMgmt("WHERE time >= 1.0"); got != "WHERE time >= 1.0" {
+		t.Errorf("fsio_block 에 mgmt 조건이 붙었다: %q", got)
 	}
 }

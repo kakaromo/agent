@@ -108,19 +108,17 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 
 	glob := buildGlobList(infos)
 	lbaCol := detectLbaColumn(db, glob)
+	cols := newFsioCols(db, glob)
+	fsio := cols.schema
 	cmdCol := detectCmdColumn(db, glob)
-	fsio := detectFsioSchema(db, glob)
 	timeCol := detectTimeColumn(db, glob)
 	where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
-	// mgmt(Query/TM UPIU, UIC) 행 제외.
+	// mgmt(Query/TM UPIU, UIC) 행 제외 — 조건 정의는 fsio_cols.go 에 모여 있다.
 	//
 	// 집계 대부분은 action = send_req/block_rq_issue 로 걸러져 mgmt 가 자동 제외되지만,
 	// total_events(count(*)) 와 duration 은 필터가 없어 mgmt 가 섞인다. **idle 구간에서는
 	// mgmt 가 행의 대부분**이라 데이터 IO 의 분모가 통째로 흔들린다.
-	// COALESCE 인 이유 — 다른 trace_type parquet 과 union 하면 is_mgmt 가 NULL 이다.
-	if fsio.isUFS {
-		where = addCondition(where, "COALESCE(is_mgmt, FALSE) = FALSE")
-	}
+	where = cols.ExcludeMgmt(where)
 
 	stats := &pb.TraceStats{}
 
@@ -828,29 +826,10 @@ func detectFsioSchema(db *sql.DB, glob string) fsioSchema {
 //   - fsio_block `io_type` 은 파서 정책상 **항상 빈 문자열**이라 cmd 축이 통째로 빈다.
 //     대신 `rwbs`("WS"/"R"/"D")가 분류 정보를 갖고 있다.
 func detectCmdColumn(db *sql.DB, glob string) string {
-	if f := detectFsioSchema(db, glob); f.any() {
-		// fsio_ufs 의 opcode 는 UInt8 이라 hex 문자열로 바꿔야 분류기와 맞는다.
-		//
-		// ⚠ 단, **ftrace 잡과 union 되면 opcode 가 VARCHAR 로 승격된다**
-		// (ftrace UFS 는 opcode 가 '0x2a' 문자열). 그 상태에서 to_hex 를 태우면
-		// 숫자가 아니라 **ASCII 바이트**를 인코딩한다 — '42' → '3432' → lpad(...,2)
-		// 로 잘려 '0x34' 라는 엉뚱한 cmd 가 나오고, 분류기가 전부 default 로 새서
-		// read/write 바이트가 0 이 된다. typeof 로 갈라 이미 문자열이면 그대로 쓴다.
-		// ⚠ CASE 의 두 갈래는 **둘 다 타입 검사를 통과해야 한다**. opcode 가 UTINYINT 일 때
-		// lower(opcode) 는 함수 매칭에 실패하므로 양쪽 모두 VARCHAR 로 캐스팅해 둔다.
-		// to_hex(VARCHAR) 는 ASCII 를 인코딩하지만 그 갈래는 실행되지 않는다.
-		hexOpcode := "CASE WHEN typeof(opcode) = 'VARCHAR' " +
-			"THEN lower(CAST(opcode AS VARCHAR)) " +
-			"ELSE '0x' || lpad(lower(to_hex(CAST(opcode AS UTINYINT))), 2, '0') END"
-		switch {
-		case f.isUFS && f.isBlock:
-			// 여러 잡을 합쳐 두 스키마가 섞인 경우 — 있는 쪽을 쓴다.
-			return fmt.Sprintf("COALESCE(%s, rwbs)", hexOpcode)
-		case f.isUFS:
-			return hexOpcode
-		default:
-			return "rwbs"
-		}
+	// fsio 계열의 컬럼식은 fsio_cols.go 가 정본이다.
+	if c := newFsioCols(db, glob); c.schema.any() {
+		// 데이터 IO 통계용 — mgmt 는 어차피 ExcludeMgmt 로 빠지므로 hex 만 쓴다.
+		return c.CmdExpr(false)
 	}
 
 	// With union_by_name=true, both columns may exist (NULL for missing rows).
