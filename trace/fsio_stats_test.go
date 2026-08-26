@@ -656,3 +656,142 @@ func TestMgmtStatsCarriesFullPercentiles(t *testing.T) {
 		t.Fatal("paired mgmt 가 하나도 없다 — 테스트가 무의미하다")
 	}
 }
+
+// TestSampledPathNonDivisibleGroupSizes — 그룹 크기가 예산으로 딱 안 나눠지는
+// 경우에도 표본이 나오는지.
+//
+// **이 테스트가 없어서 실제 버그를 놓쳤다.** grp_div 를 DuckDB 의 `/` 로 쓰면
+// DOUBLE 나눗셈이라 1.6 같은 값이 나오고, `rn % 1.6 = 0` 은 정수 rn 에 거의
+// 안 맞아 표본이 0행이 된다. 그런데 초기 테스트는 2000/50, 20/50 처럼 딱
+// 떨어지는 값이라 통과했다 — 나눗수가 정수로 나와 버그가 안 드러났다.
+//
+// 여기서는 일부러 안 나눠지는 크기(97, 1103)를 쓴다.
+func TestSampledPathNonDivisibleGroupSizes(t *testing.T) {
+	// 데이터 IO 194행(97쌍), mgmt 2206행(1103쌍) — 어떤 예산으로도 딱 안 떨어진다.
+	dir := writeSkewedFsioParquet(t, 97, 1103)
+
+	orig := maxEventsForTest
+	maxEventsForTest = 300 // 그룹당 150 → data 194//150=1, mgmt 2206//150=14
+	defer func() { maxEventsForTest = orig }()
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.IsSampled {
+		t.Fatal("샘플링 경로를 안 탔다")
+	}
+
+	var dataIO, mgmt int
+	for _, e := range resp.Events {
+		if e.IsMgmt {
+			mgmt++
+		} else {
+			dataIO++
+		}
+	}
+	t.Logf("표본: 데이터 IO %d행 (원본 194), mgmt %d행 (원본 2206)", dataIO, mgmt)
+
+	// DOUBLE 나눗셈이면 여기서 한쪽이 0 이 된다.
+	if dataIO == 0 {
+		t.Error("데이터 IO 표본이 0행 — 나눗수가 정수가 아니라 modulo 가 안 맞는다")
+	}
+	if mgmt == 0 {
+		t.Error("mgmt 표본이 0행 — 나눗수가 정수가 아니라 modulo 가 안 맞는다")
+	}
+	// 소수 그룹이 다수 그룹에 눌리지 않아야 한다.
+	if dataIO < 50 {
+		t.Errorf("데이터 IO 표본 %d행 — 예산 배분이 비율에 눌렸다", dataIO)
+	}
+}
+
+// TestSampledPathMixedUfsBlock — fsio_ufs + fsio_block 동시 조회 + 샘플링.
+//
+// 이 조합에서 detectLbaColumn 은 컬럼이 아니라 **식**(`COALESCE(lba, sector)`)을
+// 돌려준다. 별칭을 식 앞에 붙이면 `b.COALESCE(lba, sector)` 가 되어
+// "Scalar Function with name coalesce does not exist" 로 터진다.
+//
+// checkMixedFamily 가 두 fsio 타입을 같은 계열로 허용하므로 실제로 도달 가능하고,
+// **50만 행을 넘겨 샘플링 경로를 타야만** 드러난다 — 전체 조회는 prefix 가 ""
+// 라서 멀쩡하다. 그래서 대용량 트레이스에서만 나타나는 종류다.
+func TestSampledPathMixedUfsBlock(t *testing.T) {
+	ufsDir := writeFsioParquet(t, "fsio_ufs")
+	var blockDir string
+
+	// BLK 행이 있는 별도 로그 — 공용 fixture 에는 BLK 가 없어 block parquet 이
+	// 아예 안 생긴다 (그러면 lba/sector 가 같이 있는 상황이 안 만들어져서
+	// 이 테스트가 무의미해진다).
+	blockDir = t.TempDir()
+	blockLog := filepath.Join(blockDir, "trace.log")
+	var bb strings.Builder
+	for i := 0; i < 4; i++ {
+		ts := 12345.0 + float64(i)*0.01
+		bb.WriteString(fmt.Sprintf("%.6f\tBLK\t4521\t4521\t3\tmysqld\tvfs_write\tblock_rq_issue\text4\t8\t32\t983241\t16384\t%d\t/data/ibdata1\t0x10000\trwbs=WS\n", ts, 8192000+i*32))
+		bb.WriteString(fmt.Sprintf("%.6f\tBLK\t4521\t4521\t1\tmysqld\tvfs_write\tblock_rq_complete\text4\t8\t32\t983241\t16384\t%d\t/data/ibdata1\t0x10000\trwbs=WS\n", ts+0.002, 8192000+i*32))
+	}
+	if err := os.WriteFile(blockLog, []byte(bb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(blockLog, blockDir, "fsio_block", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := maxEventsForTest
+	maxEventsForTest = 4
+	defer func() { maxEventsForTest = orig }()
+
+	resp, err := GetRawData([]*TraceJobInfo{
+		{Dir: ufsDir, TraceType: "fsio_ufs"},
+		{Dir: blockDir, TraceType: "fsio_block"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("혼합 스키마 샘플링 실패: %v", err)
+	}
+	if len(resp.Events) == 0 {
+		t.Error("혼합 스키마 샘플링 결과가 비었다")
+	}
+}
+
+// TestBlockUnfinishedReachesWire — fsio_block 의 미완결 IO 플래그가 wire 까지
+// 오는지.
+//
+// UI 에 "unfin" 열을 만들어 놓고 서버가 값을 안 실으면 **항상 빈칸**이라,
+// DtoC 0 인 미완결 행이 "엄청 빠른 IO" 로 읽힌다 — UFS 에서 막으려던 바로 그
+// 오독이 block 에서 그대로 일어난다. 열만 있고 값이 없는 게 더 나쁘다.
+func TestBlockUnfinishedReachesWire(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "trace.log")
+	var b strings.Builder
+	// 짝이 맞는 1쌍 + complete 없는 issue 2건.
+	b.WriteString("100.000000\tBLK\t1\t1\t0\tapp\tvfs_write\tblock_rq_issue\text4\t8\t32\t1\t4096\t1000\t/data/a\t0x10000\trwbs=WS\n")
+	b.WriteString("100.001000\tBLK\t1\t1\t0\tapp\tvfs_write\tblock_rq_complete\text4\t8\t32\t1\t4096\t1000\t/data/a\t0x10000\trwbs=WS\n")
+	b.WriteString("100.002000\tBLK\t1\t1\t0\tapp\tvfs_write\tblock_rq_issue\text4\t8\t32\t1\t4096\t2000\t/data/b\t0x10000\trwbs=WS\n")
+	b.WriteString("100.003000\tBLK\t1\t1\t0\tapp\tvfs_read\tblock_rq_issue\text4\t8\t32\t1\t4096\t3000\t/data/c\t0x1\trwbs=R\n")
+	// 시간 만료(5초)로 닫히도록 한참 뒤 행을 하나 더 둔다.
+	b.WriteString("200.000000\tBLK\t1\t1\t0\tapp\tvfs_write\tblock_rq_issue\text4\t8\t32\t1\t4096\t4000\t/data/d\t0x10000\trwbs=WS\n")
+	if err := os.WriteFile(logFile, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "fsio_block", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_block"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var unfinished int
+	for _, e := range resp.Events {
+		if e.IsUnfinished {
+			unfinished++
+			if e.Dtoc != 0 {
+				t.Errorf("미완결 행에 dtoc 가 채워졌다: %f", e.Dtoc)
+			}
+		}
+	}
+	if unfinished == 0 {
+		t.Error("fsio_block 의 is_unfinished 가 wire 로 안 온다 — Raw Data 의 unfin 열이 항상 빈칸이 된다")
+	}
+	t.Logf("미완결 %d행 표시됨", unfinished)
+}

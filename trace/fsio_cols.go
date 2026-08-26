@@ -148,11 +148,13 @@ func (c fsioCols) rawCmdExpr(cmdCol, prefix string) string {
 
 // rawLbaExpr — Raw Data / 차트용 lba 식. mgmt 행은 NULL.
 //
-// lbaCol 은 스키마마다 다르다(fsio_ufs=lba, fsio_block=sector) — 호출부가
-// detectLbaColumn 으로 고른 걸 받아 mgmt NULL 만 씌운다.
-func (c fsioCols) rawLbaExpr(lbaCol, prefix string) string {
+// ⚠ lbaExpr 은 **이미 별칭이 적용된 완성 식**이어야 한다 (detectLbaColumnPrefixed).
+// 여기서 prefix 를 앞에 덧붙이면 두 스키마가 섞였을 때
+// `b.COALESCE(lba, sector)` 가 되어 SQL 이 터진다. prefix 는 mgmt 판정
+// 컬럼(is_mgmt)을 한정하는 데만 쓴다.
+func (c fsioCols) rawLbaExpr(lbaExpr, prefix string) string {
 	if !c.schema.isUFS {
-		return prefix + lbaCol
+		return lbaExpr
 	}
-	return c.mgmtNullExpr(prefix+lbaCol, "UBIGINT", prefix)
+	return c.mgmtNullExpr(lbaExpr, "UBIGINT", prefix)
 }

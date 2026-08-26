@@ -160,7 +160,14 @@ WITH base AS (
     -- 나눗수 21 이면 rn %% 21 = 0 이 **한 번도 안 맞아 0행**이 된다.
     -- 그룹 크기에 비례한 나눗수를 써야 각 그룹이 자기 안에서 1/N 로 솎인다.
     -- greatest(...,1) — 그룹이 예산보다 작으면 나눗수 1(전량 유지).
-    greatest(count(*) OVER (PARTITION BY %s) / %d, 1) as grp_div,
+    --
+    -- ⚠⚠ **정수 나눗셈(//) 이어야 한다.** DuckDB 의 / 는 DOUBLE 나눗셈이라
+    -- 800000/500000 = 1.6 이 되고, rn %% 1.6 = 0 은 정수 rn 에 **거의 안 맞아
+    -- 표본이 0행**이 된다. 게다가 그룹마다 소수부가 달라 결과가 뒤집힌다 —
+    -- 실측: 데이터 IO 900k(div 3.6)→0행, mgmt 100k(div 0.4→greatest→1.0)→전량.
+    -- 즉 mgmt 를 살리려던 분리가 **데이터 IO 를 전멸시키는** 정반대 결과가 됐다.
+    -- (초기 테스트는 2000/50, 20/50 이 딱 떨어지는 값이라 통과했다.)
+    greatest(count(*) OVER (PARTITION BY %s) // %d, 1) as grp_div,
     NTILE(%d) OVER (ORDER BY time) as bucket
   FROM read_parquet(%s) %s
 ),
@@ -215,7 +222,7 @@ LIMIT %d`,
 		maxEventsForTest/10+1, // ~50k buckets for extremes (테스트에선 훅을 따른다)
 		glob, filterCond,
 		lbaCol, lbaCol, lbaCol, lbaCol,
-		cols.rawLbaExpr(lbaCol, "b."), cols.mgmtNullExpr("b.qd", "UINTEGER", "b."),
+		cols.rawLbaExpr(detectLbaColumnPrefixed(db, glob, "b."), "b."), cols.mgmtNullExpr("b.qd", "UINTEGER", "b."),
 		cols.rawCmdExpr(cmdCol, "b."), cols.mgmtNullExpr("b.size", "UINTEGER", "b."),
 		fsioExtraSelectPrefixed(fsio, "b."),
 		maxEventsForTest)
@@ -273,6 +280,11 @@ var fsioUfsExtraCols = []string{
 var fsioBlockExtraCols = []string{
 	"aligned", "line_number", "pid", "tid", "comm", "syscall", "fs", "ino", "name", "io_flags",
 	"devmajor", "devminor", "rwbs", "flags", "extra",
+	// block 도 미완결 IO 가 있다 — (dev, sector, rwbs) 는 재사용 신호가 없어
+	// 시간 만료로 닫는다 (trace/parser/fsio_block.go). UFS 쪽만 넣고 여기를
+	// 빠뜨리면 Raw Data 의 "unfin" 열이 **항상 빈칸**이라, DtoC 0 인 미완결 행이
+	// "엄청 빠른 IO" 로 읽힌다 — UFS 에서 막으려던 바로 그 오독이다.
+	"is_unfinished",
 }
 
 // fsioExtraSelect — 확장 컬럼의 SELECT 절 조각. fsio 가 아니면 빈 문자열.
@@ -339,7 +351,7 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 				&isMgmt, &mgmtName, &upiuResp, &upiuStatus,
 				&qOpcode, &qIdn, &qIndex, &qSelector, &uicCmd, &isUnfinished)
 		} else if f.isBlock {
-			dest = append(dest, &devmajor, &devminor, &rwbs, &flags, &extra)
+			dest = append(dest, &devmajor, &devminor, &rwbs, &flags, &extra, &isUnfinished)
 		}
 
 		if err := rows.Scan(dest...); err != nil {
@@ -410,6 +422,7 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 			e.Rwbs = rwbs.String
 			e.Flags = flags.String
 			e.Extra = uint32(extra.Int64)
+			e.IsUnfinished = isUnfinished.Bool
 		}
 
 		events = append(events, e)
@@ -440,11 +453,25 @@ func scanEvents(db *sql.DB, q string) ([]*pb.TraceEvent, error) {
 }
 
 func detectLbaColumn(db *sql.DB, glob string) string {
+	return detectLbaColumnPrefixed(db, glob, "")
+}
+
+// detectLbaColumnPrefixed — 테이블 별칭(`b.`)을 붙인 lba 식.
+//
+// ⚠ 별칭을 **식 전체 앞에 붙이면 안 된다.** 두 스키마가 섞이면 반환값이
+// `COALESCE(lba, sector)` 라는 식이라, 앞에 붙이면 `b.COALESCE(lba, sector)` 가
+// 되어 "Scalar Function with name coalesce does not exist" 로 터진다.
+// 컬럼 이름 각각에 붙여야 한다.
+//
+// 이 조합(fsio_ufs + fsio_block 동시 조회)은 checkMixedFamily 가 같은 계열로
+// 허용하므로 실제로 도달 가능하고, **50만 행을 넘겨 샘플링 경로를 타야만**
+// 드러난다 (전체 조회는 prefix 가 "" 라 멀쩡하다).
+func detectLbaColumnPrefixed(db *sql.DB, glob, prefix string) string {
 	q := fmt.Sprintf(`SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet(%s) LIMIT 0)
 		WHERE column_name IN ('lba', 'sector')`, glob)
 	rows, err := db.Query(q)
 	if err != nil {
-		return "lba"
+		return prefix + "lba"
 	}
 	defer rows.Close()
 
@@ -461,15 +488,15 @@ func detectLbaColumn(db *sql.DB, glob string) string {
 		}
 	}
 	if hasLba && hasSector {
-		return "COALESCE(lba, sector)"
+		return fmt.Sprintf("COALESCE(%slba, %ssector)", prefix, prefix)
 	}
 	if hasLba {
-		return "lba"
+		return prefix + "lba"
 	}
 	if hasSector {
-		return "sector"
+		return prefix + "sector"
 	}
-	return "lba"
+	return prefix + "lba"
 }
 
 // setOptU32 — nullable 정수를 proto optional 필드에 옮긴다.
