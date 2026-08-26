@@ -63,6 +63,29 @@ export interface TraceJobMapping {
 	traceType: string;
 }
 
+/**
+ * StepBoundary — 시나리오 스텝 하나의 실행 구간.
+ *
+ * behavior 구간별 IO 분석의 시간 축이다. `startedMono`/`finishedMono` 는 parquet
+ * `time` 과 **같은 축**(기기 monotonic 초)이라 구간 질의에 그대로 쓸 수 있다.
+ *
+ * ⚠ mono 가 0 이면 clock offset 을 못 쟀거나 못 믿는다는 뜻 — 그 구간은 분할에
+ * 쓰지 않는다. 호스트 시각(startedAt/finishedAt)은 남아 있어 로그 대조에는 쓸 수 있다.
+ */
+export interface StepBoundary {
+	stepIndex: number;
+	loopIndex: number;
+	repeatIndex: number;
+	type: string;
+	label: string;
+	startedAt: number;
+	finishedAt: number;
+	startedMono: number;
+	finishedMono: number;
+	success: boolean;
+	error: string;
+}
+
 export interface BenchmarkResultItem {
 	deviceId: string;
 	tool: string;
@@ -73,6 +96,7 @@ export interface BenchmarkResultItem {
 	success: boolean;
 	error: string;
 	traceJobs?: TraceJobMapping[];
+	stepBoundaries?: StepBoundary[];
 }
 
 export interface BenchmarkResult {
@@ -525,6 +549,39 @@ export function getTraceResult(serverId: number, data: {
 }
 
 /**
+ * 잡별 시계 정합 상태.
+ *
+ * 스텝 구간 분할이 **가능한지**와 불가능하면 **왜인지**를 준다. 구간이 안 보일 때
+ * "기능이 사라진 것" 처럼 보이면 안 되므로, 화면이 이유를 그대로 인용한다.
+ */
+export interface ClockSyncOffset {
+	offset: number;
+	rttSec: number;
+	measuredAtSec: number;
+	samples: number;
+	uncertaintySec: number;
+}
+
+export interface ClockSyncInfo {
+	usable: boolean;
+	reason: string;
+	rttThresholdSec: number;
+	/** 측정이 아예 없으면 없는 필드 (0 을 "완벽" 으로 오독하지 않도록 서버가 생략한다). */
+	uncertaintySec?: number;
+	driftSec?: number;
+	notFound?: boolean;
+	start?: ClockSyncOffset;
+	stop?: ClockSyncOffset;
+}
+
+export function getTraceClockSync(
+	serverId: number,
+	jobIds: string[]
+): Promise<{ clockSync: Record<string, ClockSyncInfo> }> {
+	return post(`/agent/trace/clocksync?serverId=${serverId}`, { jobIds });
+}
+
+/**
  * I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나".
  *
  * fsio_* 산출물에서만 의미가 있다. ftrace 산출물로 호출하면 대부분의 축이
@@ -610,6 +667,8 @@ export interface JobExecutionRecord {
 	workloadNote?: string | null;
 	// 이 job 에 연결된 trace job 매핑 (영속화) — 만료된 job 도 기존 trace UI 로 진입 가능
 	traceJobs?: TraceJobMapping[] | null;
+	// 스텝 구간 (영속화) — 만료된 job 도 Behavior 탭을 볼 수 있게. traceJobs 와 같은 이유.
+	stepBoundaries?: StepBoundary[] | null;
 }
 
 export interface JobExecutionPage {

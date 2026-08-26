@@ -143,7 +143,7 @@
         },
         "sourceWidth": { "type": "integer", "description": "좌표 tap 스텝 기준 해상도. 다르면 경고." },
         "sourceHeight": { "type": "integer" },
-        "traceType": { "type": "string", "enum": ["ufs", "block", "both"] }
+        "traceType": { "type": "string", "enum": ["ufs", "block", "both", "fsio_ufs", "fsio_block"] }
       }
     },
     "origin": {

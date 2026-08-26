@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agent/artifacts"
 	pb "agent/pb"
 	"agent/storage/sqlitedb"
 )
@@ -147,9 +148,16 @@ func (r *dbRecorder) OnResult(ctx context.Context, agent *DeviceAgentServer, job
 				slog.Debug("update job execution trace_jobs failed", "jobId", jobID, "error", err)
 			}
 		}
+		// 스텝 구간 영속화 — 같은 이유다. 구간이 메모리에만 있으면 잡 만료 후
+		// parquet 은 남는데 Behavior 탭만 사라진다.
+		if sb := collectStepBoundariesFrom(resp); sb != "" {
+			if err := r.db.UpdateJobExecutionStepBoundaries(ctx, jobID, sb); err != nil {
+				slog.Debug("update job execution step_boundaries failed", "jobId", jobID, "error", err)
+			}
+		}
 		// archive_base 가 설정돼 있으면 풀 결과 JSON 도 디스크에 자동 저장.
 		if r.archiveBase != "" {
-			r.autoArchiveBenchmarkFrom(jobID, resp)
+			r.autoArchiveBenchmarkFrom(agent, jobID, jobType, resp)
 		}
 		return
 	}
@@ -164,13 +172,18 @@ func (r *dbRecorder) OnResult(ctx context.Context, agent *DeviceAgentServer, job
 }
 
 // autoArchiveBenchmarkFrom — 이미 fetch 한 결과를
-// {archiveBase}/auto/{yyyy-mm-dd}/{jobId}/{deviceId}_result.json 으로 저장.
+// 잡 산출물 폴더(jobs/<이름>/)에 {deviceId}_result.json 으로 저장 — trace 와 같은 곳.
 // 수동 upload (`/api/agent/upload/benchmark`) 와 폴더 분리.
-func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmarkResultResponse) {
+func (r *dbRecorder) autoArchiveBenchmarkFrom(agent *DeviceAgentServer, jobID, jobType string, resp *pb.GetBenchmarkResultResponse) {
 	if resp == nil || len(resp.GetResults()) == 0 {
 		return
 	}
-	dstDir := filepath.Join(r.archiveBase, "auto", time.Now().Format("2006-01-02"), jobID)
+	// 결과 JSON 을 **trace 와 같은 잡 폴더**에 둔다.
+	//
+	// 예전엔 archive/auto/<날짜>/<jobId>/ 였는데, trace 는 agent_trace/<traceJobId>/ 라
+	// 같은 잡이 두 트리로, 그것도 **서로 다른 ID 이름**으로 갈라졌다. 폴더째 넘기는
+	// 것만으로 재현·공유가 되게 한곳에 모은다.
+	dstDir := r.jobArtifactDir(agent, jobID, jobType)
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		slog.Warn("auto archive mkdir failed", "jobId", jobID, "error", err)
 		return
@@ -189,6 +202,72 @@ func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmar
 		}
 		slog.Info("benchmark result auto-archived", "jobId", jobID, "deviceId", br.GetDeviceId(), "path", fullPath)
 	}
+}
+
+// jobArtifactDir — 이 잡의 산출물 폴더. DB 에서 시각·타입·이름을 읽어 이름을 만든다.
+//
+// 잡이 DB 에 없으면(드묾) 기존 방식으로 폴백한다 — 저장을 아예 못 하는 것보다 낫다.
+func (r *dbRecorder) jobArtifactDir(agent *DeviceAgentServer, jobID, jobType string) string {
+	// ⚠ **잡이 이미 정한 폴더를 그대로 쓴다.** 각자 계산하면 시각이 갈린다 —
+	// 폴더 이름은 초 단위라, 시나리오가 첫 trace_start 에 닿기까지 1초만 걸려도
+	// result.json 과 trace 가 다른 폴더로 떨어진다. 이 기능이 없애려던 바로 그 증상이다.
+	if agent != nil && agent.orchestrator != nil {
+		if job, err := agent.orchestrator.GetJob(jobID); err == nil {
+			if dir := job.ArtifactDir(); dir != "" {
+				return dir
+			}
+			// trace 를 안 쓴 잡은 폴더가 아직 없다 — 잡 시각으로 만든다(같은 규칙).
+			return artifacts.JobArtifactDir(r.archiveBase, job.StartedAt(), jobType, job.Name, jobID)
+		}
+	}
+
+	// 잡이 메모리에 없으면(만료 등) DB 시각으로 폴백한다.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if e, err := r.db.FindJobExecutionByJobID(ctx, jobID); err == nil && e != nil {
+		started := e.CreatedAt
+		if e.StartedAt.Valid {
+			started = e.StartedAt.Time
+		}
+		return artifacts.JobArtifactDir(r.archiveBase, started, e.Type, e.JobName.String, jobID)
+	}
+	slog.Debug("job execution 조회 실패 — 폴백 경로 사용", "jobId", jobID)
+	return filepath.Join(r.archiveBase, "jobs", artifacts.JobDirName(time.Now(), "", "", jobID))
+}
+
+// collectStepBoundariesFrom — 결과에서 스텝 구간을 모아 JSON array 문자열로 반환.
+// FE StepBoundary shape 과 동일 (rest_convert.go 의 benchmarkResultToMap 와 같은 키).
+// 구간이 없으면 빈 문자열 — 단독 trace 나 구버전 잡이 여기 해당한다.
+func collectStepBoundariesFrom(resp *pb.GetBenchmarkResultResponse) string {
+	if resp == nil || len(resp.GetResults()) == 0 {
+		return ""
+	}
+	out := make([]map[string]any, 0)
+	for _, br := range resp.GetResults() {
+		for _, b := range br.GetStepBoundaries() {
+			out = append(out, map[string]any{
+				"stepIndex":    b.GetStepIndex(),
+				"loopIndex":    b.GetLoopIndex(),
+				"repeatIndex":  b.GetRepeatIndex(),
+				"type":         b.GetType(),
+				"label":        b.GetLabel(),
+				"startedAt":    b.GetStartedAt(),
+				"finishedAt":   b.GetFinishedAt(),
+				"startedMono":  b.GetStartedMono(),
+				"finishedMono": b.GetFinishedMono(),
+				"success":      b.GetSuccess(),
+				"error":        b.GetError(),
+			})
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // collectTraceJobsFrom — 이미 fetch 한 결과에서 trace job 매핑을 모아 JSON array 문자열로 반환.

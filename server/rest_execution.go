@@ -209,6 +209,7 @@ func executionToMap(e *sqlitedb.JobExecution) map[string]any {
 		"traceParseError":     nullString(e.TraceParseError),
 		"workloadNote":        nullString(e.WorkloadNote),
 		"traceJobs":           nullJSONArray(e.TraceJobs),
+		"stepBoundaries":      nullJSONArray(e.StepBoundaries),
 	}
 }
 

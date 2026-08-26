@@ -33,7 +33,7 @@ Go 기반 Android 디바이스 평가 에이전트의 상세 문서.
 - **[자동 실행](workload/04-automation.md)** — 사람이 정의한 워크로드를 자동 반복·순회
 - **[발굴 워크북 (how-to)](workload/05-authoring-howto.md)** — 우리 도구로 시나리오를 직접 조립하는 절차
 - **[시나리오 이식성 설계](workload/06-portability.md)** — export/import 로 다른 환경·팀·git 재사용
-- ADR: **[0001 시나리오 이식성](adr/0001-scenario-portability.md)** · 스키마: [`schemas/scenario.schema.json`](schemas/scenario.schema.json) · 예제: [`examples/`](examples/)
+- ADR: **[0001 시나리오 이식성](adr/0001-scenario-portability.md)** · 스키마: [`schemas/scenario.schema.json`](schemas/scenario.schema.json) · 예제: [`examples/`](examples/README.md) (UX 워크로드 6종 + clock offset 검증 3종)
 
 ### 운영
 - **[배포](11-deployment.md)** — 출장 패키지 만들기, Windows 후속 지원

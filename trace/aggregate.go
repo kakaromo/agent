@@ -269,7 +269,7 @@ func RunAggregation(infos []*TraceJobInfo, tool string, params map[string]any) (
 			res.Note = "이 trace 에는 시간 컬럼이 없어 구간으로 좁힐 수 없습니다"
 			return res, nil
 		}
-		where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
+		where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
 		scoped, err := querySliceSummary(db, glob, where, cmdCol)
 		if err != nil {
 			return nil, fmt.Errorf("구간 집계 실패: %w", err)

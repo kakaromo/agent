@@ -9,6 +9,7 @@
 		type Device,
 		type JobProgress,
 		type DeviceMetricsData,
+		type StepBoundary,
 		fetchExecutions
 	} from '$lib/api/agent.js';
 	import { onDestroy } from 'svelte';
@@ -67,6 +68,8 @@
 	let traceSheetOpen = $state(false);
 	let traceJobIds = $state<string[]>([]);
 	let traceMappings = $state<{ traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]>([]);
+	// 스텝 구간 — Charts 구간 밴드 + Behavior 탭의 시간 축.
+	let traceBoundaries = $state<StepBoundary[]>([]);
 	let traceDeviceId = $state<string | null>(null);
 
 	// ── Storage Info (선택된 모든 디바이스의 df /data 정보) ──
@@ -559,6 +562,12 @@
 		if (jobType === 'trace') {
 			viewingServerId = serverId;
 			traceJobIds = [jobId];
+			// ⚠ 이전 시나리오의 매핑/구간을 **반드시 지운다.** 안 지우면 단독 trace 에
+			// 남의 스텝 구간 밴드가 그려지는데, mono 축이 다른 잡이라 위치가 임의로
+			// 어긋난다. 그런데도 그래프는 정상으로 보여 눈으로 못 걸러낸다.
+			traceMappings = [];
+			traceBoundaries = [];
+			traceDeviceId = null;
 			traceSheetOpen = true;
 			return;
 		}
@@ -568,11 +577,12 @@
 		resultDetailSheetOpen = true;
 	}
 
-	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]) {
+	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[]) {
 		viewingServerId = serverId;
 		traceDeviceId = deviceId;
 		traceJobIds = jobIds;
 		traceMappings = mappings ?? [];
+		traceBoundaries = boundaries ?? [];
 		traceSheetOpen = true;
 	}
 
@@ -746,7 +756,7 @@
 	serverId={viewingServerId}
 	jobId={viewingJobId}
 	{activeJobs}
-	onViewTrace={(deviceId, jobIds, mappings) => viewTraceResult(viewingServerId!, deviceId, jobIds, mappings)}
+	onViewTrace={(deviceId, jobIds, mappings, boundaries) => viewTraceResult(viewingServerId!, deviceId, jobIds, mappings, boundaries)}
 />
 
 <AgentTraceResultSheet
@@ -754,6 +764,7 @@
 	serverId={viewingServerId}
 	jobIds={traceJobIds}
 	mappings={traceMappings}
+	boundaries={traceBoundaries}
 />
 
 <AgentScreenSheet

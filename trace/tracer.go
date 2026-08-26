@@ -39,6 +39,13 @@ type TraceJob struct {
 	FinishedAt int64
 	Error      string
 
+	// ClockSync — 호스트 wall clock ↔ 기기 monotonic 오프셋 (시작/종료 2회 측정).
+	//
+	// parquet `time` 이 기기 monotonic 절대초라, 시나리오 스텝 경계(호스트 wall clock)를
+	// 같은 축으로 옮기려면 이 값이 필요하다. 측정 실패 시 nil 이며 그때는 구간 분할만
+	// 비활성화된다 — 수집 자체는 영향받지 않는다. 상세는 clockoffset.go.
+	ClockSync TraceClockSync
+
 	// internal processes
 	adbCancel    context.CancelFunc
 	adbCmd       *exec.Cmd
@@ -75,6 +82,8 @@ type Manager struct {
 	adbMgr     *adb.Manager
 	toolsDir   string
 	outputBase string
+	// searchRoots — 재시작 후 잡 폴더 안의 trace 를 찾기 위한 추가 루트 (AddSearchRoot).
+	searchRoots []string
 }
 
 func NewManager(adbMgr *adb.Manager, toolsDir, traceDir string) *Manager {
@@ -116,7 +125,13 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	defer setupCancel()
 
 	jobID := uuid.New().String()
-	outputDir := filepath.Join(m.outputBase, jobID)
+	// 산출물 위치. 시나리오가 지정하면 그 잡 폴더 안에 모은다 — 결과 JSON 과 trace 가
+	// 한곳에 있어야 폴더째 넘기는 것만으로 재현·공유가 된다(server/jobdir.go 참고).
+	// ⚠ output_dir 은 **gRPC 로 들어오는 경로**다. 사무실 모드는 0.0.0.0 바인딩에
+	// 인증이 없어, 검사 없이 쓰면 임의 위치에 디렉토리를 만들고 로그를 쓰게 된다.
+	// 허용된 루트(outputBase 또는 등록된 검색 루트) 밑인지 확인한다.
+	outBase := m.resolveOutputBase(req.GetOutputDir())
+	outputDir := filepath.Join(outBase, jobID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir output: %w", err)
 	}
@@ -194,11 +209,55 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("start collector: %w", err)
 	}
 
+	// clock offset 측정 — **collector 가 실제로 붙은 뒤**에 잰다.
+	//
+	// 여기가 트레이스의 시간 원점에 가장 가까운 지점이다. 예전엔 collector 기동
+	// **전**에 쟀는데, fsio 는 512MB ringbuf 할당 + attach 에 수 초가 걸리고 그 시간이
+	// 메모리 상태에 따라 요동친다 — 그만큼 측정 시점이 원점에서 떨어졌다.
+	// startFsioCollector 가 attach 완료를 기다렸다 리턴하므로 이 자리가 정확하다.
+	//
+	// 실패해도 진행한다 — 구간 분할만 못 하고 수집은 정상이다.
+	//
+	// ⚠ 측정에는 **자체 컨텍스트**를 준다. setupCtx(30s)는 이벤트 enable/fsio push 가
+	// 이미 상당량 써버린 상태라, 그걸 물려받으면 남은 시간만큼만 재고 루프가 잘린다 —
+	// 표본이 1개로 줄어 최소값 채택이 무력해지는데도 `Usable()` 은 true 를 준다.
+	//
+	// ⚠ job 은 이미 m.jobs 에 등록돼 있어 다른 goroutine 이 읽을 수 있다 — 반드시
+	// 락 안에서 쓴다. adb 왕복은 락 **밖**에서 끝내고 대입만 락 안에서 한다
+	// (락 보유 중 외부 I/O 금지).
+	offCtx, offCancel := context.WithTimeout(context.Background(), MeasureBudget)
+	startOffset := MeasureClockOffset(offCtx, md.Device)
+	offCancel()
+	job.Mu.Lock()
+	job.ClockSync.Start = startOffset
+	sync := job.ClockSync
+	job.Mu.Unlock()
+	SaveClockSync(outputDir, sync)
+
 	return m.finishStart(job, adbCmd, adbCancel, logFd)
 }
 
 // enableFtraceEvents — ftrace 계열 trace_type 의 이벤트를 켠다.
 func enableFtraceEvents(ctx context.Context, md *adb.ManagedDevice, tracingDir, traceType string) {
+	// trace_clock 을 boot 로 고정한다.
+	//
+	// ⚠ 기본값 `local` 은 sched_clock 기반이라 **suspend 중 멈춘다.** 반면 스텝 경계를
+	// 옮길 때 쓰는 `/proc/uptime` 은 CLOCK_BOOTTIME(suspend 포함)이다. 그대로 두면
+	// 두 축이 **기기가 잠들어 있던 시간만큼** 어긋난다 — Android 는 화면만 꺼도
+	// suspend 하므로 실기기에선 사실상 항상 발생한다.
+	//
+	// 더 나쁜 건 이 어긋남을 drift 검사가 **못 잡는다**는 점이다. 시작·종료 probe 가
+	// 둘 다 같은 boottime 을 읽어 offset 이 같은 크기로 틀리므로 drift ≈ 0 이 나오고
+	// Usable() 은 true 를 준다. 구간이 통째로 밀려도 그래프는 정상으로 보인다.
+	//
+	// fsiotrace 는 이미 CLOCK_BOOTTIME 으로 출력한다(`--clock` 기본값 boot). 여기서
+	// ftrace 도 boot 로 맞추면 두 수집 경로와 호스트 측정이 **모두 같은 축**이 된다.
+	if _, err := md.Device.Shell(ctx, fmt.Sprintf("echo boot > %s/trace_clock", tracingDir)); err != nil {
+		// 실패해도 수집은 진행한다 — 다만 구간 분할은 못 믿는다.
+		slog.Warn("trace_clock 을 boot 로 설정하지 못했다; 스텝 구간이 suspend 시간만큼 밀릴 수 있다",
+			"tracing_dir", tracingDir, "error", err)
+	}
+
 	switch traceType {
 	case "ufs":
 		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))
@@ -315,10 +374,59 @@ func (m *Manager) StopTrace(jobID string) error {
 
 	slog.Info("trace collection stopped, parsing in background", "job_id", jobID)
 
-	// 3. 백그라운드에서 parquet-only 일괄 파싱 1회 실행
+	// 3. clock offset 2차 측정 (drift 확인) — **백그라운드**.
+	//
+	// StopTrace 는 "adb kill 은 동기, 나머지는 즉시 리턴" 이 계약이고 REST
+	// `POST /trace/{id}/stop` 이 여기서 블록된다. 측정을 동기로 두면 기기가 응답을
+	// 멈춘 경우(정지를 누르는 흔한 이유다) 응답이 그만큼 늦어진다.
+	// 수집은 이미 끝나 데이터엔 영향이 없으므로 뒤로 뺀다.
+	go m.measureStopOffset(job, deviceID)
+
+	// 4. 백그라운드에서 parquet-only 일괄 파싱 1회 실행
 	go m.finalizeTrace(job)
 
 	return nil
+}
+
+// measureStopOffset — 종료 시점 offset 을 재고 drift 를 판정한다.
+//
+// 시작과 종료의 offset 이 크게 다르면 수집 중 시계가 움직였다는 뜻이라(NTP 동기화,
+// 슬립 복귀 등) 그 잡의 구간 분할은 못 믿는다. 한 번만 재면 이걸 못 잡아낸다 —
+// 구간이 통째로 밀려도 그래프는 정상으로 보이므로 검증에서 안 걸린다.
+func (m *Manager) measureStopOffset(job *TraceJob, deviceID string) {
+	md, err := m.adbMgr.GetDevice(deviceID)
+	if err != nil {
+		// 기기가 이미 빠진 경우. 시작 측정만으로 진행하지만, drift 검사를 **건너뛴
+		// 것**과 **통과한 것**은 다르다 — 조용히 넘어가면 나중에 구분이 안 된다.
+		slog.Warn("stop-side clock offset skipped (device unavailable); drift 미검증",
+			"job_id", job.ID, "device", deviceID, "error", err)
+		return
+	}
+
+	offCtx, offCancel := context.WithTimeout(context.Background(), MeasureBudget)
+	stopOffset := MeasureClockOffset(offCtx, md.Device)
+	offCancel()
+
+	job.Mu.Lock()
+	job.ClockSync.Stop = stopOffset
+	sync := job.ClockSync
+	outputDir := job.OutputDir
+	job.Mu.Unlock()
+
+	SaveClockSync(outputDir, sync)
+
+	usable, reason := sync.Usable()
+	drift, hasDrift := sync.DriftSec()
+	switch {
+	case !usable:
+		slog.Warn("clock sync unusable; 구간 분할 비활성화",
+			"job_id", job.ID, "drift_sec", drift, "has_drift", hasDrift, "reason", reason)
+	case hasDrift:
+		slog.Info("clock sync ok", "job_id", job.ID, "drift_sec", drift,
+			"uncertainty_sec", sync.UncertaintySec())
+	default:
+		slog.Warn("stop-side clock offset measurement failed; drift 미검증", "job_id", job.ID)
+	}
 }
 
 // finalizeTrace — StopTrace 후 백그라운드에서 1회 호출. trace.log → result_*.parquet
@@ -493,10 +601,94 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	return ch, nil
 }
 
+// resolveOutputBase — 요청이 준 산출물 루트를 검증한다.
+//
+// 빈 값이면 기본 위치. 값이 있으면 **허용된 루트 밑일 때만** 받아들이고, 아니면
+// 기본 위치로 되돌린다(요청을 실패시키지 않는다 — 수집 자체는 되게).
+func (m *Manager) resolveOutputBase(requested string) string {
+	if requested == "" {
+		return m.outputBase
+	}
+	abs, err := filepath.Abs(filepath.Clean(requested))
+	if err != nil {
+		slog.Warn("output_dir 해석 실패 — 기본 위치 사용", "requested", requested, "error", err)
+		return m.outputBase
+	}
+
+	m.mu.RLock()
+	allowed := append([]string{m.outputBase}, m.searchRoots...)
+	m.mu.RUnlock()
+
+	for _, root := range allowed {
+		if root == "" {
+			continue
+		}
+		rootAbs, err := filepath.Abs(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		// filepath.Rel 로 상위 탈출(".." 시작)을 잡는다 — 문자열 prefix 비교는
+		// "/data" 와 "/data-evil" 을 구분하지 못한다.
+		rel, err := filepath.Rel(rootAbs, abs)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return abs
+		}
+	}
+	slog.Warn("output_dir 이 허용된 루트 밖이다 — 기본 위치 사용",
+		"requested", requested, "allowed", allowed)
+	return m.outputBase
+}
+
+// AddSearchRoot — trace 산출물을 찾을 추가 루트를 등록한다.
+//
+// 시나리오가 trace 를 자기 잡 폴더에 쓰므로(StartTraceRequest.OutputDir), 재시작 후
+// 그걸 조회하려면 어디를 뒤질지 알아야 한다. outputBase 하나만 보면 못 찾는다.
+func (m *Manager) AddSearchRoot(dir string) {
+	if dir == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, d := range m.searchRoots {
+		if d == dir {
+			return
+		}
+	}
+	m.searchRoots = append(m.searchRoots, dir)
+}
+
+// findTraceDirByID — 등록된 루트 아래에서 이름이 traceJobID 인 디렉토리를 찾는다.
+//
+// glob 으로 한정된 깊이만 본다 — 전체 walk 는 archive 가 커질수록 느려진다.
+// 패턴: <root>/jobs/*/trace/<id>
+func (m *Manager) findTraceDirByID(jobID string) string {
+	if jobID == "" {
+		return ""
+	}
+	m.mu.RLock()
+	roots := append([]string(nil), m.searchRoots...)
+	m.mu.RUnlock()
+
+	for _, root := range roots {
+		hits, _ := filepath.Glob(filepath.Join(root, "jobs", "*", "trace", jobID))
+		for _, h := range hits {
+			if fi, err := os.Stat(h); err == nil && fi.IsDir() {
+				return h
+			}
+		}
+	}
+	return ""
+}
+
 // TraceJobInfo holds directory and type info for parquet file lookup.
 type TraceJobInfo struct {
 	Dir       string
 	TraceType string // "ufs", "block", "both"
+
+	// ClockSync — 이 잡의 시계 정합 정보. 스텝 경계(호스트 wall clock)를 parquet
+	// `time` 축(기기 monotonic)으로 옮길 때 쓴다. 측정이 없으면 zero value 이고,
+	// 그때는 `Usable()` 이 false 라 구간 분할이 비활성화된다.
+	ClockSync TraceClockSync
 }
 
 // GetTraceJobInfo returns the parquet directory and trace type for a job.
@@ -507,18 +699,33 @@ type TraceJobInfo struct {
 //  3. legacy realtime 서브폴더 (이전 실시간 잡 호환)
 func (m *Manager) GetTraceJobInfo(jobID string) (*TraceJobInfo, error) {
 	if job, err := m.GetJob(jobID); err == nil {
-		return &TraceJobInfo{Dir: job.OutputDir, TraceType: job.TraceType}, nil
+		job.Mu.Lock()
+		sync := job.ClockSync
+		job.Mu.Unlock()
+		return &TraceJobInfo{Dir: job.OutputDir, TraceType: job.TraceType, ClockSync: sync}, nil
 	}
 	baseDir := filepath.Join(m.outputBase, jobID)
+	if fi, err := os.Stat(baseDir); err != nil || !fi.IsDir() {
+		// 잡 폴더 안에 있는 경우(server/jobdir.go 의 <archiveBase>/jobs/<이름>/trace/<id>).
+		// agent 재시작 후엔 메모리에 없으니 여기서 찾아야 조회가 된다.
+		if found := m.findTraceDirByID(jobID); found != "" {
+			sync, _ := LoadClockSync(found)
+			return &TraceJobInfo{Dir: found, TraceType: detectTraceTypeFromDir(found), ClockSync: sync}, nil
+		}
+	}
 	if fi, err := os.Stat(baseDir); err == nil && fi.IsDir() {
 		// base dir 에 result_*.parquet 가 있으면 거기서, 없으면 legacy realtime/
 		legacy := filepath.Join(baseDir, "realtime")
 		if _, err := os.Stat(legacy); err == nil {
 			if matches, _ := filepath.Glob(filepath.Join(baseDir, "*.parquet")); len(matches) == 0 {
-				return &TraceJobInfo{Dir: legacy, TraceType: detectTraceTypeFromDir(legacy)}, nil
+				// clocksync.json 은 legacy 서브폴더가 아니라 base dir 에 있다.
+				sync, _ := LoadClockSync(baseDir)
+				return &TraceJobInfo{Dir: legacy, TraceType: detectTraceTypeFromDir(legacy), ClockSync: sync}, nil
 			}
 		}
-		return &TraceJobInfo{Dir: baseDir, TraceType: detectTraceTypeFromDir(baseDir)}, nil
+		// 메모리에 없는 잡 — agent 재시작 후 경로. 사이드카에서 오프셋을 복원한다.
+		sync, _ := LoadClockSync(baseDir)
+		return &TraceJobInfo{Dir: baseDir, TraceType: detectTraceTypeFromDir(baseDir), ClockSync: sync}, nil
 	}
 	return nil, fmt.Errorf("trace job not found: %s", jobID)
 }

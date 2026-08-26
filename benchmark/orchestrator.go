@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent/adb"
+	"agent/artifacts"
 	pb "agent/pb"
 
 	"github.com/google/uuid"
@@ -33,6 +34,88 @@ type Job struct {
 	RetryCount        int32
 	RetryDelaySeconds int32
 	activeTraceIDs    map[string]string // deviceID → trace job ID
+
+	// stepBoundaries — deviceID → 스텝 실행 구간 목록.
+	//
+	// behavior 구간별 IO 분석의 시간 축이다. activeTraceIDs 와 같은 패턴으로 Job 에
+	// 달아 두는 이유: storeResult 호출부가 10곳 가까이 되는데(성공/실패/취소 경로가
+	// 제각각) 인자로 넘기면 한 곳만 빠뜨려도 그 경로에서 조용히 구간이 사라진다.
+	stepBoundaries map[string][]*pb.StepBoundary
+
+	// startedAt — 잡 생성 시각. 산출물 폴더 이름의 기준이다.
+	//
+	// ⚠ time.Now() 를 쓰면 안 된다 — 폴더 이름을 만드는 곳이 둘(여기, rest_hook)인데
+	// 시나리오가 첫 trace_start 에 닿기까지 1초만 걸려도 초 단위 포맷에서 갈린다.
+	startedAt time.Time
+
+	// artifactDir — 이 잡의 산출물 폴더. 한 번 정하면 고정한다.
+	//
+	// ⚠ trace_start 마다 새로 계산하면 시각이 달라져 **같은 시나리오의 trace 가 서로
+	// 다른 폴더로 흩어진다.**
+	artifactDir string
+}
+
+// ensureArtifactDir — 이 잡의 산출물 폴더를 (처음 한 번만) 정해 돌려준다.
+func (j *Job) ensureArtifactDir(base, jobType string) string {
+	if base == "" {
+		return ""
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.artifactDir == "" {
+		j.artifactDir = artifacts.JobArtifactDir(base, j.startedAt, jobType, j.Name, j.ID)
+	}
+	return j.artifactDir
+}
+
+// StartedAt — 잡 생성 시각. 산출물 폴더 이름의 기준이다.
+func (j *Job) StartedAt() time.Time {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.startedAt
+}
+
+// ArtifactDir — 이미 정해진 이 잡의 산출물 폴더 (없으면 빈 문자열).
+//
+// 결과 JSON 을 쓰는 쪽(rest_hook)이 **같은 폴더**를 쓰게 하려고 노출한다. 각자
+// 계산하면 시각이 달라져(초 단위 포맷) 폴더가 갈린다 — 이 기능이 없애려던 바로 그 증상.
+func (j *Job) ArtifactDir() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.artifactDir
+}
+
+// appendStepBoundary — 스텝 하나의 실행 구간을 기록한다.
+func (j *Job) appendStepBoundary(deviceID string, b *pb.StepBoundary) {
+	if b == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.stepBoundaries == nil {
+		j.stepBoundaries = make(map[string][]*pb.StepBoundary)
+	}
+	j.stepBoundaries[deviceID] = append(j.stepBoundaries[deviceID], b)
+}
+
+// takeStepBoundaries — 기록된 구간을 꺼내 **비운다** (take 그대로의 의미).
+//
+// ⚠ 비우는 것이 핵심이다. runOnDeviceWithRetry 는 실패 시 같은 디바이스로 재실행하고
+// 시도마다 storeResult 를 부르는데, 비우지 않으면 **2회차 결과에 1회차 구간이 섞인다**
+// (스텝이 두 벌씩 나오고, 실패한 시도의 시간 범위가 그대로 남는다).
+//
+// 복사본을 돌려주는 이유는 호출자가 슬라이스를 들고 나가서다 — 내부 상태와 공유하지 않는다.
+func (j *Job) takeStepBoundaries(deviceID string) []*pb.StepBoundary {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	src := j.stepBoundaries[deviceID]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]*pb.StepBoundary, len(src))
+	copy(out, src)
+	delete(j.stepBoundaries, deviceID)
+	return out
 }
 
 func (j *Job) setActiveTrace(deviceID, traceJobID string) {
@@ -91,6 +174,14 @@ func (j *Job) closeSubscribers() {
 type TraceController interface {
 	StartTrace(ctx context.Context, req *pb.StartTraceRequest) (string, error)
 	StopTrace(jobID string) error
+
+	// HostToDeviceMonotonic — 호스트 wall clock(ms)을 그 trace 잡의 기기 monotonic
+	// 초로 옮긴다. parquet `time` 과 같은 축이라 스텝 경계를 구간 질의에 바로 쓸 수 있다.
+	//
+	// ok=false 면 offset 을 못 쟀거나 못 믿을 값이라는 뜻 — 그 경우 **구간 분할을
+	// 하지 않는다.** 틀린 offset 으로 나눈 구간은 통째로 밀려도 그래프가 정상으로
+	// 보여서 검증에서 안 걸러진다 (trace/clockoffset.go 참고).
+	HostToDeviceMonotonic(traceJobID string, hostMillis int64) (float64, bool)
 }
 
 // MacroController interface to avoid circular imports with macro package.
@@ -111,16 +202,20 @@ type JobFinishHook func(jobID, state, errMsg string)
 
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
-	mu          sync.RWMutex
-	jobs        map[string]*Job
-	manager     *adb.Manager
-	toolsDir    string
-	toolNames   map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
-	traceMgr    TraceController
-	macroMgr    MacroController
-	apkMgr      ApkController
-	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
-	finishHook  JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
+	mu        sync.RWMutex
+	jobs      map[string]*Job
+	manager   *adb.Manager
+	toolsDir  string
+	toolNames map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
+	traceMgr  TraceController
+
+	// artifactBase — 잡 산출물 루트. 설정되면 시나리오가 trace 를 자기 잡 폴더
+	// 안에 쓰게 한다(결과 JSON 과 한곳에 모으기 위함). 비면 기존 동작(trace_dir).
+	artifactBase string
+	macroMgr     MacroController
+	apkMgr       ApkController
+	deviceLocks  map[string]*sync.Mutex // per-device lock for "wait" policy
+	finishHook   JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
 }
 
 // SetJobFinishHook — job 종료 시 호출될 콜백 등록. standalone 에서 DB 영속화 연결용.
@@ -282,6 +377,7 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 		cancelFunc:        jobCancel,
 		RetryCount:        req.RetryCount,
 		RetryDelaySeconds: req.RetryDelaySeconds,
+		startedAt:         time.Now(),
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{
@@ -491,6 +587,9 @@ func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, r
 		Success:    success,
 		Error:      errMsg,
 		TraceJobs:  traceJobs,
+		// 구간은 인자가 아니라 Job 에서 꺼낸다 — 호출부가 많아 인자로 넘기면
+		// 빠뜨린 경로에서 조용히 사라진다.
+		StepBoundaries: job.takeStepBoundaries(deviceID),
 	}
 	job.mu.Lock()
 	job.Results[deviceID] = result
@@ -498,6 +597,19 @@ func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, r
 }
 
 // GetJob returns a job by ID.
+// SetArtifactBase — 잡 산출물 루트를 지정한다 (standalone 전용).
+func (o *Orchestrator) SetArtifactBase(dir string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.artifactBase = dir
+}
+
+func (o *Orchestrator) getArtifactBase() string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.artifactBase
+}
+
 func (o *Orchestrator) GetJob(jobID string) (*Job, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

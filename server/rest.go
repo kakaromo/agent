@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	pb "agent/pb"
+	"agent/trace"
 )
 
 // registerRESTRoutes 는 /api/agent/* 핸들러를 mux 에 마운트한다.
@@ -312,6 +313,9 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			case "attribution":
 				handleTraceAttribution(w, r, agent)
 				return
+			case "clocksync":
+				handleTraceClockSync(w, r, agent)
+				return
 			}
 		}
 		if len(parts) != 2 {
@@ -476,6 +480,89 @@ func handleTraceAttribution(w http.ResponseWriter, r *http.Request, agent *Devic
 		return
 	}
 	writeJSON(w, http.StatusOK, attributionToMap(resp))
+}
+
+// handleTraceClockSync: POST /api/agent/trace/clocksync body { jobIds }
+//
+// 잡별 시계 정합 상태를 돌려준다. 스텝 구간 분할이 **가능한지**와, 불가능하면 **왜인지**
+// 를 화면이 그대로 보여줄 수 있어야 한다 — 이유 없이 기능이 사라지면 버그로 읽히고,
+// 반대로 못 믿을 오프셋으로 조용히 구간을 나누면 **틀린 그래프가 정상으로 보인다.**
+//
+// 응답을 기존 /trace/result 에 합치지 않고 별도 endpoint 로 둔 이유: result 응답 shape 은
+// portal 과 1:1 이라 필드를 늘리면 그 계약이 깨진다.
+func handleTraceClockSync(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	body, err := readJSONBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "decode: "+err.Error())
+		return
+	}
+	jobIDs := stringSlice(body["jobIds"])
+	if len(jobIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "jobIds required")
+		return
+	}
+	if agent.traceMgr == nil {
+		writeError(w, http.StatusInternalServerError, "trace manager not configured")
+		return
+	}
+
+	out := make(map[string]any, len(jobIDs))
+	for _, id := range jobIDs {
+		info, err := agent.traceMgr.GetTraceJobInfo(id)
+		if err != nil {
+			// "잡이 없다" 와 "잡은 있는데 측정을 못 했다" 는 원인이 완전히 다르다
+			// (오타난 jobId vs 느린 기기). 같은 문구로 뭉개면 어디를 봐야 할지 모른다.
+			out[id] = map[string]any{
+				"usable":   false,
+				"notFound": true,
+				"reason":   "해당 trace 잡을 찾을 수 없습니다 (jobId 확인 필요).",
+			}
+			continue
+		}
+		out[id] = clockSyncToMap(info.ClockSync)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"clockSync": out})
+}
+
+// clockSyncToMap — TraceClockSync → JSON map. offset/RTT 원값까지 함께 싣는다
+// (실기기 검증 때 "왜 이 판정이 나왔나" 를 숫자로 확인해야 한다).
+func clockSyncToMap(s trace.TraceClockSync) map[string]any {
+	usable, reason := s.Usable()
+	m := map[string]any{
+		"usable":          usable,
+		"reason":          reason,
+		"rttThresholdSec": trace.OffsetRTTThresholdSec,
+	}
+	// ⚠ 측정이 아예 없으면 uncertaintySec 를 **싣지 않는다.** 이때 값이 0.0 인데,
+	// 그대로 내보내면 화면이 "±0s" = 완벽한 정확도로 읽는다 — 측정이 없는 잡에
+	// 가장 자신 있는 숫자가 붙는 셈이다. 없는 건 없다고 해야 한다.
+	if s.Start != nil || s.Stop != nil {
+		m["uncertaintySec"] = s.UncertaintySec()
+	}
+	if drift, ok := s.DriftSec(); ok {
+		m["driftSec"] = drift
+	}
+	if s.Start != nil {
+		m["start"] = offsetToMap(*s.Start)
+	}
+	if s.Stop != nil {
+		m["stop"] = offsetToMap(*s.Stop)
+	}
+	return m
+}
+
+func offsetToMap(c trace.ClockOffset) map[string]any {
+	return map[string]any{
+		"offset":         c.Offset,
+		"rttSec":         c.RTTSec,
+		"measuredAtSec":  c.MeasuredAtSec,
+		"samples":        c.Samples,
+		"uncertaintySec": c.UncertaintySec(),
+	}
 }
 
 // ---------- helpers ----------

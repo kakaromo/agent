@@ -5,7 +5,7 @@
 	import DataTableShell from '$lib/components/DataTableShell.svelte';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type StepBoundary, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -23,10 +23,24 @@
 		serverId: number | null;
 		jobId: string | null;
 		activeJobs: ActiveJob[];
-		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]) => void;
+		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[]) => void;
 	}
 
 	let { open = $bindable(), serverId, jobId, activeJobs, onViewTrace }: Props = $props();
+
+	// 스텝 구간 — behavior 레인/구간 밴드의 시간 축.
+	// trace_jobs 와 달리 raw_output fallback 이 없다 (텍스트에 안 실린다).
+	function getStepBoundaries(): StepBoundary[] {
+		const out: StepBoundary[] = [];
+		if (result) {
+			for (const r of result.results) {
+				if (r.stepBoundaries) out.push(...r.stepBoundaries);
+			}
+		}
+		// live 결과가 없거나 비었으면 DB 영속본으로 폴백 — 만료된 잡 경로.
+		if (out.length === 0) return persistedBoundaries;
+		return out;
+	}
 
 	// Trace jobs — 구조화 데이터 우선, fallback으로 raw_output 파싱
 	function getTraceJobMappings(): TraceJobMapping[] {
@@ -124,6 +138,8 @@
 	let persistedSummary = $state<Record<string, number> | null>(null);
 	// DB 에 영구 저장된 trace job 매핑 — live 결과가 없는 만료된 잡에서도 기존 trace UI 진입용.
 	let persistedTraceJobs = $state<TraceJobMapping[]>([]);
+	// 영속화된 스텝 구간 — 만료된 잡에서도 Behavior 탭을 볼 수 있게 (traceJobs 와 같은 이유).
+	let persistedBoundaries = $state<StepBoundary[]>([]);
 	// 만료된 잡의 device id fallback (execution.deviceIds JSON 의 첫 device).
 	let persistedDeviceId = $state<string>('');
 
@@ -187,6 +203,7 @@
 		workloadNote = null;
 		persistedSummary = null;
 		persistedTraceJobs = [];
+		persistedBoundaries = [];
 		persistedDeviceId = '';
 		try {
 			const exec = await fetchExecutionByJobId(jobId);
@@ -195,6 +212,7 @@
 			}
 			workloadNote = exec.workloadNote ?? null;
 			persistedTraceJobs = Array.isArray(exec.traceJobs) ? exec.traceJobs : [];
+			persistedBoundaries = Array.isArray(exec.stepBoundaries) ? exec.stepBoundaries : [];
 			if (exec.deviceIds) {
 				try {
 					const ids = JSON.parse(exec.deviceIds);
@@ -827,7 +845,7 @@
 					<button
 						onclick={() => {
 							const ids = selectedTraceIds.size > 0 ? [...selectedTraceIds] : traceJobIds;
-							onViewTrace(selectedResult?.deviceId ?? '', ids, allTraceJobMappings);
+							onViewTrace(selectedResult?.deviceId ?? '', ids, allTraceJobMappings, getStepBoundaries());
 						}}
 						class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
 					>
@@ -930,7 +948,7 @@
 				<!-- 전체 trace 확인 CTA — 이 job 에 trace 가 있으면 기존 trace UI(패턴/QD/CPU/latency)로 바로 진입 -->
 				{#if allTraceJobMappings.length > 0 && onViewTrace}
 					<button
-						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId), allTraceJobMappings)}
+						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId), allTraceJobMappings, getStepBoundaries())}
 						class="w-full flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-left hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
 					>
 						<ScanSearchIcon class="size-4 text-blue-600 shrink-0" />
@@ -1093,7 +1111,9 @@
 								<button
 									onclick={() => {
 										const selected = selectedTraceIds.size > 0 ? [...selectedTraceIds] : ids;
-										onViewTrace(selectedResult?.deviceId ?? '', selected);
+										// mappings·boundaries 를 같이 넘긴다 — 빠지면 이 버튼으로 열었을 때만
+										// Loop 필터와 Behavior 탭이 사라져 "버튼마다 화면이 다른" 것처럼 보인다.
+										onViewTrace(selectedResult?.deviceId ?? '', selected, allTraceJobMappings, getStepBoundaries());
 									}}
 									class="px-2.5 py-1 rounded text-[10px] bg-blue-600 text-white hover:bg-blue-700 transition-colors"
 								>

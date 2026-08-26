@@ -183,6 +183,9 @@ func (db *DB) migrate() error {
 		`ALTER TABLE job_executions ADD COLUMN workload_note TEXT`,
 		// trace job 매핑(JSON) 영속화 — 만료된 job 도 job 상세에서 기존 trace UI 로 진입 가능
 		`ALTER TABLE job_executions ADD COLUMN trace_jobs TEXT`,
+		// 스텝 구간(JSON) 영속화 — trace_jobs 와 같은 이유다. 구간은 메모리 Job 에만
+		// 있어서, 잡이 만료되면 parquet 은 남는데 **Behavior 탭만 조용히 사라진다.**
+		`ALTER TABLE job_executions ADD COLUMN step_boundaries TEXT`,
 	}
 	for _, s := range addColumns {
 		if _, err := db.Exec(s); err != nil && !strings.Contains(err.Error(), "duplicate column") {

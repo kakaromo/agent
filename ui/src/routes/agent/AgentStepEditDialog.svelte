@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
+	import { TRACE_TYPES } from '$lib/config/traceTypes.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { getBasicOptions, getAdvancedOptions, getDefaultParams, type OptionDef } from './benchmarkOptions.js';
 	import {
@@ -252,9 +253,9 @@
 						</label>
 						{#if local.traceEnabled}
 							<select bind:value={local.traceType} class="border rounded px-1.5 py-0.5 text-[10px] bg-background">
-								<option value="ufs">UFS</option>
-								<option value="block">Block</option>
-								<option value="both">Both</option>
+								{#each TRACE_TYPES as t (t.value)}
+									<option value={t.value} title={t.desc}>{t.label}</option>
+								{/each}
 							</select>
 						{/if}
 					</div>
@@ -372,9 +373,9 @@
 							onchange={(e) => { if (local) local.formParams = { ...local.formParams, trace_type: (e.target as HTMLSelectElement).value }; }}
 							class="border rounded px-1.5 py-0.5 text-[10px] bg-background"
 						>
-							<option value="ufs">UFS</option>
-							<option value="block">Block</option>
-							<option value="both">Both</option>
+							{#each TRACE_TYPES as t (t.value)}
+								<option value={t.value} title={t.desc}>{t.label}</option>
+							{/each}
 						</select>
 					</div>
 

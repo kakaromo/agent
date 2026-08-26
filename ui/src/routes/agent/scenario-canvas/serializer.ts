@@ -247,14 +247,22 @@ export function protoToCanvas(
 			// install_apk / uninstall_apk 는 모든 params 를 formParams 에 그대로 채워야 dialog
 			// select 가 round-trip 되며, extraText 로 떨어지면 안 된다.
 			const isApkStep = s.type === 'install_apk' || s.type === 'uninstall_apk';
+			// ⚠ trace_start/trace_stop 도 같은 이유로 params 를 formParams 에 그대로
+			// 채운다. 다이얼로그의 Trace Type select 가 **formParams.trace_type** 을
+			// 읽는데, trace_type 은 knownKeys 라 여기서 걸러져 formParams 에 못 들어갔다
+			// (form.traceType 에만 들어갔고 그건 benchmark/shell 의 Auto Trace 용이다).
+			// 그래서 캔버스에서 fsio 를 골라도 저장 후 다시 열면 항상 ufs 로 돌아갔다.
+			const isTraceStep = s.type === 'trace_start' || s.type === 'trace_stop';
 			for (const [k, v] of Object.entries(params)) {
+				if (isTraceStep) { formParams[k] = v; continue; }
 				if (knownKeys.has(k)) continue;
 				if (isApkStep) { formParams[k] = v; }
 				else if (basicKeys.has(k)) { formParams[k] = v; }
 				else { extraLines.push(`${k}=${v}`); }
 			}
-			// 기본값 채우기 (apk step 은 default 가 없음 — 사용자가 채워야 함)
-			if (!isApkStep) {
+			// 기본값 채우기 (apk step 은 default 가 없음 — 사용자가 채워야 함).
+			// trace 스텝도 제외한다 — benchmark 옵션(rw/bs 등)이 trace params 로 섞인다.
+			if (!isApkStep && !isTraceStep) {
 				for (const opt of basicOpts) {
 					if (!(opt.key in formParams)) formParams[opt.key] = opt.defaultValue;
 				}
@@ -557,10 +565,22 @@ function buildStepParams(s: StepForm): Record<string, string> {
 		return params;
 	}
 
-	// trace_start: trace_type 을 params 로 실어보낸다. 이게 없으면 서버가 기본값(ufs)을 쓰므로
-	// import 시나리오의 trace_type(both/block)이 유실된다.
-	if (s.type === 'trace_start') {
-		return { trace_type: s.traceType || 'ufs' };
+	// trace_start / trace_stop: trace_type 을 params 로 실어보낸다. 이게 없으면 서버가
+	// 기본값(ufs)을 쓰므로 import 시나리오의 trace_type 이 유실된다.
+	//
+	// ⚠ **formParams 를 우선한다.** 다이얼로그의 Trace Type select 는
+	// formParams.trace_type 에 쓰는데, 예전엔 여기서 s.traceType(= benchmark/shell 의
+	// Auto Trace 용 필드)만 봐서 **사용자가 고른 값이 저장 단계에서 버려졌다.**
+	// s.traceType 은 구버전 노드 호환용 폴백으로 남긴다.
+	if (s.type === 'trace_start' || s.type === 'trace_stop') {
+		const params: Record<string, string> = {
+			trace_type: s.formParams?.trace_type || s.traceType || 'ufs'
+		};
+		// window_seconds 등 다른 params 도 보존한다 (formParams 에 들어 있다).
+		for (const [k, v] of Object.entries(s.formParams ?? {})) {
+			if (k !== 'trace_type' && v !== '') params[k] = v;
+		}
+		return params;
 	}
 
 	// IOTEST: config as JSON in params (independent step type)
