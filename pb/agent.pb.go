@@ -2488,9 +2488,16 @@ func (x *RunScenarioResponse) GetJobId() string {
 type StartTraceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	TraceType     string                 `protobuf:"bytes,2,opt,name=trace_type,json=traceType,proto3" json:"trace_type,omitempty"`              // "ufs", "block", "ufscustom"
+	TraceType     string                 `protobuf:"bytes,2,opt,name=trace_type,json=traceType,proto3" json:"trace_type,omitempty"`              // "ufs", "block", "both", "fsio_ufs", "fsio_block"
 	WindowSeconds int32                  `protobuf:"varint,3,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"` // parquet 윈도우 (기본 1초)
 	JobName       string                 `protobuf:"bytes,4,opt,name=job_name,json=jobName,proto3" json:"job_name,omitempty"`
+	// 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
+	// 비면 기본 위치(trace_dir)를 쓴다.
+	//
+	// 시나리오가 이걸 채워 **그 잡 폴더 안**에 trace 를 모은다 — 예전엔 결과 JSON 과
+	// trace 가 서로 다른 트리에, 서로 다른 ID 이름으로 흩어져 사람이 잇기 어려웠다.
+	// trace manager 는 시나리오를 몰라도 되게 경로만 받는다.
+	OutputDir     string `protobuf:"bytes,5,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2549,6 +2556,13 @@ func (x *StartTraceRequest) GetWindowSeconds() int32 {
 func (x *StartTraceRequest) GetJobName() string {
 	if x != nil {
 		return x.JobName
+	}
+	return ""
+}
+
+func (x *StartTraceRequest) GetOutputDir() string {
+	if x != nil {
+		return x.OutputDir
 	}
 	return ""
 }
@@ -8231,13 +8245,15 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x05edges\x18\n" +
 	" \x03(\v2\x0f.agent.StepEdgeR\x05edges\",\n" +
 	"\x13RunScenarioResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\x91\x01\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xb0\x01\n" +
 	"\x11StartTraceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
 	"trace_type\x18\x02 \x01(\tR\ttraceType\x12%\n" +
 	"\x0ewindow_seconds\x18\x03 \x01(\x05R\rwindowSeconds\x12\x19\n" +
-	"\bjob_name\x18\x04 \x01(\tR\ajobName\"+\n" +
+	"\bjob_name\x18\x04 \x01(\tR\ajobName\x12\x1d\n" +
+	"\n" +
+	"output_dir\x18\x05 \x01(\tR\toutputDir\"+\n" +
 	"\x12StartTraceResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\")\n" +
 	"\x10StopTraceRequest\x12\x15\n" +

@@ -227,6 +227,11 @@ func main() {
 		}
 		routerOpts.ArchiveBase = archiveBase
 		routerOpts.TraceBase = cfg.Server.TraceDir
+		// 잡 폴더(<archiveBase>/jobs/<이름>/trace/<id>) 안의 trace 도 조회되게 등록.
+		// 재시작하면 메모리 잡이 없어 이 경로를 못 찾는다.
+		traceMgr.AddSearchRoot(archiveBase)
+		// 시나리오가 trace 를 자기 잡 폴더에 쓰도록 오케스트레이터에 알린다.
+		orch.SetArtifactBase(archiveBase)
 		slog.Info("archive base", "path", archiveBase)
 		slog.Info("trace base", "path", cfg.Server.TraceDir)
 	}

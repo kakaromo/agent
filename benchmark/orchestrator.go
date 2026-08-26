@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent/adb"
+	"agent/artifacts"
 	pb "agent/pb"
 
 	"github.com/google/uuid"
@@ -40,6 +41,25 @@ type Job struct {
 	// 달아 두는 이유: storeResult 호출부가 10곳 가까이 되는데(성공/실패/취소 경로가
 	// 제각각) 인자로 넘기면 한 곳만 빠뜨려도 그 경로에서 조용히 구간이 사라진다.
 	stepBoundaries map[string][]*pb.StepBoundary
+
+	// artifactDir — 이 잡의 산출물 폴더. 한 번 정하면 고정한다.
+	//
+	// ⚠ trace_start 마다 새로 계산하면 시각이 달라져 **같은 시나리오의 trace 가 서로
+	// 다른 폴더로 흩어진다.**
+	artifactDir string
+}
+
+// ensureArtifactDir — 이 잡의 산출물 폴더를 (처음 한 번만) 정해 돌려준다.
+func (j *Job) ensureArtifactDir(base, jobType string) string {
+	if base == "" {
+		return ""
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.artifactDir == "" {
+		j.artifactDir = artifacts.JobArtifactDir(base, time.Now(), jobType, j.Name, j.ID)
+	}
+	return j.artifactDir
 }
 
 // appendStepBoundary — 스텝 하나의 실행 구간을 기록한다.
@@ -159,16 +179,20 @@ type JobFinishHook func(jobID, state, errMsg string)
 
 // Orchestrator manages benchmark job execution.
 type Orchestrator struct {
-	mu          sync.RWMutex
-	jobs        map[string]*Job
-	manager     *adb.Manager
-	toolsDir    string
-	toolNames   map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
-	traceMgr    TraceController
-	macroMgr    MacroController
-	apkMgr      ApkController
-	deviceLocks map[string]*sync.Mutex // per-device lock for "wait" policy
-	finishHook  JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
+	mu        sync.RWMutex
+	jobs      map[string]*Job
+	manager   *adb.Manager
+	toolsDir  string
+	toolNames map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
+	traceMgr  TraceController
+
+	// artifactBase — 잡 산출물 루트. 설정되면 시나리오가 trace 를 자기 잡 폴더
+	// 안에 쓰게 한다(결과 JSON 과 한곳에 모으기 위함). 비면 기존 동작(trace_dir).
+	artifactBase string
+	macroMgr     MacroController
+	apkMgr       ApkController
+	deviceLocks  map[string]*sync.Mutex // per-device lock for "wait" policy
+	finishHook   JobFinishHook          // nil 가능 (사무실 모드 등 DB 없을 때)
 }
 
 // SetJobFinishHook — job 종료 시 호출될 콜백 등록. standalone 에서 DB 영속화 연결용.
@@ -549,6 +573,19 @@ func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, r
 }
 
 // GetJob returns a job by ID.
+// SetArtifactBase — 잡 산출물 루트를 지정한다 (standalone 전용).
+func (o *Orchestrator) SetArtifactBase(dir string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.artifactBase = dir
+}
+
+func (o *Orchestrator) getArtifactBase() string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.artifactBase
+}
+
 func (o *Orchestrator) GetJob(jobID string) (*Job, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

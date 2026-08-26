@@ -335,9 +335,17 @@ message RunScenarioResponse {
 
 message StartTraceRequest {
   string device_id = 1;
-  string trace_type = 2;        // "ufs", "block", "ufscustom"
+  string trace_type = 2;        // "ufs", "block", "both", "fsio_ufs", "fsio_block"
   int32 window_seconds = 3;     // parquet 윈도우 (기본 1초)
   string job_name = 4;
+
+  // 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
+  // 비면 기본 위치(trace_dir)를 쓴다.
+  //
+  // 시나리오가 이걸 채워 **그 잡 폴더 안**에 trace 를 모은다 — 예전엔 결과 JSON 과
+  // trace 가 서로 다른 트리에, 서로 다른 ID 이름으로 흩어져 사람이 잇기 어려웠다.
+  // trace manager 는 시나리오를 몰라도 되게 경로만 받는다.
+  string output_dir = 5;
 }
 
 message StartTraceResponse {

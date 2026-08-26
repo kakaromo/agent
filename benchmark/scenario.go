@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent/adb"
+	"agent/artifacts"
 	pb "agent/pb"
 	"agent/scenario"
 
@@ -465,10 +466,19 @@ func (o *Orchestrator) executeStep(ctx context.Context, job *Job, md *adb.Manage
 			}
 		}
 
+		// 산출물을 이 잡 폴더 안에 모은다 — 결과 JSON 과 trace 가 흩어지지 않게.
+		// artifactBase 가 없으면(사무실 모드) 빈 값이라 기존 위치를 쓴다.
+		outDir := ""
+		if base := o.getArtifactBase(); base != "" {
+			if jobDir := job.ensureArtifactDir(base, "scenario"); jobDir != "" {
+				outDir = filepath.Join(jobDir, artifacts.JobTraceSubdir)
+			}
+		}
 		traceJobID, err := o.traceMgr.StartTrace(ctx, &pb.StartTraceRequest{
 			DeviceId:      deviceID,
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
+			OutputDir:     outDir,
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("auto trace start: %w", err)
@@ -581,10 +591,18 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 				windowSec = int32(v)
 			}
 		}
+		// 산출물을 이 잡 폴더 안에 모은다 (auto trace 와 같은 이유).
+		outDir := ""
+		if base := o.getArtifactBase(); base != "" {
+			if jobDir := job.ensureArtifactDir(base, "scenario"); jobDir != "" {
+				outDir = filepath.Join(jobDir, artifacts.JobTraceSubdir)
+			}
+		}
 		traceJobID, err := o.traceMgr.StartTrace(ctx, &pb.StartTraceRequest{
 			DeviceId:      deviceID,
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
+			OutputDir:     outDir,
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("start trace: %w", err)

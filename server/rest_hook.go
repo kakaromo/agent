@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agent/artifacts"
 	pb "agent/pb"
 	"agent/storage/sqlitedb"
 )
@@ -177,7 +178,12 @@ func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmar
 	if resp == nil || len(resp.GetResults()) == 0 {
 		return
 	}
-	dstDir := filepath.Join(r.archiveBase, "auto", time.Now().Format("2006-01-02"), jobID)
+	// 결과 JSON 을 **trace 와 같은 잡 폴더**에 둔다.
+	//
+	// 예전엔 archive/auto/<날짜>/<jobId>/ 였는데, trace 는 agent_trace/<traceJobId>/ 라
+	// 같은 잡이 두 트리로, 그것도 **서로 다른 ID 이름**으로 갈라졌다. 폴더째 넘기는
+	// 것만으로 재현·공유가 되게 한곳에 모은다.
+	dstDir := r.jobArtifactDir(jobID)
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		slog.Warn("auto archive mkdir failed", "jobId", jobID, "error", err)
 		return
@@ -196,6 +202,23 @@ func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmar
 		}
 		slog.Info("benchmark result auto-archived", "jobId", jobID, "deviceId", br.GetDeviceId(), "path", fullPath)
 	}
+}
+
+// jobArtifactDir — 이 잡의 산출물 폴더. DB 에서 시각·타입·이름을 읽어 이름을 만든다.
+//
+// 잡이 DB 에 없으면(드묾) 기존 방식으로 폴백한다 — 저장을 아예 못 하는 것보다 낫다.
+func (r *dbRecorder) jobArtifactDir(jobID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if e, err := r.db.FindJobExecutionByJobID(ctx, jobID); err == nil && e != nil {
+		started := e.CreatedAt
+		if e.StartedAt.Valid {
+			started = e.StartedAt.Time
+		}
+		return artifacts.JobArtifactDir(r.archiveBase, started, e.Type, e.JobName.String, jobID)
+	}
+	slog.Debug("job execution 조회 실패 — 폴백 경로 사용", "jobId", jobID)
+	return filepath.Join(r.archiveBase, "jobs", artifacts.JobDirName(time.Now(), "", "", jobID))
 }
 
 // collectStepBoundariesFrom — 결과에서 스텝 구간을 모아 JSON array 문자열로 반환.

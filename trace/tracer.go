@@ -82,6 +82,8 @@ type Manager struct {
 	adbMgr     *adb.Manager
 	toolsDir   string
 	outputBase string
+	// searchRoots — 재시작 후 잡 폴더 안의 trace 를 찾기 위한 추가 루트 (AddSearchRoot).
+	searchRoots []string
 }
 
 func NewManager(adbMgr *adb.Manager, toolsDir, traceDir string) *Manager {
@@ -123,7 +125,13 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	defer setupCancel()
 
 	jobID := uuid.New().String()
-	outputDir := filepath.Join(m.outputBase, jobID)
+	// 산출물 위치. 시나리오가 지정하면 그 잡 폴더 안에 모은다 — 결과 JSON 과 trace 가
+	// 한곳에 있어야 폴더째 넘기는 것만으로 재현·공유가 된다(server/jobdir.go 참고).
+	outBase := req.GetOutputDir()
+	if outBase == "" {
+		outBase = m.outputBase
+	}
+	outputDir := filepath.Join(outBase, jobID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir output: %w", err)
 	}
@@ -593,6 +601,47 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	return ch, nil
 }
 
+// AddSearchRoot — trace 산출물을 찾을 추가 루트를 등록한다.
+//
+// 시나리오가 trace 를 자기 잡 폴더에 쓰므로(StartTraceRequest.OutputDir), 재시작 후
+// 그걸 조회하려면 어디를 뒤질지 알아야 한다. outputBase 하나만 보면 못 찾는다.
+func (m *Manager) AddSearchRoot(dir string) {
+	if dir == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, d := range m.searchRoots {
+		if d == dir {
+			return
+		}
+	}
+	m.searchRoots = append(m.searchRoots, dir)
+}
+
+// findTraceDirByID — 등록된 루트 아래에서 이름이 traceJobID 인 디렉토리를 찾는다.
+//
+// glob 으로 한정된 깊이만 본다 — 전체 walk 는 archive 가 커질수록 느려진다.
+// 패턴: <root>/jobs/*/trace/<id>
+func (m *Manager) findTraceDirByID(jobID string) string {
+	if jobID == "" {
+		return ""
+	}
+	m.mu.RLock()
+	roots := append([]string(nil), m.searchRoots...)
+	m.mu.RUnlock()
+
+	for _, root := range roots {
+		hits, _ := filepath.Glob(filepath.Join(root, "jobs", "*", "trace", jobID))
+		for _, h := range hits {
+			if fi, err := os.Stat(h); err == nil && fi.IsDir() {
+				return h
+			}
+		}
+	}
+	return ""
+}
+
 // TraceJobInfo holds directory and type info for parquet file lookup.
 type TraceJobInfo struct {
 	Dir       string
@@ -618,6 +667,14 @@ func (m *Manager) GetTraceJobInfo(jobID string) (*TraceJobInfo, error) {
 		return &TraceJobInfo{Dir: job.OutputDir, TraceType: job.TraceType, ClockSync: sync}, nil
 	}
 	baseDir := filepath.Join(m.outputBase, jobID)
+	if fi, err := os.Stat(baseDir); err != nil || !fi.IsDir() {
+		// 잡 폴더 안에 있는 경우(server/jobdir.go 의 <archiveBase>/jobs/<이름>/trace/<id>).
+		// agent 재시작 후엔 메모리에 없으니 여기서 찾아야 조회가 된다.
+		if found := m.findTraceDirByID(jobID); found != "" {
+			sync, _ := LoadClockSync(found)
+			return &TraceJobInfo{Dir: found, TraceType: detectTraceTypeFromDir(found), ClockSync: sync}, nil
+		}
+	}
 	if fi, err := os.Stat(baseDir); err == nil && fi.IsDir() {
 		// base dir 에 result_*.parquet 가 있으면 거기서, 없으면 legacy realtime/
 		legacy := filepath.Join(baseDir, "realtime")
