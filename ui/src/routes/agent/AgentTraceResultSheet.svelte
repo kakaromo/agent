@@ -91,6 +91,24 @@
 		selectedSteps = next;
 	}
 
+	// 구간을 골라 보면 차트도 **그 구간으로 확대**한다.
+	//
+	// 골라 놓고 축은 전체라면 점이 한쪽에 뭉쳐 보여서 고른 의미가 없다. 일부만 켜져
+	// 있을 때만 좁힌다 — 전체가 켜져 있으면 원래대로 전 구간을 본다.
+	const zoomRange = $derived.by<{ min: number; max: number } | null>(() => {
+		if (hiddenSteps.size === 0) return null;          // 전부 보는 중 → 확대 안 함
+		if (usableBoundaries.length === 0) return null;   // 전부 숨김 → 기준이 없다
+		let lo = Infinity, hi = -Infinity;
+		for (const b of usableBoundaries) {
+			if (b.startedMono < lo) lo = b.startedMono;
+			if (b.finishedMono > hi) hi = b.finishedMono;
+		}
+		if (!isFinite(lo) || !(hi > lo)) return null;
+		// 경계에 딱 붙으면 끝점 IO 가 잘려 보인다. 5% 여유.
+		const pad = (hi - lo) * 0.05;
+		return { min: lo - pad, max: hi + pad };
+	});
+
 	// 화면에 실제로 그릴 구간. 토글로 숨긴 것을 뺀다.
 	const usableBoundaries = $derived(
 		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
@@ -984,7 +1002,13 @@
 				}
 			},
 			legend: { data: cmdSet, top: 0, right: 0, textStyle: { fontSize: 9 }, selected: legendSelected },
-			xAxis: { type: 'value' as const, name: 'Time (s)', min: 'dataMin', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 } },
+			// 구간을 고르면 그 범위로 좁힌다(zoomRange). 안 고르면 데이터 전체.
+			xAxis: {
+				type: 'value' as const, name: 'Time (s)',
+				min: zoomRange ? zoomRange.min : ('dataMin' as const),
+				...(zoomRange ? { max: zoomRange.max } : {}),
+				nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 }
+			},
 			yAxis: { type: 'value' as const, name: yLabel, nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 } },
 			series,
 			grid: { left: 60, right: 20, top: 25, bottom: 35 },
@@ -1295,11 +1319,25 @@
 									{#if !b.success}<span class="text-red-500">실패</span>{/if}
 								</button>
 							{/each}
-							{#if hiddenSteps.size > 0}
-								<button onclick={() => (hiddenSteps = new Set())}
-									class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}">
-									전체 표시
-								</button>
+							<!-- 항상 보인다 — 예전엔 뭔가 숨긴 뒤에만 나와서, 구간이 많을 때
+							     "하나만 보려면 나머지를 다 눌러야 하나" 가 됐다. -->
+							<button onclick={() => (hiddenSteps = new Set())}
+								class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}"
+								disabled={hiddenSteps.size === 0}
+								class:opacity-40={hiddenSteps.size === 0}>
+								전체 선택
+							</button>
+							<button onclick={() => (hiddenSteps = new Set(allBoundaries.map((b, i) => boundaryKey(b, i))))}
+								class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}"
+								disabled={hiddenSteps.size === allBoundaries.length}
+								class:opacity-40={hiddenSteps.size === allBoundaries.length}>
+								전체 해제
+							</button>
+							{#if zoomRange}
+								<!-- 축이 좁혀졌다는 걸 알린다 — 모르면 "데이터가 왜 이것뿐이지" 가 된다. -->
+								<span class={captionMuted}>
+									· 선택 구간으로 확대됨 ({(zoomRange.max - zoomRange.min).toFixed(2)}s)
+								</span>
 							{/if}
 						</div>
 					{/if}
@@ -1691,6 +1729,7 @@
 							isIdle={isIdleStep}
 							groupOf={getCmdGroup}
 							onToggle={toggleSelectStep}
+							onClearSelection={() => (selectedSteps = new Set())}
 						/>
 
 						<!-- 지표 읽는 법 — 숫자만 주면 장식이 된다.

@@ -26,30 +26,52 @@
 		/** cmd → 'read' | 'write' | 그 외. 차트와 같은 판정을 써야 색이 일치한다. */
 		groupOf: (cmd: string) => string;
 		onToggle?: (key: string) => void;
+		onClearSelection?: () => void;
 	}
 
 	let {
 		boundaries, events, edgeSec = 0, selected = new Set(),
-		keyOf, colorOf, labelOf, isIdle, groupOf, onToggle
+		keyOf, colorOf, labelOf, isIdle, groupOf, onToggle, onClearSelection
 	}: Props = $props();
 
 	const LABEL_W = 124;   // 레인 라벨 열 — 라벨이 서술형이라 넓게
 	const PLOT_H = 200;    // 산점도 높이
 
 	// 시간축 — 레인과 산점도가 **같은 값**을 쓴다.
+	//
+	// 구간을 고르면 그 범위로 좁힌다. 고른 구간이 짧을수록 그 안이 크게 보여야
+	// 무슨 일이 있었는지 읽힌다 — 축이 전체면 점이 한 줄로 뭉친다.
 	const span = $derived.by(() => {
+		const src = selected.size > 0
+			? boundaries.filter((b, i) => selected.has(keyOf(b, i)))
+			: boundaries;
 		let t0 = Infinity, t1 = -Infinity;
-		for (const b of boundaries) {
+		for (const b of src) {
 			if (b.startedMono < t0) t0 = b.startedMono;
 			if (b.finishedMono > t1) t1 = b.finishedMono;
 		}
 		if (!isFinite(t0) || !(t1 > t0)) return { t0: 0, t1: 1 };
-		return { t0, t1 };
+		const pad = (t1 - t0) * 0.05;
+		return { t0: t0 - pad, t1: t1 + pad };
 	});
 
 	/** 시각 → 0~100%. 레인(DOM)과 산점도(canvas)가 공유한다. */
 	function pct(t: number): number {
 		return ((t - span.t0) / (span.t1 - span.t0)) * 100;
+	}
+
+	/**
+	 * 레인 바 위치 — 축이 좁혀졌을 때 **범위 밖을 잘라낸다.**
+	 *
+	 * 확대하면 안 고른 구간은 축 밖으로 나가는데, 그대로 두면 바가 트랙을 넘어
+	 * 옆으로 삐져나온다. 겹치는 부분만 남기고, 아예 안 겹치면 null(안 그림).
+	 */
+	function barBox(b: StepBoundary): { left: number; width: number } | null {
+		const lo = Math.max(b.startedMono, span.t0);
+		const hi = Math.min(b.finishedMono, span.t1);
+		if (!(hi > lo)) return null;
+		const left = pct(lo);
+		return { left, width: Math.max(pct(hi) - left, 0.4) };
 	}
 
 	// 눈금 — 전체 길이에 따라 간격을 고른다.
@@ -170,11 +192,13 @@
 <div class="rounded border p-2">
 	<div class="flex items-center justify-between mb-1">
 		<span class="text-[10px] font-semibold">타임라인</span>
-		<span class="{captionMuted} text-[9px]">
+		<span class="flex items-center gap-1.5 {captionMuted} text-[9px]">
 			{#if dimming}
-				{selected.size}개 구간 선택 — 나머지는 흐리게
+				{selected.size}개 선택 — 그 구간으로 확대됨
+				<button onclick={() => onClearSelection?.()}
+					class="rounded border px-1.5 py-0.5 hover:bg-muted">전체 해제</button>
 			{:else}
-				레인을 클릭하면 그 구간만 강조됩니다 · 여러 개 선택 가능
+				레인을 클릭하면 그 구간으로 좁혀집니다 · 여러 개 선택 가능
 			{/if}
 		</span>
 	</div>
@@ -191,8 +215,7 @@
 	{#each boundaries as b, i (keyOf(b, i))}
 		{@const key = keyOf(b, i)}
 		{@const on = isOn(key)}
-		{@const left = pct(b.startedMono)}
-		{@const width = Math.max(pct(b.finishedMono) - left, 0.4)}
+		{@const box = barBox(b)}
 		{@const idle = isIdle(b.type)}
 		<div class="grid items-center min-h-[26px]" style="grid-template-columns:{LABEL_W}px 1fr">
 			<button
@@ -204,9 +227,10 @@
 				{labelOf(b)}
 			</button>
 			<div class="relative h-[22px] rounded bg-muted/40">
+				{#if box}
 				<div class="absolute top-[3px] bottom-[3px] rounded-sm flex items-center px-1.5 overflow-hidden whitespace-nowrap text-[9px] cursor-pointer"
 					class:opacity-25={!on}
-					style="left:{left}%; width:{width}%;
+					style="left:{box.left}%; width:{box.width}%;
 						{idle
 							? 'border:1px dashed currentColor; color:var(--muted-foreground);'
 							: `background:${colorOf(i)}; color:#fff;`}"
@@ -222,6 +246,7 @@
 						{(b.finishedMono - b.startedMono).toFixed(2)}s
 					</span>
 				</div>
+				{/if}
 			</div>
 		</div>
 	{/each}
