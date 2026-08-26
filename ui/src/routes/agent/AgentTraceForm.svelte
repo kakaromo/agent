@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
+	import { TRACE_TYPES } from '$lib/config/traceTypes.js';
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
 	import { startTrace, stopTrace } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
@@ -23,13 +24,7 @@
 	// trace_type 선택지. fsio_* 는 bpftrace(eBPF) 기반이라 수집 방식 자체가 다르다.
 	// 한 번에 한 레이어만 받는다 (`--only ufs` / `--only blk`) — ftrace 의 Both 에
 	// 해당하는 조합은 두지 않는다.
-	const TRACE_TYPES = [
-		{ value: 'ufs', label: 'UFS', desc: 'UFS 레이어 I/O' },
-		{ value: 'block', label: 'Block', desc: 'Block 레이어 I/O' },
-		{ value: 'both', label: 'Both', desc: 'UFS + Block' },
-		{ value: 'fsio_ufs', label: 'fsio UFS', desc: 'eBPF · UFS + 파일 귀속' },
-		{ value: 'fsio_block', label: 'fsio Block', desc: 'eBPF · Block + 파일 귀속' }
-	];
+
 	let windowSeconds = $state(0);
 	let jobName = $state('');
 	let starting = $state(false);
