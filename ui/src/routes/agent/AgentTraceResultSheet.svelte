@@ -49,48 +49,82 @@
 	// ⚠ Loop 필터를 구간에도 **똑같이** 적용한다. activeJobIds 는 선택한 loop 의
 	// trace 잡만 조회하는데 구간만 전체를 그리면, 화면엔 loop 2 데이터가 떠 있는데
 	// loop 1·3 밴드가 겹쳐 그려지고 그 행들은 이벤트 0 으로 나온다.
-	const usableBoundaries = $derived(
+	//
+	// trace_start/trace_stop 은 **제외한다.** 계측을 켜고 끄는 동작 자체라 분석 대상이
+	// 아니고, 순간에 끝나 레인에서 실오라기처럼 보이며 자리만 차지한다.
+	const BOUNDARY_SKIP_TYPES = new Set(['trace_start', 'trace_stop']);
+
+	const allBoundaries = $derived(
 		boundaries.filter(b =>
 			b.finishedMono > b.startedMono &&
 			b.startedMono > 0 &&
+			!BOUNDARY_SKIP_TYPES.has(b.type) &&
 			(selectedLoop <= 0 || b.loopIndex === selectedLoop)
 		)
 	);
+
+	// 구간 토글 — 끈 구간은 차트 밴드·표·레인에서 모두 빠진다.
+	// 구간이 많으면(loop 반복) 다 겹쳐 보여서 하나씩 떼어 봐야 읽힌다.
+	let hiddenSteps = $state<Set<string>>(new Set());
+	function boundaryKey(b: StepBoundary, i: number): string {
+		return `${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`;
+	}
+	function toggleStep(key: string) {
+		const next = new Set(hiddenSteps);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		hiddenSteps = next;
+	}
+
+	// 화면에 실제로 그릴 구간. 토글로 숨긴 것을 뺀다.
+	const usableBoundaries = $derived(
+		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
+	);
 	// 구간 데이터는 왔는데 mono 가 없는 경우 — 왜 분할이 안 되는지 알려야 한다.
-	const boundariesUnusable = $derived(boundaries.length > 0 && usableBoundaries.length === 0);
-	const hasBehavior = $derived(usableBoundaries.length > 0);
+	// ⚠ allBoundaries 기준이다 — 토글로 전부 숨긴 것과 "시계를 못 믿어서 못 그림" 은 다르다.
+	const boundariesUnusable = $derived(boundaries.length > 0 && allBoundaries.length === 0);
+	const hasBehavior = $derived(allBoundaries.length > 0);
 
-	// 스텝 **타입별** 고정색. 순번대로 돌리면 같은 종류(scroll 3회)가 매번 다른 색이라
-	// "무슨 동작이었나" 가 색으로 안 읽힌다 — 목업이 종류별로 색을 고정한 이유다.
-	const BEHAVIOR_HUES: Record<string, string> = {
-		launch_app: '59,130,246',   // 파랑 — 앱 실행
-		app_macro: '139,92,246',    // 보라 — 조작(스크롤 등)
-		benchmark: '217,48,37',     // 빨강 — 인위적 부하
-		iotest: '217,48,37',
-		shell: '245,158,11',        // 주황 — 임의 명령
-		trace_start: '154,160,166', // 회색 — 계측 자체
-		trace_stop: '154,160,166',
-		sleep: '154,160,166',       // 회색 — 의도적 대기(idle)
-		cleanup: '154,160,166'
-	};
-	const BEHAVIOR_FALLBACK = '20,184,166';
-
-	function behaviorRgb(type: string): string {
-		return BEHAVIOR_HUES[type] ?? BEHAVIOR_FALLBACK;
+	// 구간 색 — **순번대로 여러 색**을 돌린다.
+	//
+	// 한때 타입별 고정색으로 바꿨다가 되돌렸다: 실제 시나리오는 같은 타입이 연달아
+	// 오는 경우가 많아(app_macro 여러 개) 타입 기준이면 옆 구간과 색이 같아져
+	// **구간 경계가 안 보인다.** 순번 순환이 인접 구분에는 더 낫다.
+	const BEHAVIOR_HUES = [
+		'59,130,246',   // 파랑
+		'16,185,129',   // 초록
+		'245,158,11',   // 주황
+		'139,92,246',   // 보라
+		'236,72,153',   // 분홍
+		'20,184,166'    // 청록
+	];
+	function behaviorRgb(i: number): string {
+		return BEHAVIOR_HUES[i % BEHAVIOR_HUES.length];
+	}
+	/**
+	 * 색 인덱스는 **allBoundaries 상의 위치**로 고정한다.
+	 *
+	 * ⚠ 화면에 그리는 목록(usableBoundaries)의 순번을 쓰면, 구간 하나를 숨기는 순간
+	 * 뒤엣것들의 색이 앞으로 밀려 **범례와 밴드 색이 어긋난다.** 토글은 보이고 안 보이고만
+	 * 바꿔야지 색까지 바꾸면 안 된다.
+	 */
+	function colorIndexOf(b: StepBoundary): number {
+		const i = allBoundaries.indexOf(b);
+		return i >= 0 ? i : 0;
 	}
 	/** 차트 밴드용 — 옅게. */
 	function behaviorColor(i: number): string {
-		const b = usableBoundaries[i];
-		return `rgba(${behaviorRgb(b?.type ?? '')},0.10)`;
+		return `rgba(${behaviorRgb(i)},0.10)`;
 	}
 	/** 레인 바·범례용 — 진하게. */
-	function behaviorSolid(type: string): string {
-		return `rgb(${behaviorRgb(type)})`;
+	function behaviorSolid(i: number): string {
+		return `rgb(${behaviorRgb(i)})`;
 	}
-	/** sleep/trace 처럼 "아무것도 안 한" 구간은 목업처럼 점선 빈 바로. */
+	/** sleep 처럼 "아무것도 안 한" 구간은 점선 빈 바로. */
 	function isIdleStep(type: string): boolean {
-		return type === 'sleep' || type === 'trace_start' || type === 'trace_stop';
+		return type === 'sleep';
 	}
+
 	function behaviorLabel(b: StepBoundary) {
 		const base = b.label || b.type || `step ${b.stepIndex}`;
 		return b.loopIndex > 0 ? `${base} (loop ${b.loopIndex})` : base;
@@ -774,6 +808,8 @@
 
 	interface BehaviorRow {
 		key: string;
+		/** 색 인덱스 — allBoundaries 기준 고정 (colorIndexOf 주석 참고). */
+		colorIndex: number;
 		label: string;
 		type: string;
 		durationSec: number;
@@ -826,7 +862,8 @@
 				else if (g === 'write') writeBytes += e.size;
 			}
 			return {
-				key: `${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`,
+				key: boundaryKey(b, i),
+				colorIndex: colorIndexOf(b),
 				label: behaviorLabel(b),
 				type: b.type,
 				durationSec: b.finishedMono - b.startedMono,
@@ -876,26 +913,14 @@
 				markArea: {
 					silent: true,
 					itemStyle: { opacity: 1 },
-					// 라벨을 **항상 보여 준다.** 예전엔 hover 로만 두려 했는데 silent:true
-					// 라 hover 자체가 안 먹어서 **어느 구간인지 확인할 방법이 아예 없었다.**
-					// 밴드만 있고 이름이 없으면 "여기서 뭔가 있었다" 이상을 못 읽는다.
-					label: {
-						show: true,
-						position: 'insideTop',
-						rotate: 90,          // 세로쓰기 — 좁은 구간에서도 글자가 안 잘린다
-						align: 'left',
-						verticalAlign: 'middle',
-						offset: [4, 4],
-						fontSize: 8,
-						color: '#64748b',
-						overflow: 'truncate',
-						width: 90            // 너무 길면 자른다 (전체 이름은 Behavior 탭에)
-					},
+					// 라벨은 안 그린다 — 구간이 촘촘하면 글자가 겹쳐 오히려 지저분하다.
+					// 어느 구간인지는 위 범례(색)와 점 tooltip("구간: ...")으로 확인한다.
+					label: { show: false },
 					emphasis: { disabled: true },
-					data: usableBoundaries.map((b, i) => [
+					data: usableBoundaries.map(b => [
 						{
 							xAxis: b.startedMono,
-							itemStyle: { color: behaviorColor(i) },
+							itemStyle: { color: behaviorColor(colorIndexOf(b)) },
 							name: behaviorLabel(b)
 						},
 						{ xAxis: b.finishedMono }
@@ -924,7 +949,7 @@
 		};
 	}
 
-	function getChartOption(key: string): ReturnType<typeof buildScatter> {
+	function getChartOption(key: string): ReturnType<typeof buildScatter> | null {
 		const events = filteredEvents;
 		if (events.length === 0) return null;
 		const item = CHART_ITEMS.find(c => c.key === key);
@@ -1185,19 +1210,30 @@
 					{/if}
 
 					{#if hasBehavior}
-						<!-- 구간 범례 — 차트의 밴드 색이 어느 스텝인지 한눈에 잇는다.
-						     밴드 안 라벨은 구간이 촘촘하면 읽기 어려워서 여기서 한 번 더 준다. -->
+						<!-- 구간 범례 — 색 ↔ 스텝. 밴드에 라벨을 안 그리므로(촘촘하면 겹친다)
+						     여기가 유일한 색 대조표다. 클릭하면 그 구간만 껐다 켤 수 있다. -->
 						<div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px]">
 							<span class={captionMuted}>구간</span>
-							{#each behaviorRows as row, i (row.key)}
-								<span class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5"
-									title="{row.durationSec.toFixed(2)}s · {row.events.toLocaleString()} events">
+							{#each allBoundaries as b, i (boundaryKey(b, i))}
+								{@const key = boundaryKey(b, i)}
+								{@const hidden = hiddenSteps.has(key)}
+								<button
+									onclick={() => toggleStep(key)}
+									class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 hover:bg-muted"
+									class:opacity-40={hidden}
+									title="클릭하면 {hidden ? '다시 표시' : '숨김'}">
 									<span class="inline-block size-2 rounded-sm"
-										style="background:{behaviorSolid(row.type)}"></span>
-									{row.label}
-									{#if !row.success}<span class="text-red-500">실패</span>{/if}
-								</span>
+										style="background:{behaviorSolid(i)}; {hidden ? 'filter:grayscale(1);' : ''}"></span>
+									{behaviorLabel(b)}
+									{#if !b.success}<span class="text-red-500">실패</span>{/if}
+								</button>
 							{/each}
+							{#if hiddenSteps.size > 0}
+								<button onclick={() => (hiddenSteps = new Set())}
+									class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}">
+									전체 표시
+								</button>
+							{/if}
 						</div>
 					{/if}
 					{#if loadingRaw}
@@ -1588,15 +1624,22 @@
 								</span>
 							</div>
 
-							{#each usableBoundaries as b, i (`${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`)}
+							<!-- ⚠ allBoundaries 를 순회한다 — usableBoundaries 는 숨긴 걸 이미 뺀
+							     목록이라, 그걸 돌면 끈 구간이 화면에서 사라져 **되돌릴 방법이 없다.** -->
+							{#each allBoundaries as b, i (boundaryKey(b, i))}
+								{@const key = boundaryKey(b, i)}
+								{@const hidden = hiddenSteps.has(key)}
 								{@const left = lanePct(b.startedMono)}
 								{@const width = Math.max(lanePct(b.finishedMono) - left, 0.4)}
 								{@const idle = isIdleStep(b.type)}
-								<div class="grid grid-cols-[92px_1fr] items-center gap-0 min-h-[24px]">
-									<div class="pr-2 text-right text-[9px] font-mono text-muted-foreground truncate"
-										title={behaviorLabel(b)}>
-										{behaviorLabel(b)}
-									</div>
+								<div class="grid grid-cols-[92px_1fr] items-center gap-0 min-h-[24px]"
+									class:opacity-40={hidden}>
+									<button
+										onclick={() => toggleStep(key)}
+										class="pr-2 text-right text-[9px] font-mono text-muted-foreground truncate hover:text-foreground"
+										title="{behaviorLabel(b)} — 클릭하면 {hidden ? '다시 표시' : '숨김'}">
+										{hidden ? '☐' : '☑'} {behaviorLabel(b)}
+									</button>
 									<div class="relative h-[20px] rounded bg-muted/50">
 										<!-- 경계 불확실(±RTT/2) — 해칭. **강조가 아니라 "모름" 으로 읽혀야 한다.**
 										     이게 없으면 ±10ms 측정과 ±250ms 측정이 화면상 똑같아 보인다. -->
@@ -1616,7 +1659,7 @@
 											style="left:{left}%; width:{width}%;
 												{idle
 													? 'border:1px dashed var(--border); color:var(--muted-foreground);'
-													: `background:${behaviorSolid(b.type)}; color:#fff;`}"
+													: `background:${behaviorSolid(i)}; color:#fff;`}"
 											title="{behaviorLabel(b)} — {b.startedMono.toFixed(2)}s → {b.finishedMono.toFixed(2)}s">
 											<span class="truncate">{b.type}</span>
 											<span class="ml-auto pl-1.5 font-mono opacity-80">
@@ -1675,7 +1718,7 @@
 										<tr class="border-b border-border/40">
 											<td class="py-1 pr-2 font-sans">
 												<span class="inline-block w-2 h-2 rounded-sm mr-1 align-middle"
-													style="background:{behaviorSolid(row.type)}"></span>
+													style="background:{behaviorSolid(row.colorIndex)}"></span>
 												{row.label}
 												{#if !row.success}
 													<span class="ml-1 text-red-500" title="이 스텝은 실패했습니다">실패</span>
