@@ -549,6 +549,39 @@ export function getTraceResult(serverId: number, data: {
 }
 
 /**
+ * 잡별 시계 정합 상태.
+ *
+ * 스텝 구간 분할이 **가능한지**와 불가능하면 **왜인지**를 준다. 구간이 안 보일 때
+ * "기능이 사라진 것" 처럼 보이면 안 되므로, 화면이 이유를 그대로 인용한다.
+ */
+export interface ClockSyncOffset {
+	offset: number;
+	rttSec: number;
+	measuredAtSec: number;
+	samples: number;
+	uncertaintySec: number;
+}
+
+export interface ClockSyncInfo {
+	usable: boolean;
+	reason: string;
+	rttThresholdSec: number;
+	/** 측정이 아예 없으면 없는 필드 (0 을 "완벽" 으로 오독하지 않도록 서버가 생략한다). */
+	uncertaintySec?: number;
+	driftSec?: number;
+	notFound?: boolean;
+	start?: ClockSyncOffset;
+	stop?: ClockSyncOffset;
+}
+
+export function getTraceClockSync(
+	serverId: number,
+	jobIds: string[]
+): Promise<{ clockSync: Record<string, ClockSyncInfo> }> {
+	return post(`/agent/trace/clocksync?serverId=${serverId}`, { jobIds });
+}
+
+/**
  * I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나".
  *
  * fsio_* 산출물에서만 의미가 있다. ftrace 산출물로 호출하면 대부분의 축이

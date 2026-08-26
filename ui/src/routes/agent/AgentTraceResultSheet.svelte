@@ -9,7 +9,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -543,6 +543,8 @@
 		if (open && serverId != null && ids.length > 0) {
 			loadRawData();
 			loadStats();
+			// 구간이 안 보일 때 이유를 대려면 필요하다. 실패해도 나머지 조회엔 영향 없다.
+			loadClockSync();
 		}
 	});
 
@@ -588,6 +590,35 @@
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
 		finally { loadingRaw = false; }
 	}
+
+	// ── 시계 정합 상태 ──
+	//
+	// 구간이 안 보일 때 **왜인지** 를 화면이 말하게 한다. 이유 없이 기능이 사라지면
+	// 버그로 읽히고, 반대로 못 믿을 offset 으로 조용히 구간을 나누면 틀린 그래프가
+	// 정상으로 보인다. 서버 판정(reason)을 그대로 인용하는 게 안전하다.
+	let clockSync = $state<Record<string, ClockSyncInfo> | null>(null);
+
+	async function loadClockSync() {
+		if (serverId == null || activeJobIds.length === 0) return;
+		try {
+			const res = await getTraceClockSync(serverId, activeJobIds);
+			clockSync = res.clockSync ?? null;
+		} catch (e) {
+			// 조회 실패는 조회 자체를 막지 않는다 — 배너가 일반 문구로 내려갈 뿐.
+			console.error('clock sync 조회 실패:', e);
+			clockSync = null;
+		}
+	}
+
+	// 조회된 잡 중 하나라도 못 믿으면 그 이유를 보여 준다.
+	const clockSyncReason = $derived.by<string>(() => {
+		if (!clockSync) return '';
+		for (const id of activeJobIds) {
+			const c = clockSync[id];
+			if (c && !c.usable && c.reason) return c.reason;
+		}
+		return '';
+	});
 
 	async function loadStats(filter?: TraceFilter) {
 		if (serverId == null || activeJobIds.length === 0) return;
@@ -1048,10 +1079,16 @@
 						     사라진 것처럼 보이는 게 가장 나쁜 실패다. -->
 						<div class="mb-2 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[9px] leading-relaxed">
 							<b>스텝 구간을 표시할 수 없습니다.</b>
-							수집 시점의 clock offset 을 측정하지 못했거나 신뢰할 수 없어
-							(느린 adb 연결, 수집 중 시계 변경 등) 구간 경계를 IO 타임라인에
-							맞출 수 없습니다. 틀린 위치에 그리면 그래프가 정상으로 보여
-							오히려 잘못된 결론으로 이어지므로 표시하지 않습니다.
+							{#if clockSyncReason}
+								<span class="font-mono">{clockSyncReason}</span>
+							{:else}
+								수집 시점의 clock offset 을 측정하지 못했거나 신뢰할 수 없습니다
+								(느린 adb 연결, 수집 중 시계 변경 등).
+							{/if}
+							<div class="mt-0.5 {captionMuted}">
+								틀린 위치에 그리면 그래프가 정상으로 보여 오히려 잘못된 결론으로
+								이어지므로 표시하지 않습니다.
+							</div>
 						</div>
 					{/if}
 					{#if loadingRaw}
