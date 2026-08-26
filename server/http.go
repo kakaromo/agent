@@ -95,6 +95,7 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 		registerExecutionRoutes(mux, opts.DB)
 		registerMacroRoutes(mux, opts.Agent, opts.DB)
 		registerPresetRoutes(mux, opts.DB)
+		registerAILogProfileRoutes(mux, opts.DB)
 		registerScheduleRoutes(mux, opts.DB, opts.ScheduleRunner)
 		installJobExecutionHook(opts.Agent, opts.DB, opts.ArchiveBase)
 	}
