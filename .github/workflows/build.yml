@@ -1,0 +1,186 @@
+name: build
+
+# 회사에서 바로 받아 쓰기 위한 3-OS 바이너리 빌드.
+#
+# ⚠ 크로스 컴파일이 불가능하다 — go-duckdb 가 cgo 의존이라 CGO_ENABLED=0 이면
+#   `undefined: bindings.Type` 류로 컴파일이 깨진다(build.ps1 주석과 같은 증상).
+#   그래서 각 OS 의 네이티브 러너에서 각각 빌드한다.
+#
+# ⚠ UI 를 먼저 빌드해야 한다 — //go:embed all:ui/build 라서 ui/build 가 비어 있으면
+#   .gitkeep 만 임베드돼 SPA 가 안 뜬다. build-ui.sh 가 그걸 명시적으로 실패시킨다.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # 수동 실행 (회사에서 필요할 때 바로 받기)
+
+permissions:
+  contents: write           # 릴리스 업로드용
+
+env:
+  GO_VERSION: '1.25.7'      # go.mod 와 일치시킬 것
+  NODE_VERSION: '22'
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false      # 한 OS 가 깨져도 나머지는 받아볼 수 있게
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-amd64
+            goarch: amd64
+            binary: agent
+            iotest: iotest
+            archive: tar.gz
+          - os: macos-latest        # Apple Silicon 러너
+            label: darwin-arm64
+            goarch: arm64
+            binary: agent
+            iotest: iotest
+            archive: tar.gz
+          - os: macos-13            # Intel 러너
+            label: darwin-amd64
+            goarch: amd64
+            binary: agent
+            iotest: iotest
+            archive: tar.gz
+          - os: windows-latest
+            label: windows-amd64
+            goarch: amd64
+            binary: agent.exe
+            iotest: iotest.exe
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      # UI 를 먼저 — go:embed 대상이라 순서가 강제된다.
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # 임베드가 실제로 채워졌는지 확인. 여기서 안 잡으면 "빌드는 됐는데
+      # UI 가 빈 화면" 으로 나중에 발견된다.
+      - name: Verify UI output
+        shell: bash
+        run: |
+          test -f ui/build/index.html || { echo "::error::ui/build/index.html 없음 — 임베드 실패"; exit 1; }
+          echo "ui/build OK"
+
+      - name: Build agent
+        shell: bash
+        env:
+          CGO_ENABLED: '1'          # go-duckdb 필수
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          # main 에 version 변수가 없어 -X 는 쓰지 않는다 (있으면 조용히 무시된다).
+          # 버전은 아티팩트 이름과 릴리스 태그로 식별한다.
+          go build -trimpath -ldflags "-s -w" -o "${{ matrix.binary }}" .
+
+      # 시나리오 iotest 스텝이 쓰는 보조 바이너리 (build.ps1 과 동일).
+      - name: Build iotest tool
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p tools
+          go build -trimpath -ldflags "-s -w" -o "tools/${{ matrix.iotest }}" ./cmd/iotest/
+
+      # 바이너리가 실제로 뜨는지 — 링크 실패나 라이브러리 누락을 여기서 잡는다.
+      # 링크 실패·공유 라이브러리 누락을 여기서 잡는다.
+      # Go 의 flag 패키지는 -h 에 exit 2 를 내므로 종료코드가 아니라 usage 출력으로 판정.
+      - name: Smoke test
+        shell: bash
+        run: |
+          out=$(./${{ matrix.binary }} -h 2>&1 || true)
+          echo "$out" | head -20
+          echo "$out" | grep -q -- "-standalone" \
+            || { echo "::error::바이너리가 정상 실행되지 않음"; exit 1; }
+
+      - name: Test
+        if: matrix.os == 'ubuntu-latest'    # 로직 테스트는 OS 무관 — 한 번만
+        run: go test ./...
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIST="agent-${{ matrix.label }}"
+          mkdir -p "$DIST/config" "$DIST/tools"
+
+          cp "${{ matrix.binary }}" "$DIST/"
+          # config.go 는 소스라 배포에 넣지 않는다 — toml 만.
+          cp config/devices.toml "$DIST/config/"
+          # 화면 미러링에 필요. git 에 추적되는 유일한 tools 자산이다.
+          cp tools/scrcpy-server "$DIST/tools/"
+          cp "tools/${{ matrix.iotest }}" "$DIST/tools/"
+
+          cat > "$DIST/README.txt" <<'EOF'
+          agent — Android 디바이스 에이전트
+
+          실행:
+            ./agent --standalone            UI 포함, 127.0.0.1:50051 (출장/단독)
+            ./agent                         gRPC only, 0.0.0.0 (사무실)
+            ./agent --standalone --bind 0.0.0.0   LAN 공유 (신뢰망에서만)
+
+          브라우저에서 http://127.0.0.1:50051 접속.
+
+          사전 조건:
+            - adb 가 PATH 에 있어야 합니다.
+            - 벤치마크 도구(fio/iozone/tiotest)와 fsiotrace 는 용량 때문에
+              포함되지 않습니다. tools/ 에 직접 넣으세요.
+
+          설정: config/devices.toml
+          EOF
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a -tzip "${DIST}.zip" "$DIST" >/dev/null
+          else
+            tar czf "${DIST}.tar.gz" "$DIST"
+          fi
+          ls -la agent-*.${{ matrix.archive }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.label }}
+          path: agent-${{ matrix.label }}.*
+          retention-days: 30
+
+  # 태그를 밀면 릴리스로 묶어 준다 — 회사에서 링크 하나로 받기 위함.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
