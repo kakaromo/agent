@@ -37,8 +37,10 @@ var unitRe = regexp.MustCompile(
 // ⚠ Go 의 RE2 에는 negative lookahead 가 없다. 그래서 `time to first fix`(GPS) 같은
 // 알려진 오탐은 정규식 안에서 못 빼고 knownFalseRe 로 따로 거른다.
 // ⚠⚠ 여기서 `model load` / `graph prepare` / `context init` 를 **뺐다.**
-// 실기기 로그로 돌려보니 이것들이 **음성 wakeword(Bixby)** 를 최상위로 올렸다:
+// 실기기 로그로 돌려보니 이것들이 **음성 wakeword 엔진**을 최상위로 올렸다:
 // `loadPhraseSoundModel`, `Loading sound model`, `graph_prepare` 가 전부 걸린다.
+// (관측은 삼성 기기였지만 벤더 무관하다 — vivo Jovi, Xiaomi XiaoAI, Google
+// Assistant 등 어느 wakeword 엔진이든 같은 낱말을 쓴다.)
 //
 // 근본 문제는 튜닝이 아니라 **어휘가 겹친다**는 것이다. 온디바이스 ML 은 종류를
 // 불문하고 "모델을 로드" 하고 "추론" 한다 — 음성 wakeword, 얼굴인식, 사진 분류가
@@ -65,8 +67,9 @@ var knownFalseRe = regexp.MustCompile(`(?i)time to first fix`)
 // ⚠ 벤더 이름을 여기 넣지 않는다. vivo/QNN/MTK 마다 이름이 다른데 목록으로
 // 쫓아가면 새 벤더가 나올 때마다 코드를 고쳐야 한다. 대신 **동작을 가리키는
 // 일반 낱말**만 둔다 — 벤더가 뭘 부르든 이 낱말들은 공통으로 쓴다.
-// ⚠ `dsp`/`npu` 단독은 뺐다 — 음성 wakeword 가 DSP 를 쓰기 때문에 Bixby 계열이
-// 통째로 걸렸다. 가속기 이름은 "LLM 이다" 의 근거가 못 된다.
+// ⚠ `dsp`/`npu` 단독은 뺐다 — 음성 wakeword 는 상시 대기라 DSP 에서 도는 것이
+// 일반적이고, 그래서 그 계열이 통째로 걸렸다. 가속기 이름은 "LLM 이다" 의 근거가
+// 못 된다 (어느 온디바이스 ML 이든 같은 가속기를 쓴다).
 var keywordRe = regexp.MustCompile(
 	`(?i)\b(ttft|time.to.first|first.token|prefill|decode|prompt.eval|eval.time|` +
 		`inference|infer|generat|token|llm|llama|gguf|context.(?:init|length)|` +
