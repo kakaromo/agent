@@ -34,8 +34,16 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	lbaCol := detectLbaColumn(db, glob)
 	// fsio 산출물이면 cross-layer 컬럼을 함께 싣는다 — Raw Data 표가 "이 IO 를 누가/
 	// 어느 파일에" 를 행 단위로 보여주기 위해 필요하다. ftrace 는 기존 11컬럼 그대로.
-	fsio := detectFsioSchema(db, glob)
+	cols := newFsioCols(db, glob)
 	where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
+
+	// ⚠ Raw Data 는 **mgmt 행을 일부러 남긴다.** 통계와 반대다.
+	//
+	// 통계는 데이터 IO 의 모수를 지키려고 mgmt 를 빼지만, Raw Data 는 "그 시각에
+	// 무슨 일이 있었나" 를 보는 화면이라 hibern8 이 도는 동안 IO 가 멈춘 게 같은
+	// 타임라인에 보여야 한다. 대신 아래 두 가지를 해 준다:
+	//   - cmd 를 mgmt_name 으로 바꿔 종류가 `0x00` 한 덩어리로 뭉치지 않게
+	//   - lba/size/qd 를 NULL 로 만들어 Y=0 가짜 가로줄이 안 생기게
 
 	// Count total events
 	q := fmt.Sprintf("SELECT count(*) FROM read_parquet(%s) %s", glob, where)
@@ -57,7 +65,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 
 	if total <= int64(maxEventsForTest) {
 		// No sampling needed
-		events, err := queryAllEvents(db, glob, where, cmdCol, lbaCol, fsio)
+		events, err := queryAllEvents(db, glob, where, cols, cmdCol, lbaCol)
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +76,7 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	}
 
 	// Sampling required
-	events, err := querySampledEvents(db, glob, where, cmdCol, lbaCol, total, fsio)
+	events, err := querySampledEvents(db, glob, where, cols, cmdCol, lbaCol, total)
 	if err != nil {
 		return nil, err
 	}
@@ -78,17 +86,21 @@ func GetRawData(infos []*TraceJobInfo, filter *pb.TraceFilter) (*pb.GetTraceRawD
 	return resp, nil
 }
 
-func queryAllEvents(db *sql.DB, glob, where, cmdCol, lbaCol string, fsio fsioSchema) ([]*pb.TraceEvent, error) {
-	q := fmt.Sprintf(`SELECT time, %s, qd, cpu, dtoc, ctod, ctoc, %s, size, continuous, action%s
+func queryAllEvents(db *sql.DB, glob, where string, cols fsioCols, cmdCol, lbaCol string) ([]*pb.TraceEvent, error) {
+	fsio := cols.schema
+	q := fmt.Sprintf(`SELECT time, %s, %s, cpu, dtoc, ctod, ctoc, %s, %s, continuous, action%s
 		FROM read_parquet(%s) %s ORDER BY time`,
-		lbaCol, cmdCol, fsioExtraSelect(fsio), glob, where)
+		cols.rawLbaExpr(lbaCol, ""), cols.mgmtNullExpr("qd", "UINTEGER", ""),
+		cols.rawCmdExpr(cmdCol, ""), cols.mgmtNullExpr("size", "UINTEGER", ""),
+		fsioExtraSelect(fsio), glob, where)
 	if fsio.any() {
 		return scanEventsFsio(db, q, fsio)
 	}
 	return scanEvents(db, q)
 }
 
-func querySampledEvents(db *sql.DB, glob, where, cmdCol, lbaCol string, total int64, fsio fsioSchema) ([]*pb.TraceEvent, error) {
+func querySampledEvents(db *sql.DB, glob, where string, cols fsioCols, cmdCol, lbaCol string, total int64) ([]*pb.TraceEvent, error) {
+	fsio := cols.schema
 	// Strategy:
 	// 1. Divide time range into buckets
 	// 2. From each bucket, pick min/max rows for lba, qd, dtoc, ctod, ctoc
@@ -142,7 +154,7 @@ combined AS (
   UNION
   SELECT rn FROM sampled
 )
-SELECT b.time, %s, b.qd, b.cpu, b.dtoc, b.ctod, b.ctoc, %s, b.size, b.continuous, b.action%s
+SELECT b.time, %s, %s, b.cpu, b.dtoc, b.ctod, b.ctoc, %s, %s, b.continuous, b.action%s
 FROM base b
 JOIN combined c ON b.rn = c.rn
 ORDER BY b.time
@@ -151,7 +163,9 @@ LIMIT %d`,
 		glob, filterCond,
 		lbaCol, lbaCol, lbaCol, lbaCol,
 		int(total)/maxEvents+1, // modulo for uniform sampling
-		lbaCol, cmdCol, fsioExtraSelectPrefixed(fsio, "b."),
+		cols.rawLbaExpr(lbaCol, "b."), cols.mgmtNullExpr("b.qd", "UINTEGER", "b."),
+		cols.rawCmdExpr(cmdCol, "b."), cols.mgmtNullExpr("b.size", "UINTEGER", "b."),
+		fsioExtraSelectPrefixed(fsio, "b."),
 		maxEvents)
 
 	if fsio.any() {
@@ -239,9 +253,14 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 		var action, comm, syscall, fsName, name sql.NullString
 		var aligned sql.NullBool
 		var lineNo, ino, ioFlags sql.NullInt64
+		// lba/qd/size 는 mgmt 행에서 NULL 로 온다 (fsio_cols.go 의 mgmtNullExpr).
+		// proto 필드에 직접 스캔하면 "converting NULL to uint64 is unsupported"
+		// 로 터지므로 Null* 로 받아 값이 있을 때만 채운다. 안 채우면 0 인데,
+		// **여기서의 0 은 wire 상 필드 부재와 같아** 클라이언트가 구분할 수 있다.
+		var lba, qd, size sql.NullInt64
 
-		dest := []any{&e.Time, &e.Lba, &e.Qd, &e.Cpu, &e.Dtoc, &e.Ctod, &e.Ctoc,
-			&e.Cmd, &e.Size, &e.Continuous, &action,
+		dest := []any{&e.Time, &lba, &qd, &e.Cpu, &e.Dtoc, &e.Ctod, &e.Ctoc,
+			&e.Cmd, &size, &e.Continuous, &action,
 			&aligned, &lineNo, &e.Pid, &e.Tid, &comm, &syscall, &fsName, &ino, &name, &ioFlags}
 
 		var tag, opcode, lun, groupid sql.NullInt64
@@ -263,6 +282,17 @@ func scanEventsFsio(db *sql.DB, q string, f fsioSchema) ([]*pb.TraceEvent, error
 		}
 
 		e.Action = action.String
+		// mgmt 행은 NULL → 0 으로 남긴다. lba/size/qd 가 0 인 mgmt 행은
+		// 클라이언트가 그 값을 안 찍어야 한다 (차트 Y=0 가짜 가로줄 방지).
+		if lba.Valid {
+			e.Lba = uint64(lba.Int64)
+		}
+		if qd.Valid {
+			e.Qd = uint32(qd.Int64)
+		}
+		if size.Valid {
+			e.Size = uint32(size.Int64)
+		}
 		e.Aligned = aligned.Bool
 		e.LineNumber = uint64(lineNo.Int64)
 		e.Comm = comm.String

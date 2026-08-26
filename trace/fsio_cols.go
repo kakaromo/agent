@@ -32,21 +32,6 @@ func newFsioCols(db *sql.DB, glob string) fsioCols {
 	return fsioCols{schema: detectFsioSchema(db, glob)}
 }
 
-// hexOpcodeExpr — fsio_ufs 의 opcode(UInt8)를 `0x2a` 꼴 hex 문자열로.
-//
-// ⚠ **ftrace 잡과 union 되면 opcode 가 VARCHAR 로 승격된다** (ftrace UFS 는
-// opcode 가 '0x2a' 문자열). 그 상태에서 to_hex 를 태우면 숫자가 아니라
-// **ASCII 바이트**를 인코딩한다 — '42' → '3432' → lpad(...,2) 로 잘려 '0x34'
-// 라는 엉뚱한 cmd 가 나오고, 분류기가 전부 default 로 새서 read/write 바이트가
-// 0 이 된다. typeof 로 갈라 이미 문자열이면 그대로 쓴다.
-//
-// ⚠ CASE 의 두 갈래는 **둘 다 타입 검사를 통과해야 한다**. opcode 가 UTINYINT
-// 일 때 lower(opcode) 는 함수 매칭에 실패하므로 양쪽 모두 VARCHAR 로 캐스팅해
-// 둔다. to_hex(VARCHAR) 는 ASCII 를 인코딩하지만 그 갈래는 실행되지 않는다.
-const hexOpcodeExpr = "CASE WHEN typeof(opcode) = 'VARCHAR' " +
-	"THEN lower(CAST(opcode AS VARCHAR)) " +
-	"ELSE '0x' || lpad(lower(to_hex(CAST(opcode AS UTINYINT))), 2, '0') END"
-
 // mgmtExclusion — 데이터 IO 집계에서 mgmt 행을 빼는 조건.
 //
 // COALESCE 인 이유 — 다른 trace_type parquet 과 union 하면 is_mgmt 가 NULL 이다.
@@ -80,25 +65,47 @@ func (c fsioCols) ExcludeMgmt(where string) string {
 //
 // 정본: Rust `../trace/src/output/chart_rpc_duckdb.rs:362`.
 func (c fsioCols) CmdExpr(includeMgmt bool) string {
+	return c.CmdExprPrefixed(includeMgmt, "")
+}
+
+// CmdExprPrefixed — CmdExpr 의 테이블 별칭 버전 (`b.` 등). 샘플링 쿼리처럼
+// JOIN 이 있는 곳은 컬럼을 한정하지 않으면 ambiguous 로 터진다.
+func (c fsioCols) CmdExprPrefixed(includeMgmt bool, prefix string) string {
 	if !c.schema.any() {
 		return ""
 	}
-	base := hexOpcodeExpr
+	col := func(n string) string { return prefix + n }
+	// opcode(UInt8) → `0x2a` 꼴 hex.
+	//
+	// ⚠ **ftrace 잡과 union 되면 opcode 가 VARCHAR 로 승격된다** (ftrace UFS 는
+	// opcode 가 '0x2a' 문자열). 그 상태에서 to_hex 를 태우면 숫자가 아니라
+	// **ASCII 바이트**를 인코딩한다 — '42' → '3432' → lpad(...,2) 로 잘려 '0x34'
+	// 라는 엉뚱한 cmd 가 나오고, 분류기가 전부 default 로 새서 read/write 바이트가
+	// 0 이 된다. typeof 로 갈라 이미 문자열이면 그대로 쓴다.
+	//
+	// ⚠ CASE 의 두 갈래는 **둘 다 타입 검사를 통과해야 한다**. opcode 가 UTINYINT
+	// 일 때 lower(opcode) 는 함수 매칭에 실패하므로 양쪽 모두 VARCHAR 로 캐스팅해
+	// 둔다. to_hex(VARCHAR) 는 ASCII 를 인코딩하지만 그 갈래는 실행되지 않는다.
+	base := fmt.Sprintf("CASE WHEN typeof(%s) = 'VARCHAR' "+
+		"THEN lower(CAST(%s AS VARCHAR)) "+
+		"ELSE '0x' || lpad(lower(to_hex(CAST(%s AS UTINYINT))), 2, '0') END",
+		col("opcode"), col("opcode"), col("opcode"))
 	if c.schema.isUFS && includeMgmt {
 		// mgmt_name 이 빈 문자열인 행(종류 특정 실패)은 hex 로 폴백한다 —
 		// 빈 cmd 는 차트 범례에서 이름 없는 계열이 되어 더 나쁘다.
 		base = fmt.Sprintf(
-			"CASE WHEN COALESCE(is_mgmt, FALSE) AND COALESCE(mgmt_name, '') != '' "+
-				"THEN mgmt_name ELSE %s END", base)
+			"CASE WHEN COALESCE(%s, FALSE) AND COALESCE(%s, '') != '' "+
+				"THEN %s ELSE %s END",
+			col("is_mgmt"), col("mgmt_name"), col("mgmt_name"), base)
 	}
 	switch {
 	case c.schema.isUFS && c.schema.isBlock:
 		// 여러 잡을 합쳐 두 스키마가 섞인 경우 — 있는 쪽을 쓴다.
-		return fmt.Sprintf("COALESCE(%s, rwbs)", base)
+		return fmt.Sprintf("COALESCE(%s, %s)", base, col("rwbs"))
 	case c.schema.isUFS:
 		return base
 	default:
-		return "rwbs"
+		return col("rwbs")
 	}
 }
 
@@ -115,10 +122,37 @@ func (c fsioCols) CmdExpr(includeMgmt bool) string {
 // 캐스팅이 "Invalid column type NULL" 로 터진다.
 //
 // 정본: Rust `../trace/src/output/chart_rpc_duckdb.rs:358-360`.
-func (c fsioCols) mgmtNullExpr(col, typ string) string {
+func (c fsioCols) mgmtNullExpr(col, typ, prefix string) string {
 	if !c.schema.isUFS {
 		return col
 	}
 	return fmt.Sprintf(
-		"CASE WHEN COALESCE(is_mgmt, FALSE) THEN NULL::%s ELSE %s END", typ, col)
+		"CASE WHEN COALESCE(%sis_mgmt, FALSE) THEN NULL::%s ELSE %s END",
+		prefix, typ, col)
+}
+
+// rawCmdExpr — Raw Data / 차트용 cmd 식. mgmt 를 이름으로 살린다.
+//
+// 통계용(CmdExpr(false))과 갈라 두는 이유 — 통계는 ExcludeMgmt 로 mgmt 를
+// 아예 빼므로 이름이 필요 없고, 오히려 cmd 축에 mgmt 이름이 섞이면 read/write
+// 분류기가 오작동한다. Raw Data 는 반대로 mgmt 를 남기므로 이름이 필수다.
+//
+// fsio 가 아니면 호출부가 넘긴 기존 cmdCol 을 그대로 쓴다 — ftrace 는
+// opcode/io_type 이름이 스키마마다 달라 여기서 지어낼 수 없다.
+func (c fsioCols) rawCmdExpr(cmdCol, prefix string) string {
+	if !c.schema.any() {
+		return cmdCol
+	}
+	return c.CmdExprPrefixed(true, prefix)
+}
+
+// rawLbaExpr — Raw Data / 차트용 lba 식. mgmt 행은 NULL.
+//
+// lbaCol 은 스키마마다 다르다(fsio_ufs=lba, fsio_block=sector) — 호출부가
+// detectLbaColumn 으로 고른 걸 받아 mgmt NULL 만 씌운다.
+func (c fsioCols) rawLbaExpr(lbaCol, prefix string) string {
+	if !c.schema.isUFS {
+		return prefix + lbaCol
+	}
+	return c.mgmtNullExpr(prefix+lbaCol, "UBIGINT", prefix)
 }

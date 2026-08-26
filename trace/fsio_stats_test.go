@@ -349,3 +349,66 @@ func TestMgmtExclusionRoundTrips(t *testing.T) {
 		t.Errorf("fsio_block 에 mgmt 조건이 붙었다: %q", got)
 	}
 }
+
+// TestRawDataNamesMgmtAndNullsNumerics — Raw Data 경로가 mgmt 행을
+// (1) 이름으로 구분되게, (2) lba/size/qd 는 0 으로 남기는지 고정한다.
+//
+// 보정 전에는 mgmt 4행이 전부 cmd=`0x00` 이었다. SCSI 로는 TEST UNIT READY 라
+// 클라이언트 분류기가 실제 IO 명령으로 오인하기까지 했다. Query 인지 hibern8
+// 인지 Abort Task 인지가 Raw Data 에서 구분되지 않으면 "hibern8 도는 동안 IO 가
+// 멈췄다" 를 볼 수가 없다 — mgmt 를 같은 타임라인에 남기는 이유가 사라진다.
+func TestRawDataNamesMgmtAndNullsNumerics(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Raw Data 는 mgmt 를 **일부러 남긴다** (통계와 반대). 7행 전부 나와야 한다.
+	if resp.TotalEvents != 7 {
+		t.Errorf("total_events = %d, want 7 — Raw Data 에서 mgmt 가 빠졌다", resp.TotalEvents)
+	}
+
+	var mgmtRows int
+	for _, e := range resp.Events {
+		isMgmt := strings.HasPrefix(e.Action, "upiu_") ||
+			strings.HasPrefix(e.Action, "uic") || e.Action == "exception"
+		if !isMgmt {
+			continue
+		}
+		mgmtRows++
+		if e.Cmd == "0x00" {
+			t.Errorf("mgmt 행이 여전히 0x00 이다: action=%s", e.Action)
+		}
+		if e.Cmd == "" {
+			t.Errorf("mgmt 행의 cmd 가 비었다: action=%s", e.Action)
+		}
+		// lba/size/qd 는 mgmt 에 의미가 없다 — NULL 로 와서 0 이어야 한다.
+		if e.Lba != 0 || e.Size != 0 || e.Qd != 0 {
+			t.Errorf("mgmt 행에 수치가 남았다: action=%s lba=%d size=%d qd=%d",
+				e.Action, e.Lba, e.Size, e.Qd)
+		}
+	}
+	if mgmtRows != 4 {
+		t.Fatalf("mgmt 행 수 = %d, want 4", mgmtRows)
+	}
+
+	// 이름이 실제로 구분되는지 — Query 와 UIC 가 서로 다른 이름이어야 한다.
+	names := map[string]bool{}
+	for _, e := range resp.Events {
+		if strings.HasPrefix(e.Action, "upiu_") || strings.HasPrefix(e.Action, "uic") {
+			names[e.Cmd] = true
+		}
+	}
+	if len(names) < 2 {
+		t.Errorf("mgmt 이름이 구분되지 않는다: %v", names)
+	}
+
+	// 데이터 IO 는 그대로 hex 여야 한다 (mgmt 이름이 새어 들어오면 안 된다).
+	for _, e := range resp.Events {
+		if e.Action == "send_req" && !strings.HasPrefix(e.Cmd, "0x") {
+			t.Errorf("데이터 IO 의 cmd 가 hex 가 아니다: %q", e.Cmd)
+		}
+	}
+}
