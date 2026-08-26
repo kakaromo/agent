@@ -34,6 +34,7 @@ type Job struct {
 	RetryCount        int32
 	RetryDelaySeconds int32
 	activeTraceIDs    map[string]string // deviceID → trace job ID
+	activeLogcatIDs   map[string]string // deviceID → logcat job ID
 
 	// stepBoundaries — deviceID → 스텝 실행 구간 목록.
 	//
@@ -143,6 +144,36 @@ func (j *Job) getActiveTraceIDs() map[string]string {
 	return cp
 }
 
+// logcat 수집도 trace 와 같은 방식으로 추적한다.
+//
+// ⚠ 따로 두는 이유: logcat 은 trace 와 **독립적으로** 켜고 끌 수 있다(trace 없이
+// logcat 만, 또는 그 반대). 하나의 map 에 섞으면 한쪽을 멈출 때 다른 쪽까지
+// 지워진다. 취소 경로에서 조용히 수집이 남는 것이 이 분리의 이유다.
+func (j *Job) setActiveLogcat(deviceID, logcatJobID string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.activeLogcatIDs == nil {
+		j.activeLogcatIDs = make(map[string]string)
+	}
+	j.activeLogcatIDs[deviceID] = logcatJobID
+}
+
+func (j *Job) clearActiveLogcat(deviceID string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	delete(j.activeLogcatIDs, deviceID)
+}
+
+func (j *Job) getActiveLogcatIDs() map[string]string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	cp := make(map[string]string, len(j.activeLogcatIDs))
+	for k, v := range j.activeLogcatIDs {
+		cp[k] = v
+	}
+	return cp
+}
+
 func (j *Job) addSubscriber(ch chan *pb.JobProgress) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -192,6 +223,20 @@ type TraceController interface {
 	TraceTypeOf(traceJobID string) string
 }
 
+// LogcatController — logcat 수집기. trace 와 같은 이유로 인터페이스로 끊는다
+// (benchmark 가 trace 를 import 하면 순환).
+//
+// ⚠ trace 와 **같은 층위의 부가 수집**이다. 시나리오 스텝이 아니라 잡 옵션으로
+// 붙으므로 scenario/steptypes.go 파생물(프롬프트·검증·UI)이 늘지 않는다.
+type LogcatController interface {
+	// StartLogcatForJob — 수집을 시작하고 잡 ID 를 준다.
+	//
+	// tags 가 비면 explore(넓게), 있으면 measure(좁게) 로 동작한다.
+	// outputDir 은 잡 산출물 폴더 밑을 가리킨다 — 구현이 허용 루트를 검증한다.
+	StartLogcatForJob(ctx context.Context, deviceID string, tags []string, outputDir string) (string, error)
+	StopLogcat(jobID string) error
+}
+
 // MacroController interface to avoid circular imports with macro package.
 type MacroController interface {
 	ReplayMacro(ctx context.Context, req *pb.ReplayMacroRequest) (*pb.ReplayMacroResponse, error)
@@ -216,6 +261,7 @@ type Orchestrator struct {
 	toolsDir  string
 	toolNames map[pb.BenchmarkTool]string // 도구별 파일명 override (nil/빈 항목은 기본명 사용)
 	traceMgr  TraceController
+	logcatMgr LogcatController
 
 	// artifactBase — 잡 산출물 루트. 설정되면 시나리오가 trace 를 자기 잡 폴더
 	// 안에 쓰게 한다(결과 JSON 과 한곳에 모으기 위함). 비면 기존 동작(trace_dir).
@@ -321,6 +367,11 @@ func (o *Orchestrator) checkDeviceBusy(deviceID, policy string) error {
 // SetTraceController sets the trace controller for scenario trace_start/trace_stop steps.
 func (o *Orchestrator) SetTraceController(tc TraceController) {
 	o.traceMgr = tc
+}
+
+// SetLogcatController sets the logcat collector (optional side-car).
+func (o *Orchestrator) SetLogcatController(lc LogcatController) {
+	o.logcatMgr = lc
 }
 
 // SetMacroController sets the macro controller for app_macro steps.
@@ -644,6 +695,21 @@ func (o *Orchestrator) CancelJob(jobID string) error {
 				slog.Warn("trace stop on cancel failed", "trace_job", traceID, "error", stopErr)
 			}
 			job.clearActiveTrace(deviceID)
+		}
+	}
+
+	// logcat 도 같이 정리한다.
+	//
+	// ⚠ 빠뜨리면 취소 후에도 adb logcat 자식 프로세스가 계속 살아 로그를 쌓는다.
+	// 화면상으로는 잡이 취소돼 정상처럼 보이므로 **조용히 새는 경로**가 된다.
+	for deviceID, logcatID := range job.getActiveLogcatIDs() {
+		if o.logcatMgr != nil && logcatID != "" {
+			slog.Info("stopping logcat on job cancel",
+				"job_id", jobID, "device", deviceID, "logcat_job", logcatID)
+			if stopErr := o.logcatMgr.StopLogcat(logcatID); stopErr != nil {
+				slog.Warn("logcat stop on cancel failed", "logcat_job", logcatID, "error", stopErr)
+			}
+			job.clearActiveLogcat(deviceID)
 		}
 	}
 

@@ -123,6 +123,9 @@ func main() {
 	coll := monitor.NewCollector(mgr)
 	traceMgr := trace.NewManager(mgr, cfg.Server.ToolsDir, cfg.Server.TraceDir)
 	orch.SetTraceController(traceMgr)
+	// logcat 수집기 — trace 와 같은 층위의 부가 수집. 산출물은 trace 와 같은 루트에 둔다.
+	logcatMgr := trace.NewLogcatManager(mgr, cfg.Server.TraceDir)
+	orch.SetLogcatController(logcatMgr)
 
 	// MinIO client (optional)
 	var minioClient *storage.MinioClient
@@ -230,6 +233,10 @@ func main() {
 		// 잡 폴더(<archiveBase>/jobs/<이름>/trace/<id>) 안의 trace 도 조회되게 등록.
 		// 재시작하면 메모리 잡이 없어 이 경로를 못 찾는다.
 		traceMgr.AddSearchRoot(archiveBase)
+		// logcat 도 같은 잡 폴더에 쓰므로 허용 루트를 함께 등록한다.
+		// ⚠ 빠뜨리면 resolveOutputBase 가 잡 폴더를 거부해 산출물이 기본 위치로
+		// 흩어진다 — 잡과 로그가 따로 놀게 된다.
+		logcatMgr.AddSearchRoot(archiveBase)
 		// 시나리오가 trace 를 자기 잡 폴더에 쓰도록 오케스트레이터에 알린다.
 		orch.SetArtifactBase(archiveBase)
 		slog.Info("archive base", "path", archiveBase)

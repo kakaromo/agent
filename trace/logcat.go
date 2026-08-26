@@ -421,3 +421,27 @@ func (m *LogcatManager) resolveOutputBase(requested string) string {
 		"requested", requested, "allowed", allowed)
 	return m.outputBase
 }
+
+// StartLogcatForJob — benchmark.LogcatController 구현.
+//
+// 시나리오가 잡 옵션으로 수집을 켤 때 쓰는 진입점이다. 태그가 있으면 measure(좁게),
+// 없으면 explore(넓게)로 간다 — 태그를 모르는 탐색 단계에서도 그대로 쓸 수 있다.
+//
+// ⚠ 탐색 모드는 부하가 크므로 **실측정에는 태그를 반드시 지정**해야 한다.
+// 여기서 막지 않는 이유는 탐색 자체가 정당한 사용이기 때문이다 — 대신 로그로 남긴다.
+func (m *LogcatManager) StartLogcatForJob(ctx context.Context, deviceID string,
+	tags []string, outputDir string) (string, error) {
+
+	mode := LogcatModeMeasure
+	if len(tags) == 0 {
+		mode = LogcatModeExplore
+		slog.Warn("logcat 태그가 없어 explore(전체) 모드로 수집한다 — "+
+			"부하가 크므로 실측정에는 태그를 지정할 것", "device", deviceID)
+	}
+	return m.StartLogcat(ctx, StartLogcatRequest{
+		DeviceID:  deviceID,
+		Mode:      mode,
+		Tags:      tags,
+		OutputDir: outputDir,
+	})
+}
