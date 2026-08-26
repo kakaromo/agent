@@ -99,3 +99,7 @@ func JobArtifactDir(archiveBase string, startedAt time.Time, jobType, jobName, j
 // trace 를 여러 번 켤 수 있어 구분자가 필요하고, traceJobId 는 API·로그에 그대로
 // 나오는 식별자라 대조가 된다.
 const JobTraceSubdir = "trace"
+
+// JobLogcatSubdir — 잡 폴더 안에서 logcat 산출물이 들어갈 디렉토리 이름.
+// trace 와 나란히 놓여 "이 잡에서 무엇을 수집했나" 가 폴더만 봐도 드러난다.
+const JobLogcatSubdir = "logcat"

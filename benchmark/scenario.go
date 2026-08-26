@@ -300,6 +300,11 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 	// Collect trace job mappings
 	var traceJobMappings []*pb.TraceJobMapping
 
+	// logcat 부가 수집 (잡 옵션). trace 와 같은 층위다.
+	if stopLogcat := o.startJobLogcat(ctx, job, deviceID); stopLogcat != nil {
+		defer stopLogcat()
+	}
+
 	// 종료 시 active trace 정리
 	defer func() {
 		slog.Info("scenario defer cleanup", "activeTraceJobID", activeTraceJobID, "hasTraceMgr", o.traceMgr != nil)
@@ -1233,6 +1238,72 @@ func (o *Orchestrator) recordStepBoundary(job *Job, deviceID string, es expanded
 	job.appendStepBoundary(deviceID, b)
 }
 
+// startJobLogcat — 시나리오 시작 시 logcat 수집을 켠다 (잡 옵션인 경우).
+//
+// ⚠ **선형 루프와 DAG 루프 양쪽에서 부른다.** 한쪽만 넣으면 캔버스 시나리오에서
+// 조용히 logcat 이 안 켜진다 — 화면상으론 잡이 정상 동작하므로 안 걸린다.
+// 그래서 두 루프가 같은 함수를 쓰게 했다 (recordStepBoundary 와 같은 이유).
+//
+// 반환값은 정리용 stop 함수다. nil 이 아닌 경우 defer 로 반드시 부른다.
+func (o *Orchestrator) startJobLogcat(ctx context.Context, job *Job, deviceID string) func() {
+	if o.logcatMgr == nil {
+		return nil
+	}
+	tags, enabled := logcatOptionsFromParams(job.Params)
+	if !enabled {
+		return nil
+	}
+
+	outDir := ""
+	if base := o.getArtifactBase(); base != "" {
+		if jobDir := job.ensureArtifactDir(base, "scenario"); jobDir != "" {
+			outDir = filepath.Join(jobDir, artifacts.JobLogcatSubdir)
+		}
+	}
+
+	logcatID, err := o.logcatMgr.StartLogcatForJob(ctx, deviceID, tags, outDir)
+	if err != nil {
+		// ⚠ 수집 실패가 시나리오를 막지는 않는다 (trace 와 같은 방침 — 부가 수집이다).
+		// 다만 **조용히 넘어가지 않는다**: 나중에 "로그가 왜 없지" 를 추적할 수 있어야 한다.
+		slog.Warn("logcat 수집 시작 실패 — 시나리오는 계속한다",
+			"job_id", job.ID, "device", deviceID, "error", err)
+		return nil
+	}
+	job.setActiveLogcat(deviceID, logcatID)
+	slog.Info("logcat 수집 시작", "job_id", job.ID, "device", deviceID,
+		"logcat_job", logcatID, "tags", tags)
+
+	return func() {
+		if err := o.logcatMgr.StopLogcat(logcatID); err != nil {
+			slog.Warn("logcat 정리 실패", "logcat_job", logcatID, "error", err)
+		}
+		job.clearActiveLogcat(deviceID)
+	}
+}
+
+// logcatOptionsFromParams — 잡 파라미터에서 logcat 옵션을 읽는다.
+//
+//	logcat=on              → 수집 켜기
+//	logcat_tags=A,B,C      → measure 모드 (좁게)
+//	(태그 없음)             → explore 모드 (넓게, 1회성 탐색용)
+func logcatOptionsFromParams(params map[string]string) (tags []string, enabled bool) {
+	if params == nil {
+		return nil, false
+	}
+	switch strings.ToLower(strings.TrimSpace(params["logcat"])) {
+	case "on", "true", "1", "yes":
+		enabled = true
+	default:
+		return nil, false
+	}
+	for _, t := range strings.Split(params["logcat_tags"], ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags, true
+}
+
 // parseTraceMapping parses a TRACE_STOP line into a TraceJobMapping.
 // Format: TRACE_STOP|loop=1|step=2|repeat=1|job_id=abc-123|trace_type=ufs
 func parseTraceMapping(line string, es expandedStep) *pb.TraceJobMapping {
@@ -1304,6 +1375,12 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 	stepFiles := make(map[int]string)
 	var activeTraceJobID string
 	var traceJobMappings []*pb.TraceJobMapping
+
+	// logcat 부가 수집 — ⚠ 선형 루프와 **양쪽 모두**에 넣는다.
+	// 한쪽만 넣으면 캔버스(DAG) 시나리오에서 조용히 logcat 이 안 켜진다.
+	if stopLogcat := o.startJobLogcat(ctx, job, deviceID); stopLogcat != nil {
+		defer stopLogcat()
+	}
 
 	// 종료 시 active trace 정리
 	defer func() {
