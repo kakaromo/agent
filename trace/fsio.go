@@ -139,9 +139,12 @@ func startFsioCollector(ctx context.Context, serial, traceType string, logFd *os
 		return nil, err
 	}
 
-	ready := make(chan struct{})
+	// ⚠ 버퍼 1 + non-blocking send. 예전엔 unbuffered + blocking send 였는데,
+	// **타임아웃이 먼저 나면 받는 쪽이 사라져 이 goroutine 이 영영 막힌다.** 그러면
+	// stderr 를 더 안 읽고, 파이프 버퍼(~64KB)가 차는 순간 fsiotrace 가 stderr 쓰기에서
+	// 막혀 **이벤트 수집이 통째로 멎는다** — 느린 기기에서 조용히 잘린 trace 가 나온다.
+	ready := make(chan struct{}, 1)
 	go func() {
-		defer close(ready)
 		sc := bufio.NewScanner(stderrPipe)
 		signalled := false
 		for sc.Scan() {
@@ -150,7 +153,10 @@ func startFsioCollector(ctx context.Context, serial, traceType string, logFd *os
 			slog.Info("fsiotrace", "serial", serial, "msg", line)
 			if !signalled && isFsioReadyLine(line) {
 				signalled = true
-				ready <- struct{}{} // 대기자에게 알리고 로그 수집은 계속
+				select {
+				case ready <- struct{}{}:
+				default: // 이미 타임아웃으로 넘어갔다 — 알릴 곳이 없을 뿐 계속 읽는다
+				}
 			}
 		}
 	}()

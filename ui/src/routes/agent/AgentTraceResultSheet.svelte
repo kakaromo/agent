@@ -55,8 +55,23 @@
 	// 아니고, 순간에 끝나 레인에서 실오라기처럼 보이며 자리만 차지한다.
 	const BOUNDARY_SKIP_TYPES = new Set(['trace_start', 'trace_stop']);
 
+	// ⚠ 서버 판정(clockSync.usable)이 false 면 **구간을 아예 안 그린다.**
+	//
+	// 예전엔 mono 값이 채워졌는지만 봤다. 그런데 mono 는 스텝이 끝나는 순간 시작
+	// offset 으로 계산돼 박히고, drift 는 그 뒤 StopTrace 에서야 드러난다 — 즉
+	// "수집 중 시계가 움직였다" 를 알아내도 이미 박힌 값은 그대로 쓰였다.
+	// 이 기능이 막으려는 실패(밀린 구간이 정상으로 보임)가 정확히 그 경로다.
+	const clockSyncUsable = $derived.by<boolean>(() => {
+		if (!clockSync) return true; // 아직 조회 전 — 데이터가 없다고 막지는 않는다
+		for (const id of activeJobIds) {
+			const c = clockSync[id];
+			if (c && !c.usable) return false;
+		}
+		return true;
+	});
+
 	const allBoundaries = $derived(
-		boundaries.filter(b =>
+		!clockSyncUsable ? [] : boundaries.filter(b =>
 			b.finishedMono > b.startedMono &&
 			b.startedMono > 0 &&
 			!BOUNDARY_SKIP_TYPES.has(b.type) &&
@@ -119,7 +134,10 @@
 	// 있을 때만 좁힌다 — 전체가 켜져 있으면 원래대로 전 구간을 본다.
 	const zoomRange = $derived.by<{ min: number; max: number } | null>(() => {
 		if (hiddenSteps.size === 0) return null;          // 전부 보는 중 → 확대 안 함
-		if (usableBoundaries.length === 0) return null;   // 전부 숨김 → 기준이 없다
+		// ⚠ 전부 숨긴 상태에서 null 을 주면 **전 구간이 보인다** — "전체 해제" 를
+		// 눌렀는데 오히려 다 나오는, 라벨과 정반대인 동작이다. 빈 범위를 줘서
+		// "아무 구간도 안 고름" 이 그대로 드러나게 한다.
+		if (usableBoundaries.length === 0) return { min: 0, max: 0 };
 		let lo = Infinity, hi = -Infinity;
 		for (const b of usableBoundaries) {
 			if (b.startedMono < lo) lo = b.startedMono;
@@ -133,7 +151,13 @@
 
 	// 구간 데이터는 왔는데 mono 가 없는 경우 — 왜 분할이 안 되는지 알려야 한다.
 	// ⚠ allBoundaries 기준이다 — 토글로 전부 숨긴 것과 "시계를 못 믿어서 못 그림" 은 다르다.
-	const boundariesUnusable = $derived(boundaries.length > 0 && allBoundaries.length === 0);
+	// ⚠ 배너는 **loop 필터 이전** 기준으로 판단한다. allBoundaries 는 selectedLoop 로도
+	// 걸러지므로, 그걸 쓰면 "구간이 없는 loop 를 골랐을 때" 도 시계 문제로 오인하게 된다.
+	const boundariesUnusable = $derived(
+		boundaries.length > 0 &&
+		(!clockSyncUsable ||
+			boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0).length === 0)
+	);
 	const hasBehavior = $derived(allBoundaries.length > 0);
 
 	// 구간 색 — **순번대로 여러 색**을 돌린다.
@@ -355,6 +379,11 @@
 		if (first !== lastFirstJob) {
 			lastFirstJob = first;
 			selectedLoop = 0;
+			// ⚠ 구간 선택도 함께 비운다. boundaryKey 는 위치 기반(stepIndex-loop-repeat-i)이라
+			// **잡이 달라도 키가 겹친다** — 안 지우면 시나리오 A 에서 숨긴 스텝이 B 에도
+			// 적용돼, 아무 조작 없이 연 화면이 이미 일부 구간만 보고 있게 된다.
+			hiddenSteps = new Set();
+			selectedSteps = new Set();
 		}
 	});
 
@@ -770,8 +799,16 @@
 		return '';
 	});
 
+	// 응답 순서 뒤바뀜 방지용 세대 카운터.
+	//
+	// loop 를 바꾸면 두 경로가 동시에 loadStats 를 부른다(열림 effect = 필터 없음,
+	// 구간 effect = zoomRange 필터). 늦게 도착한 쪽이 최종값이 되므로, 배너는
+	// "선택 구간만" 인데 표는 전 구간 수치인 상태가 나올 수 있다.
+	let statsGen = 0;
+
 	async function loadStats(filter?: TraceFilter) {
 		if (serverId == null || activeJobIds.length === 0) return;
+		const gen = ++statsGen;
 		loadingStats = true;
 		try {
 			// archived 모드 (Rust 정확 파서 결과) → Rust trace 서비스 경로로 조회
@@ -785,9 +822,11 @@
 					filter: filter as Record<string, unknown> | undefined,
 					latencyRangesMs: parseLatencyRanges()
 				});
+				if (gen !== statsGen) return; // 더 최신 요청이 있다 — 이 응답은 버린다
 				statsResult = res.stats as unknown as TraceStats;
 			} else {
 				const res = await getTraceResult(serverId, { jobIds: activeJobIds, filter, latencyRangesMs: parseLatencyRanges() });
+				if (gen !== statsGen) return; // 더 최신 요청이 있다 — 이 응답은 버린다
 				statsResult = res.stats;
 			}
 		} catch (e) {
@@ -1368,11 +1407,13 @@
 								class:opacity-40={hiddenSteps.size === allBoundaries.length}>
 								전체 해제
 							</button>
-							{#if zoomRange}
+							{#if zoomRange && zoomRange.max > zoomRange.min}
 								<!-- 축이 좁혀졌다는 걸 알린다 — 모르면 "데이터가 왜 이것뿐이지" 가 된다. -->
 								<span class={captionMuted}>
 									· 선택 구간으로 확대됨 ({(zoomRange.max - zoomRange.min).toFixed(2)}s)
 								</span>
+							{:else if zoomRange}
+								<span class="text-amber-600">· 표시할 구간이 없습니다 — “전체 선택”</span>
 							{/if}
 						</div>
 					{/if}

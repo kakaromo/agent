@@ -42,6 +42,12 @@ type Job struct {
 	// 제각각) 인자로 넘기면 한 곳만 빠뜨려도 그 경로에서 조용히 구간이 사라진다.
 	stepBoundaries map[string][]*pb.StepBoundary
 
+	// startedAt — 잡 생성 시각. 산출물 폴더 이름의 기준이다.
+	//
+	// ⚠ time.Now() 를 쓰면 안 된다 — 폴더 이름을 만드는 곳이 둘(여기, rest_hook)인데
+	// 시나리오가 첫 trace_start 에 닿기까지 1초만 걸려도 초 단위 포맷에서 갈린다.
+	startedAt time.Time
+
 	// artifactDir — 이 잡의 산출물 폴더. 한 번 정하면 고정한다.
 	//
 	// ⚠ trace_start 마다 새로 계산하면 시각이 달라져 **같은 시나리오의 trace 가 서로
@@ -57,8 +63,25 @@ func (j *Job) ensureArtifactDir(base, jobType string) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.artifactDir == "" {
-		j.artifactDir = artifacts.JobArtifactDir(base, time.Now(), jobType, j.Name, j.ID)
+		j.artifactDir = artifacts.JobArtifactDir(base, j.startedAt, jobType, j.Name, j.ID)
 	}
+	return j.artifactDir
+}
+
+// StartedAt — 잡 생성 시각. 산출물 폴더 이름의 기준이다.
+func (j *Job) StartedAt() time.Time {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.startedAt
+}
+
+// ArtifactDir — 이미 정해진 이 잡의 산출물 폴더 (없으면 빈 문자열).
+//
+// 결과 JSON 을 쓰는 쪽(rest_hook)이 **같은 폴더**를 쓰게 하려고 노출한다. 각자
+// 계산하면 시각이 달라져(초 단위 포맷) 폴더가 갈린다 — 이 기능이 없애려던 바로 그 증상.
+func (j *Job) ArtifactDir() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	return j.artifactDir
 }
 
@@ -354,6 +377,7 @@ func (o *Orchestrator) RunBenchmark(ctx context.Context, req *pb.RunBenchmarkReq
 		cancelFunc:        jobCancel,
 		RetryCount:        req.RetryCount,
 		RetryDelaySeconds: req.RetryDelaySeconds,
+		startedAt:         time.Now(),
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{

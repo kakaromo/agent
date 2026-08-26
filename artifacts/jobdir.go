@@ -46,6 +46,10 @@ func sanitizeJobDirPart(s string, max int) string {
 	}
 	if r := []rune(s); len(r) > max {
 		s = string(r[:max])
+		// ⚠ 자른 자리가 '.' 이면 다시 떼어낸다. Windows 는 디렉토리 이름의 끝
+		// '.' 을 조용히 버려서, 그 뒤만 다른 두 잡 이름이 **한 폴더로 합쳐진다.**
+		// (이 저장소는 windows-amd64 를 빌드해 배포한다)
+		s = strings.Trim(s, "._-")
 	}
 	return s
 }

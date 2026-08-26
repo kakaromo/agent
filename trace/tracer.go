@@ -127,10 +127,10 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	jobID := uuid.New().String()
 	// 산출물 위치. 시나리오가 지정하면 그 잡 폴더 안에 모은다 — 결과 JSON 과 trace 가
 	// 한곳에 있어야 폴더째 넘기는 것만으로 재현·공유가 된다(server/jobdir.go 참고).
-	outBase := req.GetOutputDir()
-	if outBase == "" {
-		outBase = m.outputBase
-	}
+	// ⚠ output_dir 은 **gRPC 로 들어오는 경로**다. 사무실 모드는 0.0.0.0 바인딩에
+	// 인증이 없어, 검사 없이 쓰면 임의 위치에 디렉토리를 만들고 로그를 쓰게 된다.
+	// 허용된 루트(outputBase 또는 등록된 검색 루트) 밑인지 확인한다.
+	outBase := m.resolveOutputBase(req.GetOutputDir())
 	outputDir := filepath.Join(outBase, jobID)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir output: %w", err)
@@ -599,6 +599,44 @@ func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) 
 	job.Mu.Unlock()
 
 	return ch, nil
+}
+
+// resolveOutputBase — 요청이 준 산출물 루트를 검증한다.
+//
+// 빈 값이면 기본 위치. 값이 있으면 **허용된 루트 밑일 때만** 받아들이고, 아니면
+// 기본 위치로 되돌린다(요청을 실패시키지 않는다 — 수집 자체는 되게).
+func (m *Manager) resolveOutputBase(requested string) string {
+	if requested == "" {
+		return m.outputBase
+	}
+	abs, err := filepath.Abs(filepath.Clean(requested))
+	if err != nil {
+		slog.Warn("output_dir 해석 실패 — 기본 위치 사용", "requested", requested, "error", err)
+		return m.outputBase
+	}
+
+	m.mu.RLock()
+	allowed := append([]string{m.outputBase}, m.searchRoots...)
+	m.mu.RUnlock()
+
+	for _, root := range allowed {
+		if root == "" {
+			continue
+		}
+		rootAbs, err := filepath.Abs(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		// filepath.Rel 로 상위 탈출(".." 시작)을 잡는다 — 문자열 prefix 비교는
+		// "/data" 와 "/data-evil" 을 구분하지 못한다.
+		rel, err := filepath.Rel(rootAbs, abs)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return abs
+		}
+	}
+	slog.Warn("output_dir 이 허용된 루트 밖이다 — 기본 위치 사용",
+		"requested", requested, "allowed", allowed)
+	return m.outputBase
 }
 
 // AddSearchRoot — trace 산출물을 찾을 추가 루트를 등록한다.

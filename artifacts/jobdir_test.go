@@ -64,3 +64,15 @@ func TestJobDirNameZeroTime(t *testing.T) {
 		t.Error("빈 이름이 나왔다")
 	}
 }
+
+// ⚠ Windows 는 디렉토리 이름 끝의 '.' 을 조용히 버린다. 자른 자리가 '.' 이면
+// 그 뒤만 다른 두 잡 이름이 **한 폴더로 합쳐진다.** (windows-amd64 를 빌드해 배포한다)
+func TestJobDirNameNoTrailingDotAfterTruncation(t *testing.T) {
+	at := time.Date(2026, 8, 26, 22, 28, 41, 0, time.UTC)
+	// 40번째 글자가 '.' 이 되도록 만든다
+	name := strings.Repeat("a", 39) + "." + "evil"
+	got := JobDirName(at, "scenario", name, "id")
+	if strings.HasSuffix(got, ".") {
+		t.Errorf("이름이 '.' 로 끝난다 (Windows 에서 충돌): %q", got)
+	}
+}

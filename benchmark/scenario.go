@@ -136,6 +136,7 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 		DeviceStatuses: make(map[string]*pb.DeviceJobStatus),
 		Results:        make(map[string]*pb.BenchmarkResult),
 		cancelFunc:     jobCancel,
+		startedAt:      time.Now(),
 	}
 	for _, id := range deviceIDs {
 		job.DeviceStatuses[id] = &pb.DeviceJobStatus{
