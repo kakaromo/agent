@@ -110,7 +110,8 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	fsio := detectFsioSchema(db, glob)
-	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
+	timeCol := detectTimeColumn(db, glob)
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
 	// mgmt(Query/TM UPIU, UIC) 행 제외.
 	//
 	// 집계 대부분은 action = send_req/block_rq_issue 로 걸러져 mgmt 가 자동 제외되지만,
@@ -583,7 +584,7 @@ func ComputeAIExtras(infos []*TraceJobInfo, filter *pb.TraceFilter, tailN, timeB
 	lbaCol := detectLbaColumn(db, glob)
 	cmdCol := detectCmdColumn(db, glob)
 	timeCol := detectTimeColumn(db, glob) // UFSCUSTOM 등 time 컬럼 부재 대비
-	where := buildFilterWhereCols(filter, lbaCol, cmdCol, filterPresentCols(db, glob))
+	where := buildFilterWhereCols(filter, lbaCol, cmdCol, timeCol, filterPresentCols(db, glob))
 
 	// 1. tail latency top-N (dtoc 기준 가장 느린 요청)
 	if tail, err := queryTailLatency(db, glob, where, cmdCol, timeCol, tailN); err != nil {
@@ -917,23 +918,49 @@ func parseMaskString(s string) uint64 {
 	return v
 }
 
+// hasStartTime / hasEndTime — 시간 범위가 설정됐는가.
+//
+// ⚠ proto3 scalar 라 "미설정" 과 "0" 을 구분하지 못한다. 여기서는 **0 = 미설정**
+// 으로 본다 — 기존 UI(Time min/max 입력)가 빈 칸을 0 으로 보내오기 때문이다.
+//
+// 스텝 구간 분할에서 이게 문제가 되지 않는 이유: parquet `time` 은 트레이스 시작
+// 기준 상대초가 아니라 **기기 부팅 기준 monotonic 절대초**다(파서가 TSV 0번 컬럼을
+// 그대로 싣는다 — parser/fsio_line.go). 그래서 실제 구간 경계는 수천~수만 초대이지
+// 0 근처가 아니다. 0 이 유효 경계가 되는 건 부팅 직후 트레이스뿐인데, 그 경우에도
+// 하한 생략은 결과를 바꾸지 않는다(그 앞에 데이터가 없다).
+//
+// 만약 나중에 축을 트레이스 상대초로 바꾸면 이 전제가 깨진다 — 그때는 음수 센티넬이나
+// optional 필드로 "미설정" 을 따로 표현해야 한다.
+func hasStartTime(f *pb.TraceFilter) bool { return f.StartTime > 0 }
+func hasEndTime(f *pb.TraceFilter) bool   { return f.EndTime > 0 }
+
 // buildFilterWhereCols — TraceFilter → WHERE 절.
 //
 // present 는 이 parquet 에 실제로 있는 컬럼 집합이다. cross-layer 필터는 fsio 에만
 // 있는 컬럼을 참조하므로, 없는 컬럼 조건은 **조용히 건너뛴다** — 넣으면 쿼리 자체가
 // 깨져서 ftrace 산출물 조회가 통째로 실패한다. nil 이면 검사를 생략한다(하위 호환).
-func buildFilterWhereCols(f *pb.TraceFilter, lbaCol, cmdCol string, present map[string]bool) string {
+//
+// timeCol 은 시간축 컬럼식(detectTimeColumn 결과). 빈 문자열이면 시간 조건을 건너뛴다
+// — 예전엔 `time` 을 리터럴로 박아서 `start_time` 만 있는 스키마(UFSCUSTOM 등)에
+// 시간 필터를 걸면 DuckDB Binder Error 로 조회가 통째로 깨졌다. lbaCol/cmdCol 이
+// 이미 인자로 들어오는 것과 같은 이유다.
+func buildFilterWhereCols(f *pb.TraceFilter, lbaCol, cmdCol, timeCol string, present map[string]bool) string {
 	if f == nil {
 		return ""
 	}
 	// has — 컬럼 존재 여부. present 가 nil 이면 전부 있다고 본다.
 	has := func(col string) bool { return present == nil || present[col] }
 	var conds []string
-	if f.StartTime > 0 {
-		conds = append(conds, fmt.Sprintf("time >= %f", f.StartTime))
-	}
-	if f.EndTime > 0 {
-		conds = append(conds, fmt.Sprintf("time <= %f", f.EndTime))
+	// 시간 범위. HasStartTime/HasEndTime 로 "미설정" 과 "0초" 를 가른다 —
+	// `> 0` 로 판정하면 트레이스 원점(0초)에서 시작하는 첫 구간의 하한이 조용히
+	// 사라져 앞 구간이 무한정 넓어진다. 스텝 구간 분할에서 흔한 경우다.
+	if timeCol != "" {
+		if hasStartTime(f) {
+			conds = append(conds, fmt.Sprintf("%s >= %f", timeCol, f.StartTime))
+		}
+		if hasEndTime(f) {
+			conds = append(conds, fmt.Sprintf("%s <= %f", timeCol, f.EndTime))
+		}
 	}
 	if f.StartLba > 0 {
 		conds = append(conds, fmt.Sprintf("%s >= %d", lbaCol, f.StartLba))

@@ -324,7 +324,12 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING, msg, progress)
 
 		prevTraceID := activeTraceJobID
+		stepStartedAt := time.Now().UnixMilli()
 		stepOut, stepMetrics, err := o.executeStep(ctx, job, md, es, i, stepFiles, deviceID, &activeTraceJobID)
+		// 구간 기록 — trace_start 스텝은 실행 **후**에야 잡 ID 가 생기므로 전/후 중
+		// 있는 쪽을 쓴다. (통짜 1잡이면 두 값이 같다)
+		o.recordStepBoundary(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
+			stepStartedAt, time.Now().UnixMilli(), err)
 
 		// trace 상태가 바뀌었으면 job에 등록/해제 (cancel 시 정리용)
 		if activeTraceJobID != prevTraceID {
@@ -1045,6 +1050,50 @@ func formatStepMessage(es expandedStep, totalSteps int) string {
 	return strings.Join(parts, ", ")
 }
 
+// firstNonEmpty — 앞엣것이 비어 있으면 뒤엣것.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// recordStepBoundary — 스텝 하나의 실행 구간을 Job 에 기록한다.
+//
+// **왜 필요한가.** Trace Result 는 잡 전체가 한 타임라인이라 "스크롤 중 write" 와
+// "영상 중 read" 가 섞여 보인다. 스텝 경계를 남겨 두면 같은 수집을 구간별로 잘라
+// 볼 수 있다 — 기기에서 뭘 더 수집할 필요 없이 호스트가 시각만 적으면 된다.
+//
+// monotonic 변환은 **활성 trace 잡의 offset** 으로 한다. trace 가 안 돌고 있거나
+// offset 을 못 믿으면 mono 값은 0 으로 남고, 그 구간은 UI 에서 분할에 쓰이지 않는다
+// (호스트 시각은 그대로 남아 로그 대조에는 쓸 수 있다).
+func (o *Orchestrator) recordStepBoundary(job *Job, deviceID string, es expandedStep,
+	traceJobID string, startedAt, finishedAt int64, err error) {
+
+	b := &pb.StepBoundary{
+		StepIndex:   int32(es.stepIndex),
+		LoopIndex:   int32(es.loopIndex),
+		RepeatIndex: int32(es.repeatIndex),
+		Type:        es.step.GetType(),
+		Label:       es.step.GetParams()["label"],
+		StartedAt:   startedAt,
+		FinishedAt:  finishedAt,
+		Success:     err == nil,
+	}
+	if err != nil {
+		b.Error = err.Error()
+	}
+	if o.traceMgr != nil && traceJobID != "" {
+		if m, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, startedAt); ok {
+			b.StartedMono = m
+		}
+		if m, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, finishedAt); ok {
+			b.FinishedMono = m
+		}
+	}
+	job.appendStepBoundary(deviceID, b)
+}
+
 // parseTraceMapping parses a TRACE_STOP line into a TraceJobMapping.
 // Format: TRACE_STOP|loop=1|step=2|repeat=1|job_id=abc-123|trace_type=ufs
 func parseTraceMapping(line string, es expandedStep) *pb.TraceJobMapping {
@@ -1215,7 +1264,12 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 
 			prevTraceID := activeTraceJobID
+			dagStepStartedAt := time.Now().UnixMilli()
 			stepOut, stepMetrics, execErr := o.executeStep(ctx, job, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
+			// 선형 루프와 **같은 기록**을 남긴다. 한쪽만 넣으면 캔버스(DAG) 시나리오에서
+			// 조용히 빈 화면이 된다.
+			o.recordStepBoundary(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
+				dagStepStartedAt, time.Now().UnixMilli(), execErr)
 
 			// trace 상태 변경 → job에 등록/해제
 			if activeTraceJobID != prevTraceID {

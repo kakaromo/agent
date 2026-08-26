@@ -33,6 +33,40 @@ type Job struct {
 	RetryCount        int32
 	RetryDelaySeconds int32
 	activeTraceIDs    map[string]string // deviceID → trace job ID
+
+	// stepBoundaries — deviceID → 스텝 실행 구간 목록.
+	//
+	// behavior 구간별 IO 분석의 시간 축이다. activeTraceIDs 와 같은 패턴으로 Job 에
+	// 달아 두는 이유: storeResult 호출부가 10곳 가까이 되는데(성공/실패/취소 경로가
+	// 제각각) 인자로 넘기면 한 곳만 빠뜨려도 그 경로에서 조용히 구간이 사라진다.
+	stepBoundaries map[string][]*pb.StepBoundary
+}
+
+// appendStepBoundary — 스텝 하나의 실행 구간을 기록한다.
+func (j *Job) appendStepBoundary(deviceID string, b *pb.StepBoundary) {
+	if b == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.stepBoundaries == nil {
+		j.stepBoundaries = make(map[string][]*pb.StepBoundary)
+	}
+	j.stepBoundaries[deviceID] = append(j.stepBoundaries[deviceID], b)
+}
+
+// takeStepBoundaries — 기록된 구간을 복사해 돌려준다 (호출자가 슬라이스를 들고
+// 나가므로 내부 상태와 공유하지 않는다).
+func (j *Job) takeStepBoundaries(deviceID string) []*pb.StepBoundary {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	src := j.stepBoundaries[deviceID]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]*pb.StepBoundary, len(src))
+	copy(out, src)
+	return out
 }
 
 func (j *Job) setActiveTrace(deviceID, traceJobID string) {
@@ -91,6 +125,14 @@ func (j *Job) closeSubscribers() {
 type TraceController interface {
 	StartTrace(ctx context.Context, req *pb.StartTraceRequest) (string, error)
 	StopTrace(jobID string) error
+
+	// HostToDeviceMonotonic — 호스트 wall clock(ms)을 그 trace 잡의 기기 monotonic
+	// 초로 옮긴다. parquet `time` 과 같은 축이라 스텝 경계를 구간 질의에 바로 쓸 수 있다.
+	//
+	// ok=false 면 offset 을 못 쟀거나 못 믿을 값이라는 뜻 — 그 경우 **구간 분할을
+	// 하지 않는다.** 틀린 offset 으로 나눈 구간은 통째로 밀려도 그래프가 정상으로
+	// 보여서 검증에서 안 걸러진다 (trace/clockoffset.go 참고).
+	HostToDeviceMonotonic(traceJobID string, hostMillis int64) (float64, bool)
 }
 
 // MacroController interface to avoid circular imports with macro package.
@@ -491,6 +533,9 @@ func (o *Orchestrator) storeResult(job *Job, deviceID string, startedAt int64, r
 		Success:    success,
 		Error:      errMsg,
 		TraceJobs:  traceJobs,
+		// 구간은 인자가 아니라 Job 에서 꺼낸다 — 호출부가 많아 인자로 넘기면
+		// 빠뜨린 경로에서 조용히 사라진다.
+		StepBoundaries: job.takeStepBoundaries(deviceID),
 	}
 	job.mu.Lock()
 	job.Results[deviceID] = result

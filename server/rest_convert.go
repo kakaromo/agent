@@ -128,6 +128,28 @@ func benchmarkResultToMap(r *pb.BenchmarkResult) map[string]any {
 		}
 		m["traceJobs"] = jobs
 	}
+	// 스텝 구간 — behavior 구간별 IO 분석의 시간 축.
+	// mono 값이 0 이면 clock offset 을 못 믿는다는 뜻이라 UI 가 구간 분할을 끈다
+	// (호스트 시각은 남아 있어 로그 대조에는 쓸 수 있다).
+	if len(r.GetStepBoundaries()) > 0 {
+		bs := make([]map[string]any, 0, len(r.GetStepBoundaries()))
+		for _, b := range r.GetStepBoundaries() {
+			bs = append(bs, map[string]any{
+				"stepIndex":    b.GetStepIndex(),
+				"loopIndex":    b.GetLoopIndex(),
+				"repeatIndex":  b.GetRepeatIndex(),
+				"type":         b.GetType(),
+				"label":        b.GetLabel(),
+				"startedAt":    b.GetStartedAt(),
+				"finishedAt":   b.GetFinishedAt(),
+				"startedMono":  b.GetStartedMono(),
+				"finishedMono": b.GetFinishedMono(),
+				"success":      b.GetSuccess(),
+				"error":        b.GetError(),
+			})
+		}
+		m["stepBoundaries"] = bs
+	}
 	return m
 }
 

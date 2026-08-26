@@ -339,3 +339,26 @@ func parseUptimeSeconds(out string) (float64, bool) {
 	}
 	return v, true
 }
+
+// HostToDeviceMonotonic — 호스트 wall clock(ms) → 그 trace 잡의 기기 monotonic 초.
+//
+// benchmark 패키지의 TraceController 인터페이스 구현. 시나리오 스텝 경계(호스트 시각)를
+// parquet `time` 과 같은 축으로 옮기는 유일한 경로다.
+//
+// ok=false 인 경우:
+//   - 잡을 못 찾음
+//   - offset 측정 실패 (기기가 느리거나 응답 없음)
+//   - 측정은 됐지만 못 믿을 값 (RTT 임계 초과, 표본 부족, 수집 중 시계 이동)
+//
+// 이때는 **구간 분할을 하지 않는다.** 그럴듯하게 틀린 구간보다 없는 편이 낫다.
+func (m *Manager) HostToDeviceMonotonic(traceJobID string, hostMillis int64) (float64, bool) {
+	info, err := m.GetTraceJobInfo(traceJobID)
+	if err != nil {
+		return 0, false
+	}
+	if usable, _ := info.ClockSync.Usable(); !usable {
+		return 0, false
+	}
+	// Usable() 이 true 면 Start 는 non-nil 이 보장된다 (Start == nil 이면 false).
+	return info.ClockSync.Start.HostToMonotonic(hostMillis), true
+}

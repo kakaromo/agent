@@ -199,6 +199,9 @@ message BenchmarkResult {
   bool success = 7;
   string error = 8;
   repeated TraceJobMapping trace_jobs = 9;
+
+  // 시나리오 스텝 구간. behavior 구간별 IO 분석의 시간 축이 된다.
+  repeated StepBoundary step_boundaries = 10;
 }
 
 message TraceJobMapping {
@@ -206,7 +209,34 @@ message TraceJobMapping {
   int32 step_index = 2;
   int32 loop_index = 3;       // 0 = no loop
   int32 repeat_index = 4;     // 1-based
-  string trace_type = 5;      // "ufs", "block", "both"
+  string trace_type = 5;      // "ufs", "block", "both", "fsio_ufs", "fsio_block"
+}
+
+// StepBoundary — 시나리오 스텝 하나의 실행 구간.
+//
+// **왜 TraceJobMapping 이 아니라 별도 메시지인가.** TraceJobMapping 은 trace_stop
+// 스텝에서 잡당 1개 생긴다(어느 스텝이 트레이스를 멈췄나). 그런데 구간 분할이 필요한
+// 것은 trace_start ~ trace_stop **사이에 실행된 모든 스텝**의 경계라 1:N 이다.
+// 게다가 시나리오가 trace 를 안 멈추고 끝나면 TraceJobMapping 이 아예 안 생긴다
+// (defer 정리 경로는 TRACE_STOP 라인을 안 찍는다) — 경계를 거기 얹을 수 없다.
+message StepBoundary {
+  int32 step_index = 1;
+  int32 loop_index = 2;       // 0 = no loop
+  int32 repeat_index = 3;     // 1-based
+  string type = 4;            // 스텝 타입 ("launch_app", "scroll", ...) = 레인 라벨
+  string label = 5;           // 사람이 읽는 이름 (비면 UI 가 type 을 쓴다)
+
+  // 호스트 wall clock (ms). 로그·잡 시각과 대조할 때 쓴다.
+  int64 started_at = 6;
+  int64 finished_at = 7;
+
+  // 기기 monotonic (초) — parquet `time` 과 **같은 축**이라 구간 질의에 그대로 쓴다.
+  // clock offset 을 못 쟀으면 0 이고, 그때는 구간 분할이 비활성화된다.
+  double started_mono = 8;
+  double finished_mono = 9;
+
+  bool success = 10;
+  string error = 11;
 }
 
 message DeleteJobRequest {
