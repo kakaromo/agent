@@ -481,3 +481,43 @@ func TestRawDataCarriesMgmtDetail(t *testing.T) {
 		}
 	}
 }
+
+// TestSampledPathHandlesMgmtNulls — 샘플링 경로에서도 mgmt 처리가 동작하는지.
+//
+// 샘플링 쿼리는 `b.` 별칭 + CTE 구조라 SELECT 절이 전혀 다르게 조립된다.
+// 전체 조회만 테스트하면 이쪽이 조용히 깨진 채로 남는다 — 특히 타입 없는 NULL
+// 은 "스캔된 행이 전부 mgmt" 같은 조건에서만 터져서 재현이 어렵다.
+func TestSampledPathHandlesMgmtNulls(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	// 샘플링 경로 강제 — 로그가 7행이라 임계값을 1로 내린다.
+	orig := maxEventsForTest
+	maxEventsForTest = 1
+	defer func() { maxEventsForTest = orig }()
+
+	resp, err := GetRawData([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil)
+	if err != nil {
+		t.Fatalf("샘플링 경로 실패: %v", err)
+	}
+	if !resp.IsSampled {
+		t.Fatal("샘플링 경로를 안 탔다 — 테스트가 무의미하다")
+	}
+
+	var sawMgmt bool
+	for _, e := range resp.Events {
+		if !e.IsMgmt {
+			continue
+		}
+		sawMgmt = true
+		if e.Cmd == "0x00" || e.Cmd == "" {
+			t.Errorf("샘플링 경로에서 mgmt cmd 가 안 붙었다: action=%s cmd=%q", e.Action, e.Cmd)
+		}
+		if e.Lba != 0 || e.Size != 0 || e.Qd != 0 {
+			t.Errorf("샘플링 경로에서 mgmt 수치가 안 비었다: lba=%d size=%d qd=%d",
+				e.Lba, e.Size, e.Qd)
+		}
+	}
+	if !sawMgmt {
+		t.Error("샘플링 결과에 mgmt 행이 없다")
+	}
+}
