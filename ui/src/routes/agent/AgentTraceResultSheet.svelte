@@ -9,7 +9,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type JobExecutionRecord } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -35,9 +35,36 @@
 		jobIds: string[];
 		// 넘겨받은 jobIds 각각의 loop/step 정보. 있으면 "Loop N" 필터를 노출한다.
 		mappings?: TraceJobMapping[];
+		// 시나리오 스텝 구간. 있으면 Charts 에 구간 밴드 + Behavior 탭을 노출한다.
+		boundaries?: StepBoundary[];
 	}
 
-	let { open = $bindable(), serverId, jobIds, mappings = [] }: Props = $props();
+	let { open = $bindable(), serverId, jobIds, mappings = [], boundaries = [] }: Props = $props();
+
+	// ── 스텝 구간 (behavior) ──
+	//
+	// mono 축(기기 monotonic 초)이 채워진 구간만 쓴다. 0 이면 clock offset 을 못 쟀거나
+	// 못 믿는다는 뜻이라, 그 구간을 그리면 **통째로 밀린 자리에 밴드가 그려진다** —
+	// 그래프는 정상으로 보이므로 눈으로 못 걸러낸다. 그래서 아예 안 그린다.
+	const usableBoundaries = $derived(
+		boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0)
+	);
+	// 구간 데이터는 왔는데 mono 가 없는 경우 — 왜 분할이 안 되는지 알려야 한다.
+	const boundariesUnusable = $derived(boundaries.length > 0 && usableBoundaries.length === 0);
+	const hasBehavior = $derived(usableBoundaries.length > 0);
+
+	// 스텝 타입별 밴드 색. 같은 타입이 같은 색이어야 레인이 읽힌다.
+	const BEHAVIOR_COLORS = [
+		'rgba(59,130,246,0.10)', 'rgba(16,185,129,0.10)', 'rgba(245,158,11,0.10)',
+		'rgba(139,92,246,0.10)', 'rgba(236,72,153,0.10)', 'rgba(20,184,166,0.10)'
+	];
+	function behaviorColor(i: number) {
+		return BEHAVIOR_COLORS[i % BEHAVIOR_COLORS.length];
+	}
+	function behaviorLabel(b: StepBoundary) {
+		const base = b.label || b.type || `step ${b.stepIndex}`;
+		return b.loopIndex > 0 ? `${base} (loop ${b.loopIndex})` : base;
+	}
 
 	// ── Loop 필터 ──
 	// selectedLoop: 0 = 전체, 그 외 = 해당 loopIndex 만.
@@ -642,6 +669,67 @@
 		legendSelected = selected;
 	}
 
+	// ── Behavior 구간별 집계 ──
+	//
+	// 이미 클라이언트에 있는 raw 이벤트를 구간으로 자른다. `time` 은 parquet 원본
+	// 그대로(기기 monotonic 초)이고 StepBoundary.*Mono 도 같은 축이라 바로 비교된다.
+	//
+	// 서버 왕복을 안 하는 이유: 구간마다 질의하면 스텝 수만큼 라운드트립이 생기는데,
+	// 필요한 값(건수·바이트·latency 분위수)은 전부 이 배열에서 나온다.
+	// ⚠ 단 raw 가 샘플링됐으면(50만 초과) 절대 건수는 표본 기준이다 — 비율은 유효하다.
+	function quantile(sorted: number[], q: number): number {
+		if (sorted.length === 0) return 0;
+		const pos = (sorted.length - 1) * q;
+		const lo = Math.floor(pos);
+		const hi = Math.ceil(pos);
+		if (lo === hi) return sorted[lo];
+		return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+	}
+
+	interface BehaviorRow {
+		key: string;
+		label: string;
+		type: string;
+		durationSec: number;
+		events: number;
+		readBytes: number;
+		writeBytes: number;
+		p50: number;
+		p99: number;
+		maxLatency: number;
+		success: boolean;
+	}
+
+	const behaviorRows = $derived.by<BehaviorRow[]>(() => {
+		if (!hasBehavior) return [];
+		const evts = filteredEvents;
+		return usableBoundaries.map((b, i) => {
+			const inRange = evts.filter(e => e.time >= b.startedMono && e.time <= b.finishedMono);
+			// latency 는 완료 이벤트에만 실린다 (send 행의 dtoc 는 0).
+			const lat = inRange.map(e => e.dtoc).filter(v => v > 0).sort((a, c) => a - c);
+			let readBytes = 0, writeBytes = 0;
+			for (const e of inRange) {
+				// cmd 문자열로 read/write 를 가른다 — UFS(READ/WRITE)·Block(R/W) 모두 커버.
+				const c = (e.cmd || '').toUpperCase();
+				if (c.includes('READ') || c === 'R') readBytes += e.size;
+				else if (c.includes('WRITE') || c === 'W') writeBytes += e.size;
+			}
+			return {
+				key: `${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`,
+				label: behaviorLabel(b),
+				type: b.type,
+				durationSec: b.finishedMono - b.startedMono,
+				events: inRange.length,
+				readBytes,
+				writeBytes,
+				p50: quantile(lat, 0.5),
+				p99: quantile(lat, 0.99),
+				maxLatency: lat.length ? lat[lat.length - 1] : 0,
+				success: b.success
+			};
+		});
+	});
+
 	// ── Scatter chart builders ──
 	// latency 필드는 0값 제외 (send 이벤트의 latency는 0)
 	const LATENCY_FIELDS = new Set(['dtoc', 'ctod', 'ctoc']);
@@ -658,6 +746,29 @@
 			symbolSize: 2,
 			itemStyle: { color: getCmdColor(cmd) }
 		}));
+		// 구간 밴드 — 스텝 경계를 차트 위에 겹친다.
+		//
+		// 별도 레인(간트)을 위에 얹지 않는 이유: 차트마다 ECharts 인스턴스가 독립이고
+		// echarts.connect 도 안 걸려 있어서, 사용자가 한 차트를 zoom 하면 레인과
+		// 어긋난다. markArea 는 **차트 좌표계 안**이라 zoom/pan 을 데이터와 함께
+		// 따라가므로 어긋날 수가 없다.
+		if (hasBehavior && series.length > 0) {
+			(series[0] as any).markArea = {
+				silent: true,
+				itemStyle: { opacity: 1 },
+				label: { show: false },
+				emphasis: { disabled: true },
+				data: usableBoundaries.map((b, i) => [
+					{
+						xAxis: b.startedMono,
+						itemStyle: { color: behaviorColor(i) },
+						// hover 로만 라벨을 보여 준다 — 구간이 많으면(loop 반복) 빽빽해진다.
+						name: behaviorLabel(b)
+					},
+					{ xAxis: b.finishedMono }
+				])
+			};
+		}
 		return {
 			tooltip: { trigger: 'item' as const, formatter: (p: any) => `${p.seriesName}<br/>time: ${p.data[0]}<br/>${yLabel}: ${p.data[1]}` },
 			legend: { data: cmdSet, top: 0, right: 0, textStyle: { fontSize: 9 }, selected: legendSelected },
@@ -881,10 +992,26 @@
 						<!-- 귀속 집계는 cross-layer 메타가 있는 fsio 에서만 답이 나온다. -->
 						<Tabs.Trigger value="attribution" class="text-[10px] px-3 py-1">Attribution</Tabs.Trigger>
 					{/if}
+					{#if hasBehavior}
+						<!-- 스텝 구간이 있을 때만. Attribution 과 같은 조건부 노출 방식. -->
+						<Tabs.Trigger value="behavior" class="text-[10px] px-3 py-1">Behavior</Tabs.Trigger>
+					{/if}
 				</Tabs.List>
 
 				<!-- Raw Data Tab -->
 				<Tabs.Content value="raw" class="pt-2">
+					{#if boundariesUnusable}
+						<!-- 구간 데이터는 왔는데 시계 정합이 안 된 경우.
+						     조용히 숨기면 "왜 밴드가 없지?" 를 알 수 없다 — 기능이
+						     사라진 것처럼 보이는 게 가장 나쁜 실패다. -->
+						<div class="mb-2 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[9px] leading-relaxed">
+							<b>스텝 구간을 표시할 수 없습니다.</b>
+							수집 시점의 clock offset 을 측정하지 못했거나 신뢰할 수 없어
+							(느린 adb 연결, 수집 중 시계 변경 등) 구간 경계를 IO 타임라인에
+							맞출 수 없습니다. 틀린 위치에 그리면 그래프가 정상으로 보여
+							오히려 잘못된 결론으로 이어지므로 표시하지 않습니다.
+						</div>
+					{/if}
 					{#if loadingRaw}
 						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
 					{:else if rawResult && rawResult.events.length > 0}
@@ -1257,6 +1384,73 @@
 							filter={attributionFilter}
 							onDrillDown={handleAttrDrillDown}
 						/>
+					</Tabs.Content>
+				{/if}
+
+				{#if hasBehavior}
+					<Tabs.Content value="behavior" class="pt-2 space-y-3">
+						<!-- 지표 읽는 법 — 숫자만 주면 장식이 된다.
+						     이 화면을 보는 사람이 성능 분석 경험이 없을 수 있다. -->
+						<div class="rounded border bg-muted/30 p-2 text-[9px] leading-relaxed">
+							<div class="font-semibold mb-0.5">구간별로 보면 무엇을 알 수 있나</div>
+							<div class={captionMuted}>
+								시나리오 스텝(앱 실행·스크롤·영상 재생 등)마다 그 구간에 실제로 내려간 IO 를 끊어 봅니다.
+								잡 전체 평균으로는 <b>한 구간만 나빠도 묻힙니다</b> —
+								예를 들어 스크롤 구간의 p99 만 튀는 상황은 전체 p99 로는 안 보입니다.
+								Charts 탭의 옅은 세로 밴드가 같은 구간이며, 확대해도 데이터와 함께 움직입니다.
+							</div>
+							<div class="mt-1 {captionMuted}">
+								<b>p99</b> 는 느린 쪽 1% 의 지연입니다. 평균이 좋아도 p99 가 크면 사용자는 멈칫하는 걸 느낍니다.
+								<b>Read/Write</b> 비중은 그 구간이 무엇을 했는지 말해 줍니다 (콜드 실행은 보통 read 우위,
+								촬영·다운로드는 write 우위).
+							</div>
+						</div>
+
+						<div class="overflow-x-auto">
+							<table class="w-full text-[10px]">
+								<thead class="text-muted-foreground">
+									<tr class="border-b">
+										<th class="text-left py-1 pr-2 font-medium">구간</th>
+										<th class="text-right py-1 px-2 font-medium">길이</th>
+										<th class="text-right py-1 px-2 font-medium">이벤트</th>
+										<th class="text-right py-1 px-2 font-medium">Read</th>
+										<th class="text-right py-1 px-2 font-medium">Write</th>
+										<th class="text-right py-1 px-2 font-medium">p50</th>
+										<th class="text-right py-1 px-2 font-medium">p99</th>
+										<th class="text-right py-1 pl-2 font-medium">max</th>
+									</tr>
+								</thead>
+								<tbody class="font-mono">
+									{#each behaviorRows as row, i (row.key)}
+										<tr class="border-b border-border/40">
+											<td class="py-1 pr-2 font-sans">
+												<span class="inline-block w-2 h-2 rounded-sm mr-1 align-middle"
+													style="background:{behaviorColor(i).replace('0.10', '0.6')}"></span>
+												{row.label}
+												{#if !row.success}
+													<span class="ml-1 text-red-500" title="이 스텝은 실패했습니다">실패</span>
+												{/if}
+											</td>
+											<td class="text-right py-1 px-2">{row.durationSec.toFixed(2)}s</td>
+											<td class="text-right py-1 px-2">{row.events.toLocaleString()}</td>
+											<td class="text-right py-1 px-2">{fmtBytes(row.readBytes)}</td>
+											<td class="text-right py-1 px-2">{fmtBytes(row.writeBytes)}</td>
+											<td class="text-right py-1 px-2">{fmtLatency(row.p50)}</td>
+											<td class="text-right py-1 px-2">{fmtLatency(row.p99)}</td>
+											<td class="text-right py-1 pl-2">{fmtLatency(row.maxLatency)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+
+						<div class={captionMuted + ' text-[9px]'}>
+							구간 밖(스텝 사이 전환 구간)의 IO 는 어느 행에도 안 들어갑니다 —
+							그래서 각 행의 합이 전체 이벤트 수보다 적을 수 있습니다.
+							{#if rawResult?.isSampled}
+								또한 이 잡은 <b>샘플링된 raw</b> 를 보고 있어 건수·바이트는 표본 기준입니다 (비율은 유효).
+							{/if}
+						</div>
 					</Tabs.Content>
 				{/if}
 			</Tabs.Root>

@@ -63,6 +63,29 @@ export interface TraceJobMapping {
 	traceType: string;
 }
 
+/**
+ * StepBoundary — 시나리오 스텝 하나의 실행 구간.
+ *
+ * behavior 구간별 IO 분석의 시간 축이다. `startedMono`/`finishedMono` 는 parquet
+ * `time` 과 **같은 축**(기기 monotonic 초)이라 구간 질의에 그대로 쓸 수 있다.
+ *
+ * ⚠ mono 가 0 이면 clock offset 을 못 쟀거나 못 믿는다는 뜻 — 그 구간은 분할에
+ * 쓰지 않는다. 호스트 시각(startedAt/finishedAt)은 남아 있어 로그 대조에는 쓸 수 있다.
+ */
+export interface StepBoundary {
+	stepIndex: number;
+	loopIndex: number;
+	repeatIndex: number;
+	type: string;
+	label: string;
+	startedAt: number;
+	finishedAt: number;
+	startedMono: number;
+	finishedMono: number;
+	success: boolean;
+	error: string;
+}
+
 export interface BenchmarkResultItem {
 	deviceId: string;
 	tool: string;
@@ -73,6 +96,7 @@ export interface BenchmarkResultItem {
 	success: boolean;
 	error: string;
 	traceJobs?: TraceJobMapping[];
+	stepBoundaries?: StepBoundary[];
 }
 
 export interface BenchmarkResult {

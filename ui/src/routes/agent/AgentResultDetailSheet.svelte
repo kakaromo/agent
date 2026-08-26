@@ -5,7 +5,7 @@
 	import DataTableShell from '$lib/components/DataTableShell.svelte';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, getBenchmarkResult, fetchExecutionByJobId, getAiStatus, createAiAnalyzeSource, type JobStatus, type BenchmarkResult, type JobProgress, type TraceJobMapping, type StepBoundary, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -23,10 +23,21 @@
 		serverId: number | null;
 		jobId: string | null;
 		activeJobs: ActiveJob[];
-		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]) => void;
+		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[]) => void;
 	}
 
 	let { open = $bindable(), serverId, jobId, activeJobs, onViewTrace }: Props = $props();
+
+	// 스텝 구간 — behavior 레인/구간 밴드의 시간 축.
+	// trace_jobs 와 달리 raw_output fallback 이 없다 (텍스트에 안 실린다).
+	function getStepBoundaries(): StepBoundary[] {
+		if (!result) return [];
+		const out: StepBoundary[] = [];
+		for (const r of result.results) {
+			if (r.stepBoundaries) out.push(...r.stepBoundaries);
+		}
+		return out;
+	}
 
 	// Trace jobs — 구조화 데이터 우선, fallback으로 raw_output 파싱
 	function getTraceJobMappings(): TraceJobMapping[] {
@@ -930,7 +941,7 @@
 				<!-- 전체 trace 확인 CTA — 이 job 에 trace 가 있으면 기존 trace UI(패턴/QD/CPU/latency)로 바로 진입 -->
 				{#if allTraceJobMappings.length > 0 && onViewTrace}
 					<button
-						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId), allTraceJobMappings)}
+						onclick={() => onViewTrace?.(selectedResult?.deviceId ?? persistedDeviceId, allTraceJobMappings.map(m => m.traceJobId), allTraceJobMappings, getStepBoundaries())}
 						class="w-full flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-left hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
 					>
 						<ScanSearchIcon class="size-4 text-blue-600 shrink-0" />
