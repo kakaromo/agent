@@ -1359,3 +1359,161 @@ export function setBoundaryLabel(
 		labelOverride
 	});
 }
+
+// ── AI Log Profiles (on-device AI logcat 패턴) ──
+//
+// 런타임이 logcat 에 찍는 문구에서 TTFT/TPOT 를 뽑기 위한 정규식 묶음.
+// AP·세트·런타임 버전마다 문자열이 달라 코드에 박을 수 없어 프리셋으로 둔다.
+
+export interface AILogProfile {
+	id: number;
+	name: string;
+	description?: string;
+	runtime: string;
+	soc?: string;
+	patternsJson: string;
+	createdAt?: string;
+	updatedAt?: string;
+}
+
+/** mark — 걸린 줄의 **시각**만 써서 구간 경계로 쓴다 (예: `prefill begin`). */
+export interface AILogMark {
+	key: string;
+	regex: string;
+}
+
+/** series — 캡처 그룹에서 **숫자**를 뽑는다. 같은 키가 반복되면 시계열이 된다. */
+export interface AILogSeries {
+	key: string;
+	regex: string;
+	unit?: string;
+}
+
+export interface AILogPatterns {
+	tags?: string[];
+	minPriority?: string;
+	marks?: AILogMark[];
+	series?: AILogSeries[];
+}
+
+export function fetchAILogProfiles(params?: { runtime?: string; soc?: string }): Promise<AILogProfile[]> {
+	const q = new URLSearchParams();
+	if (params?.runtime) q.set('runtime', params.runtime);
+	if (params?.soc) q.set('soc', params.soc);
+	const qs = q.toString();
+	return get(`/agent/ai-log-profiles${qs ? `?${qs}` : ''}`);
+}
+
+export function createAILogProfile(data: Omit<AILogProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<AILogProfile> {
+	return post('/agent/ai-log-profiles', data);
+}
+
+export function updateAILogProfile(id: number, data: Omit<AILogProfile, 'id' | 'createdAt' | 'updatedAt'>): Promise<AILogProfile> {
+	return put(`/agent/ai-log-profiles/${id}`, data);
+}
+
+export function deleteAILogProfile(id: number): Promise<{ success: boolean }> {
+	return del(`/agent/ai-log-profiles/${id}`);
+}
+
+// ── Logcat 탐색 / 파싱 ──
+
+export interface LogcatExploreCandidate {
+	tag: string;
+	pids: number[];
+	lines: number;
+	unitHits: number;
+	keywordHits: number;
+	/** LLM 고유 신호(tok/s·ms/tok·TTFT·prefill/decode)가 걸린 줄 수. 가장 믿을 만하다. */
+	strongHits: number;
+	/** 유휴 구간엔 없고 추론 구간에만 나타났는가. */
+	onlyDuringRun: boolean;
+	samples: string[];
+	score: number;
+}
+
+export interface LogcatExploreResult {
+	totalLines: number;
+	parsedLines: number;
+	distinctTags: number;
+	candidates: LogcatExploreCandidate[];
+	/**
+	 * 후보는 있으나 LLM 고유 신호가 **하나도 없다.**
+	 * 낱말만 겹치는 다른 온디바이스 ML(음성 wakeword·얼굴인식 등)일 수 있다는 뜻.
+	 * 화면에서 반드시 눈에 띄게 구분해야 한다 — 목록이 있다는 것만으로 답이 있다고
+	 * 읽히면 안 된다.
+	 */
+	weakOnly: boolean;
+	diagnosis: string[];
+}
+
+export interface LogcatExploreRequest {
+	jobId?: string;
+	path?: string;
+	idleFrom?: number;
+	idleTo?: number;
+	runFrom?: number;
+	runTo?: number;
+}
+
+export function exploreLogcat(req: LogcatExploreRequest): Promise<{ path: string; result: LogcatExploreResult }> {
+	return post('/agent/logcat/explore', req);
+}
+
+export interface LogcatSeriesPoint {
+	timeSec: number;
+	value: number;
+	raw: string;
+}
+
+export interface LogcatSeriesResult {
+	key: string;
+	unit?: string;
+	points: LogcatSeriesPoint[];
+	count: number;
+	min: number;
+	max: number;
+	mean: number;
+	median: number;
+	p99: number;
+}
+
+export interface LogcatMarkHit {
+	key: string;
+	timeSec: number;
+	tag: string;
+	raw: string;
+}
+
+export interface LogcatPatternStat {
+	key: string;
+	kind: string;
+	hits: number;
+	/** 정규식은 맞았는데 캡처 값이 숫자가 아니었던 횟수 — 캡처 그룹 위치 문제다. */
+	parseFailures: number;
+}
+
+export interface LogcatParseResult {
+	totalLines: number;
+	parsedLines: number;
+	matchedTags: string[];
+	marks: LogcatMarkHit[];
+	series: Record<string, LogcatSeriesResult>;
+	stats: LogcatPatternStat[];
+	totalHits: number;
+	/** 패턴 일부만 맞았다 — 반쪽 지표를 정상으로 읽으면 안 된다. */
+	partial: boolean;
+	missingKeys: string[];
+	diagnosis: string[];
+}
+
+export interface LogcatParseRequest {
+	jobId?: string;
+	path?: string;
+	profileId?: number;
+	patternsJson?: string;
+}
+
+export function parseLogcat(req: LogcatParseRequest): Promise<{ path: string; result: LogcatParseResult }> {
+	return post('/agent/logcat/parse', req);
+}

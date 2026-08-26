@@ -12,6 +12,7 @@
 	import ScanSearchIcon from '@lucide/svelte/icons/scan-search';
 	import SmartphoneIcon from '@lucide/svelte/icons/smartphone';
 	import CircleDotIcon from '@lucide/svelte/icons/circle-dot';
+	import BrainIcon from '@lucide/svelte/icons/brain';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import UnplugIcon from '@lucide/svelte/icons/unplug';
@@ -24,8 +25,8 @@
 		devices: Device[];
 		loadingDevices: boolean;
 		selectedDeviceIds: Set<string>;
-		centerMode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest';
-		onModeChange: (mode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest') => void;
+		centerMode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest' | 'ailog';
+		onModeChange: (mode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest' | 'ailog') => void;
 		onRefreshDevices: () => void;
 		onOpenServerSheet: () => void;
 		onOpenMonitoring: (deviceId: string) => void;
@@ -117,11 +118,12 @@
 
 	const selectedCount = $derived(selectedDeviceIds.size);
 
-	const modeButtons: { mode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest'; label: string; icon: any }[] = [
+	const modeButtons: { mode: 'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest' | 'ailog'; label: string; icon: any }[] = [
 		{ mode: 'benchmark', label: 'Benchmark', icon: PlayIcon },
 		{ mode: 'iotest', label: 'I/O Test', icon: FlaskConicalIcon },
 		{ mode: 'scenario', label: 'Scenario', icon: ListOrderedIcon },
 		{ mode: 'trace', label: 'Trace', icon: ScanSearchIcon },
+		{ mode: 'ailog', label: 'AI (LLM)', icon: BrainIcon },
 		{ mode: 'macro', label: 'Macro', icon: CircleDotIcon },
 		{ mode: 'results', label: 'Results', icon: ClockIcon },
 		{ mode: 'schedule', label: 'Schedule', icon: CalendarIcon }

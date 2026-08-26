@@ -29,6 +29,7 @@
 	import AgentScreenSheet from './AgentScreenSheet.svelte';
 	import TerminalDialog from '$lib/components/remote/TerminalDialog.svelte';
 	import AgentScheduleView from './AgentScheduleView.svelte';
+	import AgentAILogView from './AgentAILogView.svelte';
 	import AgentMacroRecorder from './AgentMacroRecorder.svelte';
 	import IOTestForm from './iotest/IOTestForm.svelte';
 
@@ -43,7 +44,7 @@
 	let devices = $state<Device[]>([]);
 	let loadingDevices = $state(false);
 	let selectedDeviceIds = $state<Set<string>>(new Set());
-	let centerMode = $state<'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest'>('results');
+	let centerMode = $state<'benchmark' | 'scenario' | 'trace' | 'results' | 'schedule' | 'macro' | 'iotest' | 'ailog'>('results');
 	let activeJobs = $state<ActiveJob[]>([]);
 	let jobHistory = $state<JobRecord[]>([]);
 
@@ -726,6 +727,8 @@
 						enabledServers={enabledServers}
 						onJobStarted={startJob}
 					/>
+				{:else if centerMode === 'ailog'}
+					<AgentAILogView />
 				{:else}
 					<AgentResultsView
 						{jobHistory}
