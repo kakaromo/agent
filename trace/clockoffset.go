@@ -268,9 +268,19 @@ func LoadClockSync(dir string) (TraceClockSync, bool) {
 //	                  │           ▲           │
 //	                  │      기기가 읽은 시점  │  ← 어디인지 모른다 → 중앙으로 가정
 //
-// `/proc/uptime` 을 쓰는 이유: 첫 필드가 부팅 이후 초라 CLOCK_MONOTONIC 과 같은 기준이고,
-// root 없이 읽히며, 어느 안드로이드에나 있다. (`-v monotonic` logcat 이 같은 축이라는
-// 것도 이 값과 대조해 확인했다.)
+// `/proc/uptime` 을 쓰는 이유: 첫 필드가 **CLOCK_BOOTTIME**(suspend 포함) 기준 부팅 이후
+// 초라 ftrace `trace_clock=boot` · fsiotrace `--clock=boot` 와 같은 축이고, root 없이
+// 읽히며, 어느 안드로이드에나 있다.
+//
+// ⚠ 한때 이 자리에 "`-v monotonic` logcat 도 같은 축임을 대조해 확인했다" 고 적혀 있었으나
+// **실기기 실측으로 뒤집혔다**: `/proc/uptime`=20176.61 vs `logcat -v monotonic`=20056.13
+// → **120.5초 차이**. adb 왕복(수~수십 ms)으로 설명되지 않고, 스케일은 같은데 원점만
+// 어긋났다 = **누적 suspend 시간**. 이름 그대로 `/proc/uptime` 은 BOOTTIME(suspend 포함),
+// `logcat -v monotonic` 은 MONOTONIC(suspend 제외)이다.
+// 이전 오판의 근거는 Cuttlefish 실측 1회(차이 5초)를 "adb 왕복 지연" 으로 설명한 것인데,
+// 그 기기는 RTT 가 18~28초라 **애초에 검증이 불가능한 상태였다.**
+// → logcat 을 이 오프셋과 함께 쓰려면 별도 축 변환이 필요하다.
+// 여기서 재는 값은 **`/proc/uptime` 축 전용**이다.
 //
 // 실패해도 에러를 반환하지 않고 nil 을 준다 — 오프셋 측정 실패가 **트레이스 수집 자체를
 // 막아서는 안 된다.** 구간 분할만 비활성화되면 된다.
