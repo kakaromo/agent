@@ -178,28 +178,6 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		md.Device.Shell(setupCtx, fmt.Sprintf("echo 1 > %s/tracing_on", tracingDir))
 	}
 
-	// clock offset 측정 — 수집 시작 **직전**에 잰다.
-	//
-	// 여기가 트레이스의 시간 원점에 가장 가까운 지점이다. 이벤트 enable/push 같은 준비
-	// 작업(수 초가 걸릴 수 있다) 앞에서 재면 그만큼 측정 시점이 원점에서 떨어진다.
-	// 실패해도 진행한다 — 구간 분할만 못 하고 수집은 정상이다.
-	//
-	// ⚠ 측정에는 **자체 컨텍스트**를 준다. setupCtx(30s)는 이벤트 enable/fsio push 가
-	// 이미 상당량 써버린 상태라, 그걸 물려받으면 남은 시간만큼만 재고 루프가 잘린다 —
-	// 표본이 1개로 줄어 최소값 채택이 무력해지는데도 `Usable()` 은 true 를 준다.
-	//
-	// ⚠ job 은 이미 m.jobs 에 등록돼 있어 다른 goroutine 이 읽을 수 있다 — 반드시
-	// 락 안에서 쓴다. adb 왕복은 락 **밖**에서 끝내고 대입만 락 안에서 한다
-	// (락 보유 중 외부 I/O 금지).
-	offCtx, offCancel := context.WithTimeout(context.Background(), MeasureBudget)
-	startOffset := MeasureClockOffset(offCtx, md.Device)
-	offCancel()
-	job.Mu.Lock()
-	job.ClockSync.Start = startOffset
-	sync := job.ClockSync
-	job.Mu.Unlock()
-	SaveClockSync(outputDir, sync)
-
 	// Start collector → log file
 	adbCtx, adbCancel := context.WithCancel(context.Background())
 	logFd, err := os.Create(logFile)
@@ -222,6 +200,31 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		adbCancel()
 		return "", fmt.Errorf("start collector: %w", err)
 	}
+
+	// clock offset 측정 — **collector 가 실제로 붙은 뒤**에 잰다.
+	//
+	// 여기가 트레이스의 시간 원점에 가장 가까운 지점이다. 예전엔 collector 기동
+	// **전**에 쟀는데, fsio 는 512MB ringbuf 할당 + attach 에 수 초가 걸리고 그 시간이
+	// 메모리 상태에 따라 요동친다 — 그만큼 측정 시점이 원점에서 떨어졌다.
+	// startFsioCollector 가 attach 완료를 기다렸다 리턴하므로 이 자리가 정확하다.
+	//
+	// 실패해도 진행한다 — 구간 분할만 못 하고 수집은 정상이다.
+	//
+	// ⚠ 측정에는 **자체 컨텍스트**를 준다. setupCtx(30s)는 이벤트 enable/fsio push 가
+	// 이미 상당량 써버린 상태라, 그걸 물려받으면 남은 시간만큼만 재고 루프가 잘린다 —
+	// 표본이 1개로 줄어 최소값 채택이 무력해지는데도 `Usable()` 은 true 를 준다.
+	//
+	// ⚠ job 은 이미 m.jobs 에 등록돼 있어 다른 goroutine 이 읽을 수 있다 — 반드시
+	// 락 안에서 쓴다. adb 왕복은 락 **밖**에서 끝내고 대입만 락 안에서 한다
+	// (락 보유 중 외부 I/O 금지).
+	offCtx, offCancel := context.WithTimeout(context.Background(), MeasureBudget)
+	startOffset := MeasureClockOffset(offCtx, md.Device)
+	offCancel()
+	job.Mu.Lock()
+	job.ClockSync.Start = startOffset
+	sync := job.ClockSync
+	job.Mu.Unlock()
+	SaveClockSync(outputDir, sync)
 
 	return m.finishStart(job, adbCmd, adbCancel, logFd)
 }

@@ -1,12 +1,15 @@
 package trace
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"agent/adb"
 )
@@ -108,14 +111,68 @@ func stopFsioOnDevice(ctx context.Context, dev *adb.Device) {
 	_, _ = dev.Shell(ctx, "pkill -TERM "+fsiotraceBinary)
 }
 
+// fsioReadyTimeout — attach 완료 신호를 기다리는 상한.
+//
+// 넘겨도 수집은 그대로 진행한다(신호를 놓쳤을 뿐 살아 있을 수 있다). 다만 그 경우
+// 앞부분 이벤트를 놓쳤을 가능성이 있으므로 경고를 남긴다.
+const fsioReadyTimeout = 30 * time.Second
+
 // startFsioCollector — fsiotrace 를 기기에서 실행하고 stdout 을 logFd 로 흘린다.
+//
+// **attach 가 끝날 때까지 기다렸다가 리턴한다.** 이게 없으면 시나리오에서 trace_start
+// 다음 스텝이 곧바로 실행돼 **아직 훅이 안 붙은 구간의 IO 를 통째로 놓친다.**
+// (Trace 탭은 사람이 버튼을 누르는 시간이 우연히 이 대기를 대신해 줘서 증상이 안 보였다.)
+//
+// fsiotrace 는 ringbuf 를 기본 512MB 로 잡는데, 커널이 이걸 미리 할당하는 시간이
+// **메모리 상태에 따라 즉시~수십 초로 요동친다.** 그래서 고정 대기로는 못 맞추고
+// 완료 신호를 봐야 한다 — stdout 모드에서는 poll 루프 직전의 "warn: stdout ..." 줄이
+// 마지막 출력이라 그게 준비 완료 신호가 된다.
 func startFsioCollector(ctx context.Context, serial, traceType string, logFd *os.File) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "adb", "-s", serial, "shell", buildFsioCommand(traceType))
 	cmd.Stdout = logFd
-	// stderr 는 진단용 — fsiotrace 는 attach 실패/유실 통계를 여기로 낸다.
-	cmd.Stderr = os.Stderr
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+
+	ready := make(chan struct{})
+	go func() {
+		defer close(ready)
+		sc := bufio.NewScanner(stderrPipe)
+		signalled := false
+		for sc.Scan() {
+			line := sc.Text()
+			// 진단 로그는 계속 흘린다 — attach 실패·유실 통계(diag[9])가 여기 나온다.
+			slog.Info("fsiotrace", "serial", serial, "msg", line)
+			if !signalled && isFsioReadyLine(line) {
+				signalled = true
+				ready <- struct{}{} // 대기자에게 알리고 로그 수집은 계속
+			}
+		}
+	}()
+
+	select {
+	case <-ready:
+		// attach 완료. 이제 워크로드를 돌려도 앞부분을 안 놓친다.
+	case <-time.After(fsioReadyTimeout):
+		slog.Warn("fsiotrace attach 신호를 기다리다 시간이 초과됐다; 초반 이벤트를 놓쳤을 수 있다",
+			"serial", serial, "timeout", fsioReadyTimeout)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return cmd, nil
+}
+
+// isFsioReadyLine — fsiotrace 가 수집을 시작했음을 알리는 stderr 줄인가.
+//
+// stdout 모드: "warn: stdout 은 줄 단위로 flush 합니다 ..." (poll 루프 직전 마지막 출력)
+// -o 모드   : "writing events to <path> ..."
+// 둘 다 커버해 둔다 — 나중에 -o 로 바꿔도 이 함수는 그대로 동작한다.
+func isFsioReadyLine(line string) bool {
+	return strings.Contains(line, "warn: stdout") ||
+		strings.Contains(line, "writing events to")
 }
