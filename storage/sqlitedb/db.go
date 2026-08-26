@@ -3,8 +3,8 @@
 // portal Spring + PostgreSQL 의 portal_* 테이블 스키마를 SQLite 로 마이그레이션한다.
 // pure Go (modernc.org/sqlite) 라 CGO 불필요 → cross-compile 그대로.
 //
-// 7 테이블: agent_servers, job_executions, benchmark_presets, iotest_presets,
-//          scenario_templates, app_macros, scheduled_jobs.
+// 8 테이블: agent_servers, job_executions, benchmark_presets, iotest_presets,
+// scenario_templates, app_macros, scheduled_jobs, ai_log_profiles.
 package sqlitedb
 
 import (
@@ -50,7 +50,7 @@ func Open(path string) (*DB, error) {
 	return db, nil
 }
 
-// migrate 는 7 테이블을 idempotent 하게 생성한다 (CREATE TABLE IF NOT EXISTS).
+// migrate 는 8 테이블을 idempotent 하게 생성한다 (CREATE TABLE IF NOT EXISTS).
 func (db *DB) migrate() error {
 	stmts := []string{
 		// AgentServer — portal portal_agent_servers
@@ -166,6 +166,30 @@ func (db *DB) migrate() error {
 			last_run_at TEXT,
 			last_run_status TEXT,
 			next_run_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+
+		// AILogProfile — on-device AI(LLM) 평가용 logcat 패턴 묶음.
+		//
+		// AP·세트·런타임 버전마다 로그 문자열이 달라서 패턴을 코드에 박을 수 없다.
+		// 설정값이면 형식을 몰라도 지금 만들 수 있고, 런타임이 바뀌어도 코드는 그대로다.
+		//
+		// runtime/soc 만 컬럼인 이유: 기기가 붙었을 때 "이 AP 에 맞는 프로파일" 을
+		// 골라주려면 **조회 조건**이 돼야 한다. JSON 안에 있으면 못 거른다.
+		// 반대로 패턴 종류는 런타임마다 늘어나므로 컬럼이면 매번 마이그레이션이 필요하다
+		// (benchmark_presets.params_json / iotest_presets.config_json 과 같은 판단).
+		//
+		// ⚠ 측정 **결과**는 여기 안 넣는다. 프로파일은 "어떻게 읽을지" 이고 측정값은
+		// 잡 산출물이라 job_executions.result_summary 로 간다. 섞으면 프로파일 하나를
+		// 여러 잡이 쓸 때 꼬인다.
+		`CREATE TABLE IF NOT EXISTS ai_log_profiles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT,
+			runtime TEXT NOT NULL,
+			soc TEXT,
+			patterns_json TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,

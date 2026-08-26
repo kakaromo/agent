@@ -135,3 +135,21 @@ type ScheduledJob struct {
 	CreatedAt         time.Time      `json:"createdAt"`
 	UpdatedAt         time.Time      `json:"updatedAt"`
 }
+
+// AILogProfile — on-device AI(LLM) 평가용 logcat 패턴 묶음.
+//
+// 런타임이 logcat 에 찍는 문자열에서 TTFT/TPOT 를 뽑기 위한 정규식 모음이다.
+// AP·세트·런타임 버전마다 문자열이 달라 코드에 박을 수 없어 프리셋으로 둔다.
+//
+// Runtime/SOC 가 별도 컬럼인 이유는 db.go 의 CREATE TABLE 주석 참고 (조회 조건).
+// SOC 가 빈 값이면 해당 런타임 공용 프로파일로 본다.
+type AILogProfile struct {
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Runtime      string    `json:"runtime"`
+	SOC          string    `json:"soc"`
+	PatternsJSON string    `json:"patternsJson"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}

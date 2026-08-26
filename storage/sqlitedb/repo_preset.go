@@ -280,3 +280,107 @@ func (db *DB) DeleteScenarioTemplate(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// ---------- AILogProfile ----------
+
+const alpCols = `id, name, description, runtime, soc, patterns_json, created_at, updated_at`
+
+func scanAILogProfile(row interface{ Scan(...any) error }) (*AILogProfile, error) {
+	p := &AILogProfile{}
+	var desc, soc sql.NullString
+	var createdAt, updatedAt string
+	err := row.Scan(&p.ID, &p.Name, &desc, &p.Runtime, &soc, &p.PatternsJSON, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if desc.Valid {
+		p.Description = desc.String
+	}
+	if soc.Valid {
+		p.SOC = soc.String
+	}
+	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+		p.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+		p.UpdatedAt = t
+	}
+	return p, nil
+}
+
+func (db *DB) ListAILogProfiles(ctx context.Context) ([]*AILogProfile, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+alpCols+` FROM ai_log_profiles ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*AILogProfile
+	for rows.Next() {
+		p, err := scanAILogProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) FindAILogProfile(ctx context.Context, id int64) (*AILogProfile, error) {
+	row := db.QueryRowContext(ctx, `SELECT `+alpCols+` FROM ai_log_profiles WHERE id=?`, id)
+	p, err := scanAILogProfile(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return p, err
+}
+
+func (db *DB) CreateAILogProfile(ctx context.Context, p *AILogProfile) (*AILogProfile, error) {
+	if p.Name == "" || p.Runtime == "" || p.PatternsJSON == "" {
+		return nil, fmt.Errorf("name, runtime, patternsJson required")
+	}
+	// ⚠ 정규식은 사용자 입력이다 — 저장 전에 컴파일해 본다.
+	// 여기서 안 막으면 잘못된 패턴이 DB 에 들어앉아 **측정 시점에** 터진다.
+	// 그때는 기기를 붙들고 있는 중이라 되돌리는 비용이 훨씬 크다.
+	if err := ValidatePatternsJSON(p.PatternsJSON); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := db.ExecContext(ctx, `INSERT INTO ai_log_profiles
+		(name, description, runtime, soc, patterns_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.Name, p.Description, p.Runtime, p.SOC, p.PatternsJSON, now, now)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return db.FindAILogProfile(ctx, id)
+}
+
+func (db *DB) UpdateAILogProfile(ctx context.Context, id int64, p *AILogProfile) (*AILogProfile, error) {
+	if err := ValidatePatternsJSON(p.PatternsJSON); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := db.ExecContext(ctx, `UPDATE ai_log_profiles
+		SET name=?, description=?, runtime=?, soc=?, patterns_json=?, updated_at=? WHERE id=?`,
+		p.Name, p.Description, p.Runtime, p.SOC, p.PatternsJSON, now, id)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	return db.FindAILogProfile(ctx, id)
+}
+
+func (db *DB) DeleteAILogProfile(ctx context.Context, id int64) error {
+	res, err := db.ExecContext(ctx, `DELETE FROM ai_log_profiles WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
