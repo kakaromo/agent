@@ -102,10 +102,17 @@
 	// 하나를 껐다 켬) 굳이 다시 부르지 않는다.
 	let lastStatsRange = $state('');
 	$effect(() => {
-		const key = zoomRange ? `${zoomRange.min}:${zoomRange.max}` : '';
+		// noneSelected 도 키에 넣는다 — 전부 숨김 ↔ 전부 표시 전환이 zoomRange 로는
+		// 둘 다 null 이라 구분되지 않아, 재조회가 안 되고 표만 이전 값으로 남는다.
+		const key = noneSelected ? 'none' : zoomRange ? `${zoomRange.min}:${zoomRange.max}` : '';
 		if (key === lastStatsRange) return;
 		lastStatsRange = key;
 		if (!open || serverId == null || activeJobIds.length === 0) return;
+		if (noneSelected) {
+			// 서버에 물을 게 없다. 빈 결과로 두면 다른 탭(빈 목록)과 말이 맞는다.
+			statsResult = null;
+			return;
+		}
 		loadStats(buildFilter());
 	});
 
@@ -128,16 +135,22 @@
 		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
 	);
 
+	// 구간을 하나도 안 남긴 상태. zoomRange 로는 표현할 수 없다(위 주석 참고).
+	const noneSelected = $derived(
+		allBoundaries.length > 0 && hiddenSteps.size > 0 && usableBoundaries.length === 0
+	);
+
 	// 구간을 골라 보면 차트도 **그 구간으로 확대**한다.
 	//
 	// 골라 놓고 축은 전체라면 점이 한쪽에 뭉쳐 보여서 고른 의미가 없다. 일부만 켜져
 	// 있을 때만 좁힌다 — 전체가 켜져 있으면 원래대로 전 구간을 본다.
 	const zoomRange = $derived.by<{ min: number; max: number } | null>(() => {
 		if (hiddenSteps.size === 0) return null;          // 전부 보는 중 → 확대 안 함
-		// ⚠ 전부 숨긴 상태에서 null 을 주면 **전 구간이 보인다** — "전체 해제" 를
-		// 눌렀는데 오히려 다 나오는, 라벨과 정반대인 동작이다. 빈 범위를 줘서
-		// "아무 구간도 안 고름" 이 그대로 드러나게 한다.
-		if (usableBoundaries.length === 0) return { min: 0, max: 0 };
+		// ⚠ 전부 숨긴 경우는 **별도 플래그(noneSelected)로 다룬다.**
+		// 여기서 {min:0,max:0} 을 돌려주면 서버 필터에 startTime=0 이 실리는데,
+		// 백엔드는 `> 0` 을 "미설정" 으로 보므로 **Statistics 만 전 구간을 보여준다** —
+		// 다른 화면은 비어 있는데 표만 꽉 찬, 가장 헷갈리는 상태가 된다.
+		if (usableBoundaries.length === 0) return null;
 		let lo = Infinity, hi = -Infinity;
 		for (const b of usableBoundaries) {
 			if (b.startedMono < lo) lo = b.startedMono;
@@ -570,6 +583,7 @@
 		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
 		// Statistics 도 전체 기준이었다 — 화면마다 모수가 달라 "고른 구간의 p99" 를
 		// 물어도 답이 안 나왔다. 여기서 자르면 Raw/Behavior/차트가 같은 모수를 본다.
+		if (noneSelected) return [];   // 아무 구간도 안 고름 — 보여줄 게 없다
 		if (zoomRange) {
 			evts = evts.filter(e => e.time >= zoomRange.min && e.time <= zoomRange.max);
 		}
@@ -1412,7 +1426,7 @@
 								<span class={captionMuted}>
 									· 선택 구간으로 확대됨 ({(zoomRange.max - zoomRange.min).toFixed(2)}s)
 								</span>
-							{:else if zoomRange}
+							{:else if noneSelected}
 								<span class="text-amber-600">· 표시할 구간이 없습니다 — “전체 선택”</span>
 							{/if}
 						</div>
