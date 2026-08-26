@@ -46,8 +46,15 @@
 	// mono 축(기기 monotonic 초)이 채워진 구간만 쓴다. 0 이면 clock offset 을 못 쟀거나
 	// 못 믿는다는 뜻이라, 그 구간을 그리면 **통째로 밀린 자리에 밴드가 그려진다** —
 	// 그래프는 정상으로 보이므로 눈으로 못 걸러낸다. 그래서 아예 안 그린다.
+	// ⚠ Loop 필터를 구간에도 **똑같이** 적용한다. activeJobIds 는 선택한 loop 의
+	// trace 잡만 조회하는데 구간만 전체를 그리면, 화면엔 loop 2 데이터가 떠 있는데
+	// loop 1·3 밴드가 겹쳐 그려지고 그 행들은 이벤트 0 으로 나온다.
 	const usableBoundaries = $derived(
-		boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0)
+		boundaries.filter(b =>
+			b.finishedMono > b.startedMono &&
+			b.startedMono > 0 &&
+			(selectedLoop <= 0 || b.loopIndex === selectedLoop)
+		)
 	);
 	// 구간 데이터는 왔는데 mono 가 없는 경우 — 왜 분할이 안 되는지 알려야 한다.
 	const boundariesUnusable = $derived(boundaries.length > 0 && usableBoundaries.length === 0);
@@ -702,13 +709,34 @@
 
 	const behaviorRows = $derived.by<BehaviorRow[]>(() => {
 		if (!hasBehavior) return [];
-		const evts = filteredEvents;
+		// 구간마다 전체 배열을 훑으면 O(구간 × 이벤트)다. 이벤트는 최대 50만(샘플링
+		// 상한)이고 loop 시나리오는 구간이 수십~수백 개라 수천만 번 비교가 되는데,
+		// 필터/탭을 건드릴 때마다 메인 스레드에서 다시 돈다.
+		// 시각순으로 한 번 정렬해 두고 구간별로 이분 탐색해 잘라 쓴다.
+		const sorted = [...filteredEvents].sort((a, b2) => a.time - b2.time);
+		const lowerBound = (t: number) => {
+			let lo = 0, hi = sorted.length;
+			while (lo < hi) {
+				const mid = (lo + hi) >> 1;
+				if (sorted[mid].time < t) lo = mid + 1;
+				else hi = mid;
+			}
+			return lo;
+		};
 		return usableBoundaries.map((b, i) => {
-			const inRange = evts.filter(e => e.time >= b.startedMono && e.time <= b.finishedMono);
+			const from = lowerBound(b.startedMono);
+			let to = from;
+			while (to < sorted.length && sorted[to].time <= b.finishedMono) to++;
+			const inRange = sorted.slice(from, to);
 			// latency 는 완료 이벤트에만 실린다 (send 행의 dtoc 는 0).
 			const lat = inRange.map(e => e.dtoc).filter(v => v > 0).sort((a, c) => a - c);
+			// ⚠ 바이트는 **완료 이벤트만** 센다. action 탭이 'all' 이면 한 요청이
+			// send/complete 두 행으로 들어와 그냥 더하면 전부 2배가 된다 (latency 는
+			// dtoc>0 필터가 있어 영향이 없어서 바이트만 조용히 어긋난다).
+			const isComplete = (a: string) => a === 'complete_rsp' || a === 'block_rq_complete';
 			let readBytes = 0, writeBytes = 0;
 			for (const e of inRange) {
+				if (!isComplete(e.action)) continue;
 				// ⚠ read/write 판정은 **getCmdGroup 을 그대로 쓴다.** UFS 의 cmd 는
 				// "READ" 가 아니라 SCSI hex opcode(0x28/0x2a)라, 문자열에 "read" 가
 				// 들어있는지 보는 방식은 UFS 에서 통째로 0 이 된다. 이 함수는 opcode·
@@ -756,22 +784,32 @@
 		// echarts.connect 도 안 걸려 있어서, 사용자가 한 차트를 zoom 하면 레인과
 		// 어긋난다. markArea 는 **차트 좌표계 안**이라 zoom/pan 을 데이터와 함께
 		// 따라가므로 어긋날 수가 없다.
-		if (hasBehavior && series.length > 0) {
-			(series[0] as any).markArea = {
+		if (hasBehavior) {
+			// ⚠ 밴드를 series[0] 에 붙이면 안 된다. series[0] 은 임의의 cmd(UFS 면
+			// 보통 0x28)라, 사용자가 legend 에서 그 cmd 를 끄는 순간 ECharts 가
+			// markArea 까지 같이 숨겨 **모든 차트의 밴드가 한꺼번에 사라진다.**
+			// legend 에 안 잡히는 전용 빈 series 에 매단다.
+			series.push({
+				name: '',
+				type: 'scatter' as const,
+				data: [],
 				silent: true,
-				itemStyle: { opacity: 1 },
-				label: { show: false },
-				emphasis: { disabled: true },
-				data: usableBoundaries.map((b, i) => [
-					{
-						xAxis: b.startedMono,
-						itemStyle: { color: behaviorColor(i) },
-						// hover 로만 라벨을 보여 준다 — 구간이 많으면(loop 반복) 빽빽해진다.
-						name: behaviorLabel(b)
-					},
-					{ xAxis: b.finishedMono }
-				])
-			};
+				markArea: {
+					silent: true,
+					itemStyle: { opacity: 1 },
+					label: { show: false },
+					emphasis: { disabled: true },
+					data: usableBoundaries.map((b, i) => [
+						{
+							xAxis: b.startedMono,
+							itemStyle: { color: behaviorColor(i) },
+							// hover 로만 라벨 — 구간이 많으면(loop 반복) 빽빽해진다.
+							name: behaviorLabel(b)
+						},
+						{ xAxis: b.finishedMono }
+					])
+				}
+			} as any);
 		}
 		return {
 			tooltip: { trigger: 'item' as const, formatter: (p: any) => `${p.seriesName}<br/>time: ${p.data[0]}<br/>${yLabel}: ${p.data[1]}` },

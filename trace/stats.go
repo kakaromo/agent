@@ -951,9 +951,8 @@ func buildFilterWhereCols(f *pb.TraceFilter, lbaCol, cmdCol, timeCol string, pre
 	// has — 컬럼 존재 여부. present 가 nil 이면 전부 있다고 본다.
 	has := func(col string) bool { return present == nil || present[col] }
 	var conds []string
-	// 시간 범위. HasStartTime/HasEndTime 로 "미설정" 과 "0초" 를 가른다 —
-	// `> 0` 로 판정하면 트레이스 원점(0초)에서 시작하는 첫 구간의 하한이 조용히
-	// 사라져 앞 구간이 무한정 넓어진다. 스텝 구간 분할에서 흔한 경우다.
+	// 시간 범위. 컬럼명은 감지된 것을 쓴다 (timeCol 주석 참고).
+	// 0 을 "미설정" 으로 보는 근거는 hasStartTime/hasEndTime 에 적어 두었다.
 	if timeCol != "" {
 		if hasStartTime(f) {
 			conds = append(conds, fmt.Sprintf("%s >= %f", timeCol, f.StartTime))

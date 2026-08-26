@@ -55,8 +55,13 @@ func (j *Job) appendStepBoundary(deviceID string, b *pb.StepBoundary) {
 	j.stepBoundaries[deviceID] = append(j.stepBoundaries[deviceID], b)
 }
 
-// takeStepBoundaries — 기록된 구간을 복사해 돌려준다 (호출자가 슬라이스를 들고
-// 나가므로 내부 상태와 공유하지 않는다).
+// takeStepBoundaries — 기록된 구간을 꺼내 **비운다** (take 그대로의 의미).
+//
+// ⚠ 비우는 것이 핵심이다. runOnDeviceWithRetry 는 실패 시 같은 디바이스로 재실행하고
+// 시도마다 storeResult 를 부르는데, 비우지 않으면 **2회차 결과에 1회차 구간이 섞인다**
+// (스텝이 두 벌씩 나오고, 실패한 시도의 시간 범위가 그대로 남는다).
+//
+// 복사본을 돌려주는 이유는 호출자가 슬라이스를 들고 나가서다 — 내부 상태와 공유하지 않는다.
 func (j *Job) takeStepBoundaries(deviceID string) []*pb.StepBoundary {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -66,6 +71,7 @@ func (j *Job) takeStepBoundaries(deviceID string) []*pb.StepBoundary {
 	}
 	out := make([]*pb.StepBoundary, len(src))
 	copy(out, src)
+	delete(j.stepBoundaries, deviceID)
 	return out
 }
 

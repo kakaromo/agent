@@ -67,13 +67,33 @@ func TestJobStepBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("take 는 꺼내고 비운다 — 재시도 시 섞이면 안 된다", func(t *testing.T) {
+		// runOnDeviceWithRetry 는 실패 시 같은 디바이스로 재실행하고 시도마다
+		// storeResult 를 부른다. 안 비우면 2회차 결과에 1회차 구간이 섞인다.
+		j := &Job{}
+		j.appendStepBoundary("d", &pb.StepBoundary{StepIndex: 0})
+		j.appendStepBoundary("d", &pb.StepBoundary{StepIndex: 1})
+		if got := j.takeStepBoundaries("d"); len(got) != 2 {
+			t.Fatalf("1회차 len = %d, want 2", len(got))
+		}
+		// 2회차: 새로 기록한 것만 나와야 한다
+		j.appendStepBoundary("d", &pb.StepBoundary{StepIndex: 0})
+		got := j.takeStepBoundaries("d")
+		if len(got) != 1 {
+			t.Errorf("2회차 len = %d, want 1 — 1회차 구간이 섞였다", len(got))
+		}
+	})
+
 	t.Run("반환값은 복사본 — 내부 상태와 공유하지 않는다", func(t *testing.T) {
 		j := &Job{}
 		j.appendStepBoundary("d", &pb.StepBoundary{StepIndex: 1})
 		got := j.takeStepBoundaries("d")
-		got[0] = nil // 호출자가 슬라이스를 건드려도
-		if again := j.takeStepBoundaries("d"); again[0] == nil {
-			t.Error("내부 슬라이스가 오염됐다")
+		got[0] = nil // 호출자가 슬라이스를 건드려도 내부에 영향이 없어야 한다
+		j.mu.Lock()
+		internal := j.stepBoundaries["d"]
+		j.mu.Unlock()
+		if len(internal) != 0 {
+			t.Error("take 후에도 내부에 남아 있다")
 		}
 	})
 }

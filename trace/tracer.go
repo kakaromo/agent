@@ -228,6 +228,25 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 
 // enableFtraceEvents — ftrace 계열 trace_type 의 이벤트를 켠다.
 func enableFtraceEvents(ctx context.Context, md *adb.ManagedDevice, tracingDir, traceType string) {
+	// trace_clock 을 boot 로 고정한다.
+	//
+	// ⚠ 기본값 `local` 은 sched_clock 기반이라 **suspend 중 멈춘다.** 반면 스텝 경계를
+	// 옮길 때 쓰는 `/proc/uptime` 은 CLOCK_BOOTTIME(suspend 포함)이다. 그대로 두면
+	// 두 축이 **기기가 잠들어 있던 시간만큼** 어긋난다 — Android 는 화면만 꺼도
+	// suspend 하므로 실기기에선 사실상 항상 발생한다.
+	//
+	// 더 나쁜 건 이 어긋남을 drift 검사가 **못 잡는다**는 점이다. 시작·종료 probe 가
+	// 둘 다 같은 boottime 을 읽어 offset 이 같은 크기로 틀리므로 drift ≈ 0 이 나오고
+	// Usable() 은 true 를 준다. 구간이 통째로 밀려도 그래프는 정상으로 보인다.
+	//
+	// fsiotrace 는 이미 CLOCK_BOOTTIME 으로 출력한다(`--clock` 기본값 boot). 여기서
+	// ftrace 도 boot 로 맞추면 두 수집 경로와 호스트 측정이 **모두 같은 축**이 된다.
+	if _, err := md.Device.Shell(ctx, fmt.Sprintf("echo boot > %s/trace_clock", tracingDir)); err != nil {
+		// 실패해도 수집은 진행한다 — 다만 구간 분할은 못 믿는다.
+		slog.Warn("trace_clock 을 boot 로 설정하지 못했다; 스텝 구간이 suspend 시간만큼 밀릴 수 있다",
+			"tracing_dir", tracingDir, "error", err)
+	}
+
 	switch traceType {
 	case "ufs":
 		md.Device.Shell(ctx, fmt.Sprintf("echo 1 > %s/events/ufs/ufshcd_command/enable", tracingDir))

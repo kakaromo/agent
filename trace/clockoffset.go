@@ -14,13 +14,26 @@ import (
 	"agent/adb"
 )
 
-// clockoffset — 호스트 wall clock ↔ 기기 CLOCK_MONOTONIC 오프셋 측정.
+// clockoffset — 호스트 wall clock ↔ 기기 CLOCK_BOOTTIME 오프셋 측정.
 //
-// **왜 필요한가.** parquet 의 `time` 컬럼은 **기기 부팅 기준 monotonic 절대초**다.
-// ftrace 는 커널 monotonic clock 의 sec.usec 를, fsiotrace 는 `bpf_ktime_get_ns()` 를
-// 그대로 찍고 (`trace/parser/fsio_line.go` 가 TSV 0번 컬럼을 재기준 없이 넣는다),
-// 반면 시나리오 스텝 경계는 호스트의 `time.Now()` = wall clock 이다.
-// 두 축은 기준점이 무관해 **offset 을 재지 않으면 절대 못 맞춘다.**
+// **왜 필요한가.** parquet 의 `time` 컬럼은 **기기 부팅 기준 절대초**이고, 시나리오
+// 스텝 경계는 호스트의 `time.Now()` = wall clock 이다. 두 축은 기준점이 무관해
+// **offset 을 재지 않으면 절대 못 맞춘다.**
+//
+// ⚠ **어느 부팅 기준 시계인지가 중요하다** — suspend 를 포함하느냐로 갈린다:
+//   - `CLOCK_MONOTONIC` : suspend 중 **멈춘다**
+//   - `CLOCK_BOOTTIME`  : suspend 중에도 **흐른다** (= mono + 누적 suspend)
+// Android 는 화면만 꺼도 suspend 하므로 실기기에선 이 차이가 분~시간 단위로 벌어진다.
+//
+// 그래서 세 축을 전부 **BOOTTIME 으로 맞춰 두었다**:
+//   - 호스트 측정 : `/proc/uptime` (첫 필드가 BOOTTIME)
+//   - fsio 수집   : fsiotrace `--clock` 기본값 `boot` = CLOCK_BOOTTIME
+//   - ftrace 수집 : `echo boot > trace_clock` (tracer.go 의 enableFtraceEvents).
+//                   ⚠ 기본값 `local` 은 suspend 를 제외하므로 **반드시 바꿔야 한다.**
+//
+// ⚠ 이 정합이 깨져도 **drift 검사가 못 잡는다.** 시작·종료 probe 가 둘 다 같은 시계를
+// 읽어 offset 이 같은 크기로 틀리므로 drift ≈ 0 이 나오고 Usable() 은 true 를 준다.
+// 즉 축을 맞추는 것이 유일한 방어선이다.
 //
 //	구간경계(monotonic초) = 호스트 wall clock 초 + Offset
 //
