@@ -989,6 +989,30 @@
 		return { t0, t1 };
 	});
 
+	// 해칭 표시 폭(px) — 비율대로 그리면 sub-pixel 이라 안 보인다(실측 ±11.5ms 는
+	// 30초 트랙에서 0.7px). 눈에 걸리는 최소 폭으로 고정하고, 대신 **실제 값을
+	// 숫자로** 함께 밝힌다.
+	const edgeHatchPx = 3;
+
+	// 오차가 구간 길이에 비해 무시할 수준이면 빗금을 아예 안 그린다.
+	// 0.7px 짜리를 3px 로 부풀려 그리면 없는 불확실성을 있는 것처럼 보이게 만든다 —
+	// 가장 짧은 구간의 2% 미만이면 숫자로만 알린다.
+	const showEdgeHatch = $derived.by<boolean>(() => {
+		if (edgeUncertaintySec <= 0 || allBoundaries.length === 0) return false;
+		let shortest = Infinity;
+		for (const b of allBoundaries) {
+			const d = b.finishedMono - b.startedMono;
+			if (d > 0 && d < shortest) shortest = d;
+		}
+		if (!isFinite(shortest)) return false;
+		return (edgeUncertaintySec * 2) / shortest >= 0.02;
+	});
+
+	function fmtEdgeMs(sec: number): string {
+		const ms = sec * 1000;
+		return ms >= 10 ? `${ms.toFixed(0)}ms` : `${ms.toFixed(1)}ms`;
+	}
+
 	function lanePct(t: number): number {
 		const { t0, t1 } = laneSpan;
 		return ((t - t0) / (t1 - t0)) * 100;
@@ -1643,14 +1667,18 @@
 									<div class="relative h-[20px] rounded bg-muted/50">
 										<!-- 경계 불확실(±RTT/2) — 해칭. **강조가 아니라 "모름" 으로 읽혀야 한다.**
 										     이게 없으면 ±10ms 측정과 ±250ms 측정이 화면상 똑같아 보인다. -->
-										{#if edgeUncertaintySec > 0}
-											{@const ew = (edgeUncertaintySec * 2 / (laneSpan.t1 - laneSpan.t0)) * 100}
+										<!-- ⚠ 실측 RTT 23ms 기준 불확실 폭은 ±11.5ms 로, 30초 시나리오에서
+										     트랙의 0.08%(≈0.7px)다. 비율 그대로 그리면 **렌더링이 안 된다.**
+										     그래서 눈에 걸리는 최소 폭(3px)을 보장하되, 그렇게 키운 것이
+										     실제보다 넓다는 사실을 아래 범례에서 숫자로 밝힌다 — 폭을
+										     부풀린 채 설명이 없으면 오차를 과대평가하게 된다. -->
+										{#if showEdgeHatch}
 											{#each [b.startedMono, b.finishedMono] as edge}
 												<div class="absolute top-0 bottom-0 pointer-events-none"
-													style="left:{lanePct(edge - edgeUncertaintySec)}%; width:{ew}%;
+													style="left:calc({lanePct(edge)}% - {edgeHatchPx / 2}px); width:{edgeHatchPx}px;
 														background-image: repeating-linear-gradient(45deg,
 															rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"
-													title="경계 불확실 ±{(edgeUncertaintySec * 1000).toFixed(0)}ms — 이 안의 IO 는 어느 구간인지 단정할 수 없습니다"
+													title="경계 불확실 ±{fmtEdgeMs(edgeUncertaintySec)} — 이 안의 IO 는 어느 구간인지 단정할 수 없습니다"
 												></div>
 											{/each}
 										{/if}
@@ -1672,12 +1700,21 @@
 
 							{#if edgeUncertaintySec > 0}
 								<div class="mt-1.5 flex items-center gap-1.5 {captionMuted} text-[9px]">
-									<span class="inline-block w-6 h-2 rounded-sm"
-										style="background-image: repeating-linear-gradient(45deg,
-											rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"></span>
-									경계 불확실 ±{(edgeUncertaintySec * 1000).toFixed(0)}ms —
-									이 안에 걸친 IO 는 어느 구간인지 단정할 수 없습니다
-									(호스트↔기기 시각 측정의 원리적 한계, adb 왕복의 절반).
+									{#if showEdgeHatch}
+										<span class="inline-block w-6 h-2 rounded-sm shrink-0"
+											style="background-image: repeating-linear-gradient(45deg,
+												rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"></span>
+									{/if}
+									<span>
+										경계 불확실 <b>±{fmtEdgeMs(edgeUncertaintySec)}</b> —
+										이 안에 걸친 IO 는 어느 구간인지 단정할 수 없습니다
+										(호스트↔기기 시각 측정의 원리적 한계, adb 왕복의 절반).
+										{#if showEdgeHatch}
+											빗금은 <b>보이도록 넓힌 것</b>이라 실제 폭보다 큽니다.
+										{:else}
+											구간 길이에 비해 무시할 수준이라 표시하지 않습니다.
+										{/if}
+									</span>
 								</div>
 							{/if}
 						</div>
