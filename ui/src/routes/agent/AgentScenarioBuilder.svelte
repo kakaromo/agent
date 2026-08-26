@@ -85,14 +85,25 @@
 				const opts = getBasicOptions(tool);
 				const formP: Record<string, string> = {};
 				const extraLines: string[] = [];
+				// ⚠ trace_start/trace_stop 의 params 는 **formParams 로 직접 넣는다.**
+				// opts 는 benchmark(FIO 등) 옵션 목록이라 trace_type 이 거기 없어서
+				// extraLines 로 밀려나는데, 아래에서 `trace_type=` 을 필터로 걸러내
+				// **값이 통째로 사라졌다.** 그래서 스텝 편집에서 fsio 를 골라도 저장 후
+				// 다시 열면 항상 ufs 로 돌아가 "변경이 안 되는" 것처럼 보였다.
+				// 다이얼로그는 이 타입에서 formParams.trace_type 을 읽는다.
+				const isTraceStep = s.type === 'trace_start' || s.type === 'trace_stop';
 				if (s.params) {
 					for (const [k, v] of Object.entries(s.params)) {
-						if (opts.some(o => o.key === k)) formP[k] = v;
+						if (isTraceStep || opts.some(o => o.key === k)) formP[k] = v;
 						else extraLines.push(`${k}=${v}`);
 					}
 				}
-				for (const opt of opts) {
-					if (!(opt.key in formP)) formP[opt.key] = opt.defaultValue;
+				// benchmark 기본값 채우기 — trace 스텝엔 적용하지 않는다
+				// (rw/bs 같은 FIO 옵션이 trace_start params 로 섞여 저장된다).
+				if (!isTraceStep) {
+					for (const opt of opts) {
+						if (!(opt.key in formP)) formP[opt.key] = opt.defaultValue;
+					}
 				}
 				const useFile = s.params?.use_file_from_step != null ? Number(s.params.use_file_from_step) : null;
 
