@@ -5,6 +5,7 @@
 	import TraceScatterChart from './TraceScatterChart.svelte';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
+	import BehaviorTimeline from './BehaviorTimeline.svelte';
 	import { columnsFor } from './rawDataColumns.js';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
@@ -74,6 +75,20 @@
 		if (next.has(key)) next.delete(key);
 		else next.add(key);
 		hiddenSteps = next;
+	}
+
+	// 타임라인 구간 선택 — hiddenSteps(숨김)와 **다른 개념**이다.
+	//
+	//   hiddenSteps  : 차트/표에서 아예 빼기 (범례 토글)
+	//   selectedSteps: 타임라인에서 그 구간만 강조하고 나머지는 흐리게 (필터 미리보기)
+	//
+	// 섞으면 "왜 표에서 사라졌지" 와 "왜 흐리지" 가 구분이 안 된다.
+	let selectedSteps = $state<Set<string>>(new Set());
+	function toggleSelectStep(key: string) {
+		const next = new Set(selectedSteps);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		selectedSteps = next;
 	}
 
 	// 화면에 실제로 그릴 구간. 토글로 숨긴 것을 뺀다.
@@ -816,10 +831,34 @@
 		events: number;
 		readBytes: number;
 		writeBytes: number;
-		p50: number;
-		p99: number;
+		/** 사용자가 고른 분위수 값들 (behaviorPercentiles 와 같은 순서). */
+		percentiles: number[];
 		maxLatency: number;
+		discardBytes: number;
+		discardCount: number;
 		success: boolean;
+	}
+
+	// 분위수는 사용자가 정한다 — 워크로드마다 봐야 할 꼬리가 다르다(p95 로 충분한 경우도,
+	// p99.9 까지 봐야 하는 경우도 있다). 기본은 흔히 쓰는 3개.
+	let percentileInput = $state('50, 95, 99');
+	const behaviorPercentiles = $derived.by<number[]>(() => {
+		const out: number[] = [];
+		for (const raw of percentileInput.split(',')) {
+			const v = parseFloat(raw.trim().replace(/^p/i, ''));
+			// 0 < v < 100. p99.999 처럼 소수 자리 제한은 두지 않는다 — 꼬리를 얼마나
+			// 깊게 볼지는 표본 수에 달렸고, 그 판단은 사용자 몫이다.
+			if (Number.isFinite(v) && v > 0 && v < 100) out.push(v);
+		}
+		// 중복 제거 + 오름차순. 비면 기본값으로 되돌린다(빈 표를 주지 않는다).
+		const uniq = [...new Set(out)].sort((a, b) => a - b);
+		return uniq.length > 0 ? uniq : [50, 95, 99];
+	});
+	// ⚠ toFixed 로 자르면 안 된다. p99.999 가 "p100.0" 으로 표시돼 **틀린 값**이 되고,
+	// p99.9 / p99.99 / p99.999 가 화면에서 구분이 안 된다. 꼬리를 깊게 보는 게 목적인
+	// 지표라 자릿수 자체가 정보다. 사용자가 입력한 값을 그대로 쓴다.
+	function fmtPct(p: number): string {
+		return `p${p}`;
 	}
 
 	const behaviorRows = $derived.by<BehaviorRow[]>(() => {
@@ -849,7 +888,9 @@
 			// send/complete 두 행으로 들어와 그냥 더하면 전부 2배가 된다 (latency 는
 			// dtoc>0 필터가 있어 영향이 없어서 바이트만 조용히 어긋난다).
 			const isComplete = (a: string) => a === 'complete_rsp' || a === 'block_rq_complete';
-			let readBytes = 0, writeBytes = 0;
+			// discard(=trim/unmap)도 센다. 삭제·캐시정리 워크로드에서 핵심 신호인데
+			// read/write 만 보면 "IO 가 거의 없다" 로 잘못 읽힌다.
+			let readBytes = 0, writeBytes = 0, discardBytes = 0, discardCount = 0;
 			for (const e of inRange) {
 				if (!isComplete(e.action)) continue;
 				// ⚠ read/write 판정은 **getCmdGroup 을 그대로 쓴다.** UFS 의 cmd 는
@@ -860,6 +901,7 @@
 				const g = getCmdGroup(e.cmd);
 				if (g === 'read') readBytes += e.size;
 				else if (g === 'write') writeBytes += e.size;
+				else if (g === 'discard') { discardBytes += e.size; discardCount++; }
 			}
 			return {
 				key: boundaryKey(b, i),
@@ -870,9 +912,10 @@
 				events: inRange.length,
 				readBytes,
 				writeBytes,
-				p50: quantile(lat, 0.5),
-				p99: quantile(lat, 0.99),
+				percentiles: behaviorPercentiles.map(p => quantile(lat, p / 100)),
 				maxLatency: lat.length ? lat[lat.length - 1] : 0,
+				discardBytes,
+				discardCount,
 				success: b.success
 			};
 		});
@@ -1637,87 +1680,18 @@
 
 				{#if hasBehavior}
 					<Tabs.Content value="behavior" class="pt-2 space-y-3">
-						<!-- 스텝 레인 (목업 형태) — 스텝마다 한 줄, 시간축 공유.
-						     Charts 밴드와 달리 zoom 이 없어 어긋날 일이 없다. -->
-						<div class="rounded border p-2">
-							<div class="flex items-center justify-between mb-1.5">
-								<span class="text-[10px] font-semibold">스텝 구간</span>
-								<span class="{captionMuted} text-[9px] font-mono">
-									{laneSpan.t0.toFixed(2)}s → {laneSpan.t1.toFixed(2)}s
-									({(laneSpan.t1 - laneSpan.t0).toFixed(2)}s)
-								</span>
-							</div>
-
-							<!-- ⚠ allBoundaries 를 순회한다 — usableBoundaries 는 숨긴 걸 이미 뺀
-							     목록이라, 그걸 돌면 끈 구간이 화면에서 사라져 **되돌릴 방법이 없다.** -->
-							{#each allBoundaries as b, i (boundaryKey(b, i))}
-								{@const key = boundaryKey(b, i)}
-								{@const hidden = hiddenSteps.has(key)}
-								{@const left = lanePct(b.startedMono)}
-								{@const width = Math.max(lanePct(b.finishedMono) - left, 0.4)}
-								{@const idle = isIdleStep(b.type)}
-								<div class="grid grid-cols-[124px_1fr] items-center gap-0 min-h-[24px]"
-									class:opacity-40={hidden}>
-									<button
-										onclick={() => toggleStep(key)}
-										class="pr-2 text-right text-[9px] font-mono text-muted-foreground truncate hover:text-foreground"
-										title="{behaviorLabel(b)} — 클릭하면 {hidden ? '다시 표시' : '숨김'}">
-										{hidden ? '☐' : '☑'} {behaviorLabel(b)}
-									</button>
-									<div class="relative h-[20px] rounded bg-muted/50">
-										<!-- 경계 불확실(±RTT/2) — 해칭. **강조가 아니라 "모름" 으로 읽혀야 한다.**
-										     이게 없으면 ±10ms 측정과 ±250ms 측정이 화면상 똑같아 보인다. -->
-										<!-- ⚠ 실측 RTT 23ms 기준 불확실 폭은 ±11.5ms 로, 30초 시나리오에서
-										     트랙의 0.08%(≈0.7px)다. 비율 그대로 그리면 **렌더링이 안 된다.**
-										     그래서 눈에 걸리는 최소 폭(3px)을 보장하되, 그렇게 키운 것이
-										     실제보다 넓다는 사실을 아래 범례에서 숫자로 밝힌다 — 폭을
-										     부풀린 채 설명이 없으면 오차를 과대평가하게 된다. -->
-										{#if showEdgeHatch}
-											{#each [b.startedMono, b.finishedMono] as edge}
-												<div class="absolute top-0 bottom-0 pointer-events-none"
-													style="left:calc({lanePct(edge)}% - {edgeHatchPx / 2}px); width:{edgeHatchPx}px;
-														background-image: repeating-linear-gradient(45deg,
-															rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"
-													title="경계 불확실 ±{fmtEdgeMs(edgeUncertaintySec)} — 이 안의 IO 는 어느 구간인지 단정할 수 없습니다"
-												></div>
-											{/each}
-										{/if}
-
-										<div class="absolute top-[2px] bottom-[2px] rounded-sm flex items-center px-1.5 overflow-hidden whitespace-nowrap text-[9px]"
-											style="left:{left}%; width:{width}%;
-												{idle
-													? 'border:1px dashed var(--border); color:var(--muted-foreground);'
-													: `background:${behaviorSolid(i)}; color:#fff;`}"
-											title="{behaviorLabel(b)} — {b.startedMono.toFixed(2)}s → {b.finishedMono.toFixed(2)}s">
-											<span class="truncate">{b.type}</span>
-											<span class="ml-auto pl-1.5 font-mono opacity-80">
-												{(b.finishedMono - b.startedMono).toFixed(2)}s
-											</span>
-										</div>
-									</div>
-								</div>
-							{/each}
-
-							{#if edgeUncertaintySec > 0}
-								<div class="mt-1.5 flex items-center gap-1.5 {captionMuted} text-[9px]">
-									{#if showEdgeHatch}
-										<span class="inline-block w-6 h-2 rounded-sm shrink-0"
-											style="background-image: repeating-linear-gradient(45deg,
-												rgba(242,153,0,0.44) 0 3px, transparent 3px 6px);"></span>
-									{/if}
-									<span>
-										경계 불확실 <b>±{fmtEdgeMs(edgeUncertaintySec)}</b> —
-										이 안에 걸친 IO 는 어느 구간인지 단정할 수 없습니다
-										(호스트↔기기 시각 측정의 원리적 한계, adb 왕복의 절반).
-										{#if showEdgeHatch}
-											빗금은 <b>보이도록 넓힌 것</b>이라 실제 폭보다 큽니다.
-										{:else}
-											구간 길이에 비해 무시할 수준이라 표시하지 않습니다.
-										{/if}
-									</span>
-								</div>
-							{/if}
-						</div>
+						<BehaviorTimeline
+							boundaries={allBoundaries}
+							events={filteredEvents}
+							edgeSec={edgeUncertaintySec}
+							selected={selectedSteps}
+							keyOf={boundaryKey}
+							colorOf={behaviorSolid}
+							labelOf={behaviorLabel}
+							isIdle={isIdleStep}
+							groupOf={getCmdGroup}
+							onToggle={toggleSelectStep}
+						/>
 
 						<!-- 지표 읽는 법 — 숫자만 주면 장식이 된다.
 						     이 화면을 보는 사람이 성능 분석 경험이 없을 수 있다. -->
@@ -1730,10 +1704,24 @@
 								Charts 탭의 옅은 세로 밴드가 같은 구간이며, 확대해도 데이터와 함께 움직입니다.
 							</div>
 							<div class="mt-1 {captionMuted}">
-								<b>p99</b> 는 느린 쪽 1% 의 지연입니다. 평균이 좋아도 p99 가 크면 사용자는 멈칫하는 걸 느낍니다.
+								<b>pNN</b> 은 느린 쪽 (100-NN)% 의 지연입니다 — p99 면 가장 느린 1%. 평균이 좋아도
+								p99 가 크면 사용자는 멈칫하는 걸 느낍니다. 볼 분위수는 위 입력칸에서 바꿀 수 있습니다.
 								<b>Read/Write</b> 비중은 그 구간이 무엇을 했는지 말해 줍니다 (콜드 실행은 보통 read 우위,
-								촬영·다운로드는 write 우위).
+								촬영·다운로드는 write 우위). <b>Discard</b> 는 삭제·캐시정리(trim/unmap)로,
+								여기가 크면 저장소를 비우는 작업이 돈 것입니다.
 							</div>
+						</div>
+
+						<div class="flex items-center gap-2 text-[9px]">
+							<span class={captionMuted}>분위수</span>
+							<input
+								bind:value={percentileInput}
+								placeholder="50, 95, 99"
+								class="w-40 border rounded px-1.5 py-0.5 bg-background font-mono"
+								title="쉼표로 구분. 0~100 사이 값 (예: 50, 95, 99, 99.9)" />
+							<span class={captionMuted}>
+								꼬리를 어디까지 볼지는 워크로드마다 다릅니다 — p99.9 처럼 소수도 됩니다.
+							</span>
 						</div>
 
 						<div class="overflow-x-auto">
@@ -1745,8 +1733,10 @@
 										<th class="text-right py-1 px-2 font-medium">이벤트</th>
 										<th class="text-right py-1 px-2 font-medium">Read</th>
 										<th class="text-right py-1 px-2 font-medium">Write</th>
-										<th class="text-right py-1 px-2 font-medium">p50</th>
-										<th class="text-right py-1 px-2 font-medium">p99</th>
+										<th class="text-right py-1 px-2 font-medium">Discard</th>
+										{#each behaviorPercentiles as pv}
+											<th class="text-right py-1 px-2 font-medium">{fmtPct(pv)}</th>
+										{/each}
 										<th class="text-right py-1 pl-2 font-medium">max</th>
 									</tr>
 								</thead>
@@ -1765,8 +1755,12 @@
 											<td class="text-right py-1 px-2">{row.events.toLocaleString()}</td>
 											<td class="text-right py-1 px-2">{fmtBytes(row.readBytes)}</td>
 											<td class="text-right py-1 px-2">{fmtBytes(row.writeBytes)}</td>
-											<td class="text-right py-1 px-2">{fmtLatency(row.p50)}</td>
-											<td class="text-right py-1 px-2">{fmtLatency(row.p99)}</td>
+											<td class="text-right py-1 px-2" title="{row.discardCount.toLocaleString()} events">
+												{row.discardBytes > 0 ? fmtBytes(row.discardBytes) : '-'}
+											</td>
+											{#each row.percentiles as pvv}
+												<td class="text-right py-1 px-2">{fmtLatency(pvv)}</td>
+											{/each}
 											<td class="text-right py-1 pl-2">{fmtLatency(row.maxLatency)}</td>
 										</tr>
 									{/each}
