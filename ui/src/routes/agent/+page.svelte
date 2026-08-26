@@ -562,6 +562,12 @@
 		if (jobType === 'trace') {
 			viewingServerId = serverId;
 			traceJobIds = [jobId];
+			// ⚠ 이전 시나리오의 매핑/구간을 **반드시 지운다.** 안 지우면 단독 trace 에
+			// 남의 스텝 구간 밴드가 그려지는데, mono 축이 다른 잡이라 위치가 임의로
+			// 어긋난다. 그런데도 그래프는 정상으로 보여 눈으로 못 걸러낸다.
+			traceMappings = [];
+			traceBoundaries = [];
+			traceDeviceId = null;
 			traceSheetOpen = true;
 			return;
 		}

@@ -49,6 +49,11 @@ type JobExecution struct {
 	// 만료된 job 도 job 상세에서 기존 trace UI 로 진입할 수 있게 영속화.
 	TraceJobs sql.NullString `json:"traceJobs"`
 
+	// StepBoundaries — 시나리오 스텝 구간 JSON array. behavior 구간별 IO 분석의 시간 축.
+	// TraceJobs 와 같은 이유로 영속화한다 — 구간이 메모리에만 있으면 잡 만료 후
+	// parquet 은 남는데 Behavior 탭만 사라진다.
+	StepBoundaries sql.NullString `json:"stepBoundaries"`
+
 	// Trace archive 메타 (nullable)
 	TraceRawKey         sql.NullString `json:"traceRawKey"`
 	TraceRawFormat      sql.NullString `json:"traceRawFormat"`

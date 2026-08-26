@@ -14,7 +14,7 @@ const execCols = `id, job_id, server_id, server_name, type, tool, job_name, devi
 	started_at, completed_at, created_at,
 	trace_raw_key, trace_raw_format, trace_raw_size, trace_raw_uploaded_at,
 	trace_parquet_keys, trace_parsed_at, trace_parse_state, trace_parse_error,
-	workload_note, trace_jobs`
+	workload_note, trace_jobs, step_boundaries`
 
 func scanExec(row interface{ Scan(...any) error }) (*JobExecution, error) {
 	e := &JobExecution{}
@@ -25,7 +25,7 @@ func scanExec(row interface{ Scan(...any) error }) (*JobExecution, error) {
 		&startedAt, &completedAt, &createdAt,
 		&e.TraceRawKey, &e.TraceRawFormat, &e.TraceRawSize, &traceRawUploadedAt,
 		&e.TraceParquetKeys, &traceParsedAt, &e.TraceParseState, &e.TraceParseError,
-		&e.WorkloadNote, &e.TraceJobs,
+		&e.WorkloadNote, &e.TraceJobs, &e.StepBoundaries,
 	)
 	if err != nil {
 		return nil, err
@@ -138,6 +138,19 @@ func (db *DB) UpdateJobExecutionWorkloadNote(ctx context.Context, jobID, note st
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateJobExecutionStepBoundaries — 잡 종료 시 스텝 구간 JSON 을 영속화.
+//
+// UpdateJobExecutionTraceJobs 와 같은 이유·같은 시점이다. 구간이 메모리 Job 에만
+// 있으면 잡 만료 후 **parquet 은 남는데 Behavior 탭만 조용히 사라진다.**
+func (db *DB) UpdateJobExecutionStepBoundaries(ctx context.Context, jobID, boundariesJSON string) error {
+	if boundariesJSON == "" {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `UPDATE job_executions SET step_boundaries=? WHERE job_id=?`,
+		boundariesJSON, jobID)
+	return err
 }
 
 // UpdateJobExecutionTraceJobs — 잡 종료 시 trace job 매핑 JSON 을 영속화.

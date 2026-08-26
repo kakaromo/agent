@@ -370,6 +370,16 @@
 	);
 	let mainTab = $state('raw');
 
+	// 선택된 탭이 사라지면 기본 탭으로 되돌린다.
+	//
+	// mainTab 은 시트를 닫아도 유지되는데, Behavior/Attribution 은 조건부 노출이라
+	// 그 탭을 보던 중 닫고 **구간(또는 fsio)이 없는 잡**을 열면 트리거와 콘텐츠가
+	// 둘 다 사라져 **아무 탭도 선택 안 된 빈 본문**이 된다.
+	$effect(() => {
+		if (mainTab === 'behavior' && !hasBehavior) mainTab = 'raw';
+		if (mainTab === 'attribution' && !isFsio) mainTab = 'raw';
+	});
+
 	// Filter state
 	let filterStartTime = $state('');
 	let filterEndTime = $state('');

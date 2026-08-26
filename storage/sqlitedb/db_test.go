@@ -254,3 +254,42 @@ func TestScheduledJobCRUD(t *testing.T) {
 		t.Error("expected enabled=false after toggle")
 	}
 }
+
+// TestStepBoundariesPersist — 스텝 구간이 DB 에 남고 다시 읽히는가.
+//
+// 이게 없으면 잡이 만료된 뒤 parquet 은 남는데 Behavior 탭만 조용히 사라진다
+// (trace_jobs 를 영속화한 것과 정확히 같은 이유).
+func TestStepBoundariesPersist(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	exec, err := db.SaveJobExecution(ctx, &JobExecution{
+		JobID: "job-sb", Type: "scenario", State: "running",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	const payload = `[{"stepIndex":0,"type":"scroll","startedMono":1005.5,"finishedMono":1007.25,"success":true}]`
+	if err := db.UpdateJobExecutionStepBoundaries(ctx, "job-sb", payload); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	got, err := db.FindJobExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.StepBoundaries.Valid || got.StepBoundaries.String != payload {
+		t.Errorf("StepBoundaries = %q (valid=%v), want %q",
+			got.StepBoundaries.String, got.StepBoundaries.Valid, payload)
+	}
+
+	// 빈 문자열은 no-op — 구간 없는 잡(단독 trace)이 기존 값을 지우면 안 된다.
+	if err := db.UpdateJobExecutionStepBoundaries(ctx, "job-sb", ""); err != nil {
+		t.Fatalf("empty update: %v", err)
+	}
+	again, _ := db.FindJobExecution(ctx, exec.ID)
+	if again.StepBoundaries.String != payload {
+		t.Error("빈 문자열 업데이트가 기존 값을 지웠다")
+	}
+}

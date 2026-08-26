@@ -147,6 +147,13 @@ func (r *dbRecorder) OnResult(ctx context.Context, agent *DeviceAgentServer, job
 				slog.Debug("update job execution trace_jobs failed", "jobId", jobID, "error", err)
 			}
 		}
+		// 스텝 구간 영속화 — 같은 이유다. 구간이 메모리에만 있으면 잡 만료 후
+		// parquet 은 남는데 Behavior 탭만 사라진다.
+		if sb := collectStepBoundariesFrom(resp); sb != "" {
+			if err := r.db.UpdateJobExecutionStepBoundaries(ctx, jobID, sb); err != nil {
+				slog.Debug("update job execution step_boundaries failed", "jobId", jobID, "error", err)
+			}
+		}
 		// archive_base 가 설정돼 있으면 풀 결과 JSON 도 디스크에 자동 저장.
 		if r.archiveBase != "" {
 			r.autoArchiveBenchmarkFrom(jobID, resp)
@@ -189,6 +196,41 @@ func (r *dbRecorder) autoArchiveBenchmarkFrom(jobID string, resp *pb.GetBenchmar
 		}
 		slog.Info("benchmark result auto-archived", "jobId", jobID, "deviceId", br.GetDeviceId(), "path", fullPath)
 	}
+}
+
+// collectStepBoundariesFrom — 결과에서 스텝 구간을 모아 JSON array 문자열로 반환.
+// FE StepBoundary shape 과 동일 (rest_convert.go 의 benchmarkResultToMap 와 같은 키).
+// 구간이 없으면 빈 문자열 — 단독 trace 나 구버전 잡이 여기 해당한다.
+func collectStepBoundariesFrom(resp *pb.GetBenchmarkResultResponse) string {
+	if resp == nil || len(resp.GetResults()) == 0 {
+		return ""
+	}
+	out := make([]map[string]any, 0)
+	for _, br := range resp.GetResults() {
+		for _, b := range br.GetStepBoundaries() {
+			out = append(out, map[string]any{
+				"stepIndex":    b.GetStepIndex(),
+				"loopIndex":    b.GetLoopIndex(),
+				"repeatIndex":  b.GetRepeatIndex(),
+				"type":         b.GetType(),
+				"label":        b.GetLabel(),
+				"startedAt":    b.GetStartedAt(),
+				"finishedAt":   b.GetFinishedAt(),
+				"startedMono":  b.GetStartedMono(),
+				"finishedMono": b.GetFinishedMono(),
+				"success":      b.GetSuccess(),
+				"error":        b.GetError(),
+			})
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // collectTraceJobsFrom — 이미 fetch 한 결과에서 trace job 매핑을 모아 JSON array 문자열로 반환.

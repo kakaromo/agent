@@ -667,6 +667,8 @@ export interface JobExecutionRecord {
 	workloadNote?: string | null;
 	// 이 job 에 연결된 trace job 매핑 (영속화) — 만료된 job 도 기존 trace UI 로 진입 가능
 	traceJobs?: TraceJobMapping[] | null;
+	// 스텝 구간 (영속화) — 만료된 job 도 Behavior 탭을 볼 수 있게. traceJobs 와 같은 이유.
+	stepBoundaries?: StepBoundary[] | null;
 }
 
 export interface JobExecutionPage {
