@@ -1792,38 +1792,85 @@
 										링크 점유 {fmtLatency(mgmtTotalMs)}ms · 관측 기간의 {mgmtRatio.toFixed(1)}%
 									</span>
 								</div>
-								<div class="border rounded-md overflow-x-auto">
-									<table class="w-full text-[10px]">
-										<thead class="bg-muted/50">
-											<tr>
-												<th class="text-left px-2 py-1 font-medium">Event</th>
-												<th class="text-left px-2 py-1 font-medium">Kind</th>
-												<th class="text-right px-2 py-1 font-medium">Count</th>
-												<th class="text-right px-2 py-1 font-medium">Paired</th>
-												<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
-												<th class="text-right px-2 py-1 font-medium">Share</th>
-												<th class="text-right px-2 py-1 font-medium">Avg</th>
-												<th class="text-right px-2 py-1 font-medium">Max</th>
-											</tr>
-										</thead>
-										<tbody>
-											{#each mgmt as m}
-												<tr class="border-t">
-													<td class="px-2 py-0.5">{m.name}</td>
-													<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
-													<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
-													<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
-													<td class="text-right px-2 py-0.5">
-														{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
-													</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
-													<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
-												</tr>
-											{/each}
-										</tbody>
-									</table>
-								</div>
+								<!-- Overview(점유 시간 중심) / DtoC(분포 중심) 두 축.
+								     합계만 보면 "가끔 아주 느린 게 있나" 를 못 본다 — hibern8 exit 이
+								     평소 2ms 인데 p99.9 가 50ms 면 그게 stall 의 원인이다. -->
+								<Tabs.Root value="overview">
+									<Tabs.List class="flex gap-0.5 mb-1">
+										<Tabs.Trigger value="overview" class="text-[10px] px-2 py-0.5">Overview</Tabs.Trigger>
+										<Tabs.Trigger value="dtoc" class="text-[10px] px-2 py-0.5">DtoC 분포</Tabs.Trigger>
+									</Tabs.List>
+									<Tabs.Content value="overview">
+										<div class="border rounded-md overflow-x-auto">
+											<table class="w-full text-[10px]">
+												<thead class="bg-muted/50">
+													<tr>
+														<th class="text-left px-2 py-1 font-medium">Event</th>
+														<th class="text-left px-2 py-1 font-medium">Kind</th>
+														<th class="text-right px-2 py-1 font-medium">Count</th>
+														<th class="text-right px-2 py-1 font-medium">Paired</th>
+														<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
+														<th class="text-right px-2 py-1 font-medium">Share</th>
+														<th class="text-right px-2 py-1 font-medium">Avg</th>
+														<th class="text-right px-2 py-1 font-medium">Max</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each mgmt as m}
+														<tr class="border-t">
+															<td class="px-2 py-0.5">{m.name}</td>
+															<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
+															<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
+															<td class="text-right px-2 py-0.5">
+																{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
+															</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</Tabs.Content>
+									<Tabs.Content value="dtoc">
+										<!-- 모수는 Paired(짝지어진 건수) 다. send 만 있고 complete 를 못 받은
+										     mgmt 는 dtoc 가 0(=모름)이라 백분위 계산에서 빠진다. -->
+										<div class="border rounded-md overflow-x-auto">
+											<table class="w-full text-[10px]">
+												<thead class="bg-muted/50">
+													<tr>
+														<th class="text-left px-2 py-1 font-medium">Event</th>
+														<th class="text-right px-2 py-1 font-medium">Paired</th>
+														<th class="text-right px-2 py-1 font-medium">Min</th>
+														<th class="text-right px-2 py-1 font-medium">Max</th>
+														<th class="text-right px-2 py-1 font-medium">Avg</th>
+														<th class="text-right px-2 py-1 font-medium">StdDev</th>
+														<th class="text-right px-2 py-1 font-medium">Median</th>
+														<th class="text-right px-2 py-1 font-medium">P99</th>
+														<th class="text-right px-2 py-1 font-medium">P99.9</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each mgmt as m}
+														<tr class="border-t">
+															<td class="px-2 py-0.5">{m.name}</td>
+															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.min ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.stddev ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.median ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p99 ?? 0)}</td>
+															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p999 ?? 0)}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</Tabs.Content>
+								</Tabs.Root>
 							</div>
 						{/if}
 

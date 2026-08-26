@@ -605,3 +605,54 @@ func TestSampledPathSplitsMgmtBudget(t *testing.T) {
 		t.Errorf("표본 총량 %d > 예산 %d", len(resp.Events), maxEventsForTest)
 	}
 }
+
+// TestMgmtStatsCarriesFullPercentiles — mgmt 의 DtoC 분포 지표가 실제로
+// 채워지는지. UI 의 "DtoC 분포" 탭이 이 값들을 그린다.
+//
+// 컬럼만 만들고 값이 안 오면 표가 전부 0.000 으로 보이는데, 그건 "지연이
+// 0" 으로 읽혀서 빈칸보다 나쁘다.
+func TestMgmtStatsCarriesFullPercentiles(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.MgmtStats) == 0 {
+		t.Fatal("mgmt 집계가 비었다")
+	}
+
+	var checked int
+	for _, m := range stats.MgmtStats {
+		if m.GetPairedCount() == 0 {
+			continue // 짝이 없으면 분포가 없는 게 맞다
+		}
+		checked++
+		d := m.GetDtoc()
+		if d == nil {
+			t.Fatalf("%s: dtoc 가 nil", m.GetName())
+		}
+		// 짝지어진 mgmt 는 실제 왕복 시간이 있다 — 전부 0 이면 안 된다.
+		if d.GetMax() <= 0 {
+			t.Errorf("%s: dtoc.max = %f, want > 0", m.GetName(), d.GetMax())
+		}
+		if d.GetMedian() <= 0 {
+			t.Errorf("%s: dtoc.median = %f, want > 0 — 백분위가 안 채워졌다",
+				m.GetName(), d.GetMedian())
+		}
+		if d.GetP99() <= 0 {
+			t.Errorf("%s: dtoc.p99 = %f, want > 0", m.GetName(), d.GetP99())
+		}
+		if d.GetP999() <= 0 {
+			t.Errorf("%s: dtoc.p999 = %f, want > 0", m.GetName(), d.GetP999())
+		}
+		// min <= median <= max 는 분포의 기본 성질이다.
+		if d.GetMin() > d.GetMedian() || d.GetMedian() > d.GetMax() {
+			t.Errorf("%s: min/median/max 순서가 깨졌다 (%f / %f / %f)",
+				m.GetName(), d.GetMin(), d.GetMedian(), d.GetMax())
+		}
+	}
+	if checked == 0 {
+		t.Fatal("paired mgmt 가 하나도 없다 — 테스트가 무의미하다")
+	}
+}
