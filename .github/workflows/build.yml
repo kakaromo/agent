@@ -1,6 +1,11 @@
 name: build
 
-# 회사에서 바로 받아 쓰기 위한 3-OS 바이너리 빌드.
+# 회사에서 바로 받아 쓰기 위한 3-타깃 바이너리 빌드
+# (linux-amd64 / darwin-arm64 / windows-amd64).
+#
+# ⚠ Intel Mac(darwin-amd64, macos-13)은 뺐다 — 쓰는 사람이 없는데 러너 대기가 길어
+#   나머지가 다 끝난 뒤에도 전체 run 이 queued 로 묶여 있었다. 필요해지면 matrix 에
+#   되돌리면 된다.
 #
 # ⚠ 크로스 컴파일이 불가능하다 — go-duckdb 가 cgo 의존이라 CGO_ENABLED=0 이면
 #   `undefined: bindings.Type` 류로 컴파일이 깨진다(build.ps1 주석과 같은 증상).
@@ -41,12 +46,6 @@ jobs:
           - os: macos-latest        # Apple Silicon 러너
             label: darwin-arm64
             goarch: arm64
-            binary: agent
-            iotest: iotest
-            archive: tar.gz
-          - os: macos-13            # Intel 러너
-            label: darwin-amd64
-            goarch: amd64
             binary: agent
             iotest: iotest
             archive: tar.gz
