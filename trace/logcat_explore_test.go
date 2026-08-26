@@ -50,15 +50,19 @@ func TestExplore_FindsRealMetrics(t *testing.T) {
 
 // ⚠ 이 테스트가 이 파일의 핵심이다.
 // 음성 wakeword·얼굴인식 같은 다른 온디바이스 ML 은 LLM 과 **어휘가 겹친다** —
-// 똑같이 "모델을 로드"하고 "추론"한다. 실기기 로그에서 실제로 Bixby 계열이
+// 똑같이 "모델을 로드"하고 "추론"한다. 실기기 로그에서 실제로 wakeword 엔진이
 // 최상위를 차지했었다. 낱말만 겹치는 것을 LLM 신호로 착각하면 안 된다.
+//
+// ⚠ 아래 픽스처는 삼성 기기에서 관측한 실제 줄이지만 **벤더 특정 문제가 아니다.**
+// vivo Jovi · Xiaomi XiaoAI · Google Assistant 등 어느 wakeword 엔진이든
+// 같은 형태로 걸린다. 태그·문구가 달라도 낱말이 같기 때문이다.
 func TestExplore_VoiceMLIsNotMistakenForLLM(t *testing.T) {
 	log := strings.Join([]string{
 		"100.000 2257 2630 I STHAL   : SoundTriggerHw: loadPhraseSoundModel: 152: Enter",
 		"100.100 2992 4190 D SoundTriggerModule: loadPhraseModel()->32",
 		"100.200 28614 29005 I BWU@DspControlUtil: Loading sound model 6131373735",
 		"100.300 2257 2630 D AGM     : graph: graph_prepare: 920 exit, ret 0",
-		"100.400 28614 29005 I DspUtils: DSP Load Event, current active model : hibixby",
+		"100.400 28614 29005 I DspUtils: DSP Load Event, current active model : wakeword",
 		"100.500 6047 6111 I GpsSession_FLP: Time To First Fix   : 0 seconds",
 	}, "\n")
 
