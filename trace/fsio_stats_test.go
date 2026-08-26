@@ -268,3 +268,49 @@ func TestFsioCmdStatsExcludesUnfinishedFromLatency(t *testing.T) {
 			r.Dtoc.Max, r.Dtoc.Avg)
 	}
 }
+
+// TestFsioAggregationExcludesMgmt — AI 집계 경로(RunAggregation)가 mgmt 행을
+// 모수에서 빼는지 고정한다.
+//
+// ComputeStats 는 예전부터 mgmt 를 뺐지만 aggregate.go 는 안 뺐다. 이 결과는
+// LLM 이 근거로 읽으므로, 오염되면 "0x00 이 N%" 같은 존재하지 않는 패턴을
+// 그럴듯하게 해석한다. 에러가 아니라 조용히 틀린 답이라 눈치채기 어렵다.
+func TestFsioAggregationExcludesMgmt(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+	infos := []*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}
+
+	res, err := RunAggregation(infos, AggCmdBreakdown, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, ok := res.Data["commands"].([]map[string]any)
+	if !ok {
+		t.Fatalf("commands 행을 못 읽었다: %T", res.Data["commands"])
+	}
+	for _, r := range rows {
+		// mgmt 행은 opcode 가 없어 0x00 으로 뭉친다. 데이터 IO 만 남아야 한다.
+		if cmd, _ := r["cmd"].(string); cmd == "0x00" {
+			t.Errorf("cmd_breakdown 에 mgmt 행(0x00)이 섞였다: %v", r)
+		}
+	}
+	// 로그의 데이터 IO cmd 는 0x2a / 0x28 둘뿐이다.
+	if len(rows) != 2 {
+		t.Errorf("cmd 행 수 = %d, want 2 (got %v)", len(rows), rows)
+	}
+
+	// tail_latency 도 같은 모수를 써야 한다. mgmt 의 dtoc(query 7.7ms, uic 2.95ms)는
+	// 데이터 IO(0.275ms)보다 훨씬 커서, 안 빼면 상위를 mgmt 가 독차지한다.
+	tail, err := RunAggregation(infos, AggTailLatency, map[string]any{"n": 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, ok := tail.Data["events"].([]TailLatencyEvent)
+	if !ok {
+		t.Fatalf("events 를 못 읽었다: %T", tail.Data["events"])
+	}
+	for _, e := range events {
+		if e.Cmd == "0x00" {
+			t.Errorf("tail_latency 상위에 mgmt 행이 섞였다: %+v", e)
+		}
+	}
+}
