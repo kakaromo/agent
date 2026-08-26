@@ -555,7 +555,10 @@
 		{ key: 'cpu', label: 'CPU', yLabel: 'CPU', group: 'common' },
 		{ key: 'ctod', label: 'CtoD Latency', yLabel: 'CtoD (ms)', group: 'send' },
 		{ key: 'dtoc', label: 'DtoC Latency', yLabel: 'DtoC (ms)', group: 'complete' },
-		{ key: 'ctoc', label: 'CtoC Latency', yLabel: 'CtoC (ms)', group: 'complete' }
+		{ key: 'ctoc', label: 'CtoC Latency', yLabel: 'CtoC (ms)', group: 'complete' },
+		// mgmt(UIC/Query/TM) 전용 DtoC. 데이터 IO 와 지연 크기대가 달라 같은 축에
+		// 두면(µs 단위 IO 옆에 ms 단위 hibern8) 한쪽이 바닥에 깔려 안 보인다.
+		{ key: 'dtoc_mgmt', label: 'DtoC (mgmt)', yLabel: 'DtoC (ms)', group: 'complete' }
 	] as const;
 	let visibleCharts = $state<Set<string>>(new Set(['lba', 'qd', 'dtoc']));
 
@@ -619,13 +622,19 @@
 	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
 	// Available chart items based on action tab
-	let availableChartItems = $derived(
-		activeActionTab === 'send'
+	let availableChartItems = $derived.by(() => {
+		let items = activeActionTab === 'send'
 			? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'send')
 			: activeActionTab === 'complete'
 				? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'complete')
-				: CHART_ITEMS // all
-	);
+				: [...CHART_ITEMS]; // all
+		// mgmt(UPIU/UIC)는 UFS 프로토콜 계층 개념이라 fsio_ufs 에만 존재한다.
+		// 다른 타입에서 빈 차트를 띄우면 "데이터가 없다" 로 오해하게 된다.
+		if (activeTraceType !== 'fsio_ufs') {
+			items = items.filter(c => c.key !== 'dtoc_mgmt');
+		}
+		return items;
+	});
 
 	function toggleChart(key: string) {
 		const next = new Set(visibleCharts);
@@ -668,12 +677,93 @@
 		// Discard/Trim/Unmap 계열 (보라)
 		discard: ['#a855f7', '#9333ea', '#7c3aed', '#c084fc', '#d8b4fe'],
 		// 기타 (회색/청록)
-		other: ['#64748b', '#475569', '#6b7280', '#94a3b8', '#78716c']
+		other: ['#64748b', '#475569', '#6b7280', '#94a3b8', '#78716c'],
+		// ── UFS management ──
+		// 데이터 IO 가 아니라 링크 점유·장치 제어다. 전용 차트(DtoC (mgmt))를 따로
+		// 두면서 "같은 mgmt" 로 뭉뚱그리지 않고 **성질별로** 색을 가른다. 차트만 봐도
+		// "링크가 자주 잠들었다" vs "WB 를 계속 건드린다" 가 구분되도록.
+		//
+		// mgmt_link  링크 전원/상태 (UIC: hibern8 enter/exit, link startup) — 보라
+		// mgmt_read  장치 상태 조회 (Read Attribute/Descriptor/Flag)        — 청록
+		// mgmt_write 장치 설정 변경 (Set/Clear/Toggle Flag, Write ...)      — 주황
+		// mgmt_tm    Task Management (Abort Task, LU Reset 등)              — 빨강(이상 신호)
+		mgmt_link: ['#8b5cf6', '#7c3aed', '#6d28d9', '#a78bfa', '#c4b5fd'],
+		mgmt_read: ['#06b6d4', '#0891b2', '#0e7490', '#22d3ee', '#67e8f9'],
+		mgmt_write: ['#f59e0b', '#d97706', '#b45309', '#fbbf24', '#fcd34d'],
+		mgmt_tm: ['#ef4444', '#dc2626', '#b91c1c', '#f87171', '#fca5a5'],
+		// 종류를 특정 못 한 mgmt (producer 가 정보를 안 준 폴백) — 회청색
+		mgmt: ['#64748b', '#94a3b8', '#475569', '#cbd5e1', '#78716c']
 	};
 
 	// cmd별 계열 인덱스 카운터
 	const cmdColorAssigned: Record<string, string> = {};
-	const groupCounters: Record<string, number> = { read: 0, write: 0, flush: 0, discard: 0, other: 0 };
+	const groupCounters: Record<string, number> = {
+		read: 0, write: 0, flush: 0, discard: 0, other: 0,
+		mgmt_link: 0, mgmt_read: 0, mgmt_write: 0, mgmt_tm: 0, mgmt: 0
+	};
+
+	/**
+	 * UFS management 이벤트 이름인가?
+	 *
+	 * 아래 getCmdGroup 의 문자열 스니핑보다 **먼저** 판정해야 한다. 그냥 두면
+	 * "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard(보라), "Read Flag(...)" 는
+	 * 'read' 포함으로 read(파랑) 가 되어 **데이터 IO 와 구분이 안 된다.**
+	 * 깨지는 게 아니라 그럴듯하게 틀려서 더 위험하다.
+	 *
+	 * 판정 기준은 서버가 굽는 mgmt_name 의 형태다 (trace/parser/ufs_names.go).
+	 * 데이터 IO 의 cmd 는 항상 '0x28' 같은 hex 라 겹칠 일이 없다.
+	 */
+	function isMgmtCmd(cmd: string): boolean {
+		const s = (cmd ?? '').trim();
+		if (!s || s.startsWith('0x')) return false; // 데이터 IO 는 hex opcode
+		if (s.startsWith('DME_')) return true; // UIC
+		// Query — opcode 이름 + 괄호 안 IDN
+		if (/^(Read|Write|Set|Clear|Toggle)\s+(Descriptor|Attribute|Flag)\b/.test(s)) return true;
+		// Task Management
+		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) return true;
+		// 파서가 못 푼 값은 "Unknown(0x..)" 로 온다. 데이터 IO 색을 뺏지 않도록 mgmt 로.
+		if (s.startsWith('Unknown(')) return true;
+		// producer 가 qop/idn/uic_cmd 를 안 준 경우 mgmt_name 이 action 으로 폴백된다
+		// (uic / upiu_send / upiu_response / nop_out / rtt / exception).
+		if (/^(uic|upiu_|nop_|rtt|exception)/.test(s)) return true;
+		return false;
+	}
+
+	/**
+	 * mgmt 이벤트의 **성질** 판정. 색 그룹 키를 그대로 돌려준다.
+	 *
+	 * 판정 순서가 중요하다:
+	 *   - TM 을 먼저 — "Query Task" 는 TM 인데 뒤의 Read/Write 규칙에 걸리면 안 된다.
+	 *   - 그 다음 UIC(DME_) — 이름에 다른 키워드가 없어 안전.
+	 *   - Query 는 opcode 이름이 앞에 오므로(Read Attribute / Set Flag) 그걸로 구분.
+	 */
+	function getMgmtGroup(cmd: string): string {
+		const s = (cmd ?? '').trim();
+		// Task Management — 이상 신호라 가장 먼저, 그리고 눈에 띄는 색으로.
+		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) {
+			return 'mgmt_tm';
+		}
+		// UIC (링크 계층) — DME_HIBER_ENTER/EXIT, DME_LINK_STARTUP ...
+		if (s.startsWith('DME_') || /^uic(_|$)/.test(s)) return 'mgmt_link';
+		// Query — 장치 설정을 **바꾸는** 쪽
+		if (/^(Write Descriptor|Write Attribute|Set Flag|Clear Flag|Toggle Flag)\b/.test(s)) {
+			return 'mgmt_write';
+		}
+		// Query — 장치 상태를 **읽는** 쪽
+		if (/^(Read Descriptor|Read Attribute|Read Flag)\b/.test(s)) return 'mgmt_read';
+		// 폴백(upiu_send / nop_out / rtt / exception / Unknown(0x..))
+		return 'mgmt';
+	}
+
+	/**
+	 * 차트에서 감출 mgmt 이벤트.
+	 *
+	 * upiu_response 는 send 와 1:1 로 붙는 응답이라 차트에 그리면 같은 이벤트가
+	 * 두 번 보인다. 통계/Raw Data 에는 그대로 남기고 **차트 시리즈에서만** 뺀다.
+	 */
+	function isHiddenInChart(cmd: string): boolean {
+		return /^upiu_response\b/.test((cmd ?? '').trim());
+	}
 
 	// SCSI opcode → group 매핑 (UFS)
 	const SCSI_CMD_GROUPS: Record<string, string> = {
@@ -699,6 +789,11 @@
 	function getCmdGroup(cmd: string): string {
 		const lower = cmd.toLowerCase().trim();
 		if (!lower) return 'other';
+
+		// ⚠ mgmt 판정이 **아래 문자열 스니핑보다 먼저**여야 한다. 그냥 두면
+		// "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard, "Read Flag(...)" 는 'read'
+		// 포함으로 read 가 되어 데이터 IO 와 색이 겹친다 — 그럴듯하게 틀린다.
+		if (isMgmtCmd(cmd)) return getMgmtGroup(cmd);
 
 		// SCSI hex opcode: 0x28, 0x2a 등
 		if (lower.startsWith('0x')) {
@@ -1056,13 +1151,22 @@
 	// latency 필드는 0값 제외 (send 이벤트의 latency는 0)
 	const LATENCY_FIELDS = new Set(['dtoc', 'ctod', 'ctoc']);
 
-	function buildScatter(events: TraceEvent[], yField: keyof TraceEvent, yLabel: string) {
+	function buildScatter(events: TraceEvent[], yKey: string, yLabel: string) {
+		// dtoc_mgmt 는 **가상 키** — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
+		// mgmt latency 는 데이터 IO 와 자릿수가 달라(µs IO vs ms hibern8) 같은 축에
+		// 두면 한쪽이 바닥에 깔려 안 보인다. 그래서 축을 분리한다.
+		const isMgmtChart = yKey === 'dtoc_mgmt';
+		const yField = (isMgmtChart ? 'dtoc' : yKey) as keyof TraceEvent;
 		const excludeZero = LATENCY_FIELDS.has(yField);
-		const cmdSet = [...new Set(events.map(e => e.cmd))];
+		// upiu_response 는 send 와 1:1 로 붙어서 차트에 그리면 같은 이벤트가 두 번 보인다.
+		const visible = events.filter(e => !isHiddenInChart(e.cmd));
+		// mgmt 차트에는 mgmt 만, 나머지 차트에는 데이터 IO 만.
+		const scoped = visible.filter(e => isMgmtCmd(e.cmd) === isMgmtChart);
+		const cmdSet = [...new Set(scoped.map(e => e.cmd))];
 		const series = cmdSet.map(cmd => ({
 			name: cmd,
 			type: 'scatter' as const,
-			data: events
+			data: scoped
 				.filter(e => e.cmd === cmd && (!excludeZero || (e[yField] as number) > 0))
 				.map(e => [e.time, e[yField]]),
 			symbolSize: 2,
@@ -1134,7 +1238,7 @@
 		if (events.length === 0) return null;
 		const item = CHART_ITEMS.find(c => c.key === key);
 		if (!item) return null;
-		return buildScatter(events, key as keyof TraceEvent, item.yLabel);
+		return buildScatter(events, key, item.yLabel);
 	}
 
 	// ── Stats helpers ──
