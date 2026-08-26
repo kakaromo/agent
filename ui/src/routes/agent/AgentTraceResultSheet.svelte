@@ -1656,7 +1656,7 @@
 								{@const left = lanePct(b.startedMono)}
 								{@const width = Math.max(lanePct(b.finishedMono) - left, 0.4)}
 								{@const idle = isIdleStep(b.type)}
-								<div class="grid grid-cols-[92px_1fr] items-center gap-0 min-h-[24px]"
+								<div class="grid grid-cols-[124px_1fr] items-center gap-0 min-h-[24px]"
 									class:opacity-40={hidden}>
 									<button
 										onclick={() => toggleStep(key)}

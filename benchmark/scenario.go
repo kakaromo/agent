@@ -1058,6 +1058,113 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+// describeStep — 스텝을 "무슨 행동이었나" 로 읽히게 요약한다.
+//
+// **왜 필요한가.** 타입만 쓰면 레인이 `shell`, `app_macro`, `shell` 처럼 나와서
+// 정작 알고 싶은 것 — 어떤 앱을 켰고 무엇을 스크롤했나 — 이 안 보인다. 구간별 IO 를
+// 보는 화면인데 구간이 무슨 행동인지 모르면 숫자만 남는다.
+//
+// params 에 `label` 이 명시돼 있으면 그걸 최우선한다(사용자가 직접 붙인 이름).
+func describeStep(step *pb.ScenarioStep) string {
+	if step == nil {
+		return ""
+	}
+	p := step.GetParams()
+	if lbl := strings.TrimSpace(p["label"]); lbl != "" {
+		return lbl
+	}
+
+	// 패키지명은 끝 조각만 쓴다 — com.google.android.youtube → youtube.
+	// 레인 라벨 폭이 좁아 풀네임은 어차피 잘린다.
+	shortPkg := func(pkg string) string {
+		pkg = strings.TrimSpace(pkg)
+		if i := strings.LastIndex(pkg, "."); i >= 0 && i+1 < len(pkg) {
+			return pkg[i+1:]
+		}
+		return pkg
+	}
+	trunc := func(v string, n int) string {
+		v = strings.TrimSpace(strings.ReplaceAll(v, "\n", " "))
+		if len([]rune(v)) > n {
+			return string([]rune(v)[:n]) + "…"
+		}
+		return v
+	}
+
+	switch step.GetType() {
+	case "launch_app":
+		name := shortPkg(p["package_name"])
+		switch p["clear_mode"] {
+		case "clear":
+			return name + " 초기화 실행"
+		case "none":
+			return name + " 실행(warm)"
+		default:
+			return name + " 콜드 실행"
+		}
+	case "stop_app":
+		return shortPkg(p["package_name"]) + " 종료"
+	case "tap_element":
+		for _, k := range []string{"element_text", "element_content_desc", "element_resource_id"} {
+			if v := strings.TrimSpace(p[k]); v != "" {
+				return "탭: " + trunc(v, 18)
+			}
+		}
+		return "탭"
+	case "tap":
+		return fmt.Sprintf("탭 (%s,%s)", p["x"], p["y"])
+	case "text":
+		return "입력: " + trunc(p["input_text"], 18)
+	case "scroll":
+		dir := p["direction"]
+		if dir == "" {
+			dir = "down"
+		}
+		if c := p["count"]; c != "" && c != "1" {
+			return fmt.Sprintf("스크롤 %s ×%s", dir, c)
+		}
+		return "스크롤 " + dir
+	case "key":
+		return "키 " + p["keycode"]
+	case "sleep":
+		if sec := p["seconds"]; sec != "" {
+			return "대기 " + sec + "s"
+		}
+		return "대기"
+	case "shell":
+		return trunc(p["cmd"], 28)
+	case "benchmark":
+		// tool 은 params 가 아니라 별도 필드다.
+		parts := []string{strings.ToLower(step.GetTool().String())}
+		if rw := p["rw"]; rw != "" {
+			parts = append(parts, rw)
+		}
+		if bs := p["bs"]; bs != "" {
+			parts = append(parts, bs)
+		}
+		return strings.Join(parts, " ")
+	case "app_macro":
+		if m := step.GetMacro(); m != nil {
+			if n := strings.TrimSpace(m.GetMacroName()); n != "" {
+				return n
+			}
+			if pkg := shortPkg(m.GetPackageName()); pkg != "" {
+				return pkg + " 매크로"
+			}
+		}
+		return "매크로"
+	case "install_apk":
+		return "설치: " + trunc(p["apk_filename"], 20)
+	case "uninstall_apk":
+		return "제거: " + shortPkg(p["package_name"])
+	case "cleanup":
+		return "정리"
+	case "iotest":
+		return "iotest"
+	}
+	return step.GetType()
+}
+
 // recordStepBoundary — 스텝 하나의 실행 구간을 Job 에 기록한다.
 //
 // **왜 필요한가.** Trace Result 는 잡 전체가 한 타임라인이라 "스크롤 중 write" 와
@@ -1075,7 +1182,7 @@ func (o *Orchestrator) recordStepBoundary(job *Job, deviceID string, es expanded
 		LoopIndex:   int32(es.loopIndex),
 		RepeatIndex: int32(es.repeatIndex),
 		Type:        es.step.GetType(),
-		Label:       es.step.GetParams()["label"],
+		Label:       describeStep(es.step),
 		StartedAt:   startedAt,
 		FinishedAt:  finishedAt,
 		Success:     err == nil,
