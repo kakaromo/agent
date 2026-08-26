@@ -723,9 +723,14 @@
 		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) return true;
 		// 파서가 못 푼 값은 "Unknown(0x..)" 로 온다. 데이터 IO 색을 뺏지 않도록 mgmt 로.
 		if (s.startsWith('Unknown(')) return true;
+		// Query NOP — QueryDisplay(0x00) 은 idn 없이 이름만 돌려줘 "NOP" 이 된다
+		// (trace/parser/ufs_names.go). 아래 소문자 규칙에 안 걸려서 예전엔 데이터
+		// IO 로 샜다.
+		if (/^NOP\b/i.test(s)) return true;
 		// producer 가 qop/idn/uic_cmd 를 안 준 경우 mgmt_name 이 action 으로 폴백된다
 		// (uic / upiu_send / upiu_response / nop_out / rtt / exception).
-		if (/^(uic|upiu_|nop_|rtt|exception)/.test(s)) return true;
+		// 대소문자 무시 — producer/파서가 대문자로 낼 수 있다.
+		if (/^(uic|upiu_|nop_|rtt|exception)/i.test(s)) return true;
 		return false;
 	}
 
@@ -743,8 +748,8 @@
 		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) {
 			return 'mgmt_tm';
 		}
-		// UIC (링크 계층) — DME_HIBER_ENTER/EXIT, DME_LINK_STARTUP ...
-		if (s.startsWith('DME_') || /^uic(_|$)/.test(s)) return 'mgmt_link';
+		// UIC / NOP (링크 계층) — DME_HIBER_ENTER/EXIT, DME_LINK_STARTUP, NOP(링크 확인)
+		if (s.startsWith('DME_') || /^uic(_|$)/i.test(s) || /^(NOP|nop_)/i.test(s)) return 'mgmt_link';
 		// Query — 장치 설정을 **바꾸는** 쪽
 		if (/^(Write Descriptor|Write Attribute|Set Flag|Clear Flag|Toggle Flag)\b/.test(s)) {
 			return 'mgmt_write';
@@ -756,13 +761,39 @@
 	}
 
 	/**
+	 * 이 이벤트가 mgmt 인가 — **서버가 준 is_mgmt 가 정본**이다.
+	 *
+	 * 이름 스니핑(isMgmtCmd)은 폴백일 뿐이다. mgmt_name 이 "NOP" 처럼 어떤
+	 * 규칙에도 안 걸리는 값일 수 있고, 그러면 mgmt 행이 데이터 IO 로 분류돼
+	 * lba/qd 가 0 인 채로 LBA/QD 차트에 가짜 가로줄을 그린다.
+	 *
+	 * is_mgmt 가 없는 경로(ftrace, 구버전 응답)를 위해 이름 폴백을 남긴다.
+	 */
+	function isMgmtEvent(e: TraceEvent): boolean {
+		const v = (e as unknown as Record<string, unknown>).is_mgmt;
+		if (typeof v === 'boolean') return v;
+		return isMgmtCmd(e.cmd);
+	}
+
+	/**
 	 * 차트에서 감출 mgmt 이벤트.
 	 *
-	 * upiu_response 는 send 와 1:1 로 붙는 응답이라 차트에 그리면 같은 이벤트가
-	 * 두 번 보인다. 통계/Raw Data 에는 그대로 남기고 **차트 시리즈에서만** 뺀다.
+	 * 요청/응답이 1:1 로 붙는 mgmt 는 차트에 둘 다 그리면 같은 왕복이 두 번
+	 * 보인다. 통계/Raw Data 에는 그대로 남기고 **차트 시리즈에서만** 뺀다.
+	 *
+	 * ⚠ 판정은 **action** 으로 한다. 예전엔 cmd 에 upiu_response 정규식을
+	 * 걸었는데, cmd 에는 mgmt_name("Read Descriptor(geometry)")이 들어가지
+	 * 실제 action 이 안 들어간다. 게다가 producer 가 내는 이름은 upiu_response
+	 * 가 아니라 query_rsp / tm_rsp / nop_in 이라 **어떤 행에도 안 맞아 dedup 이
+	 * 아예 동작하지 않았다.**
+	 *
+	 * 빼는 쪽은 **요청**이다 — dtoc(왕복 시간)는 응답 행에만 실리므로 응답을
+	 * 빼면 mgmt latency 가 통째로 사라진다.
 	 */
-	function isHiddenInChart(cmd: string): boolean {
-		return /^upiu_response\b/.test((cmd ?? '').trim());
+	function isHiddenInChart(e: TraceEvent): boolean {
+		if (!isMgmtEvent(e)) return false;
+		const a = (e.action ?? '').toLowerCase();
+		return a.endsWith('_req') || a.endsWith('_out') || a === 'uic_send';
 	}
 
 	// SCSI opcode → group 매핑 (UFS)
@@ -1158,10 +1189,15 @@
 		const isMgmtChart = yKey === 'dtoc_mgmt';
 		const yField = (isMgmtChart ? 'dtoc' : yKey) as keyof TraceEvent;
 		const excludeZero = LATENCY_FIELDS.has(yField);
-		// upiu_response 는 send 와 1:1 로 붙어서 차트에 그리면 같은 이벤트가 두 번 보인다.
-		const visible = events.filter(e => !isHiddenInChart(e.cmd));
+		// mgmt 요청/응답 쌍 중 요청 쪽을 뺀다 — 안 그러면 같은 왕복이 두 번 그려진다.
+		const visible = events.filter(e => !isHiddenInChart(e));
 		// mgmt 차트에는 mgmt 만, 나머지 차트에는 데이터 IO 만.
-		const scoped = visible.filter(e => isMgmtCmd(e.cmd) === isMgmtChart);
+		//
+		// ⚠ 판정은 서버가 준 **is_mgmt 필드**로 한다 (isMgmtEvent). 이름 스니핑만
+		// 쓰면 Query NOP(mgmt_name="NOP") 처럼 규칙에 안 걸리는 mgmt 가 데이터 IO 로
+		// 분류돼, lba/qd 가 NULL(→0)인 채로 LBA/QD 차트에 **Y=0 가짜 가로줄**을
+		// 그린다 — mgmtNullExpr 로 없애려던 바로 그 현상이다.
+		const scoped = visible.filter(e => isMgmtEvent(e) === isMgmtChart);
 		const cmdSet = [...new Set(scoped.map(e => e.cmd))];
 		const series = cmdSet.map(cmd => ({
 			name: cmd,
