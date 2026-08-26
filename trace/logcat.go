@@ -445,3 +445,29 @@ func (m *LogcatManager) StartLogcatForJob(ctx context.Context, deviceID string,
 		OutputDir: outputDir,
 	})
 }
+
+// IsAllowedPath — 이 경로가 logcat 산출물 루트 안인지 본다.
+//
+// ⚠ REST 가 임의 경로를 읽지 못하게 하는 가드다. 없으면 서버의 아무 파일이나
+// 노출된다 (`/etc/passwd` 같은 것). resolveOutputBase 와 같은 filepath.Rel
+// 기법을 쓴다 — 문자열 prefix 비교는 "/data" 와 "/data-evil" 을 구분 못 한다.
+func (m *LogcatManager) IsAllowedPath(abs string) bool {
+	m.mu.RLock()
+	allowed := append([]string{m.outputBase}, m.searchRoots...)
+	m.mu.RUnlock()
+
+	for _, root := range allowed {
+		if root == "" {
+			continue
+		}
+		rootAbs, err := filepath.Abs(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(rootAbs, abs)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
