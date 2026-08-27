@@ -481,6 +481,10 @@ message LatencyStats {
   double p9999 = 8;
   double p99999 = 9;
   double p999999 = 10;
+  // 이 통계에 실제로 들어간 행 수. latency 컬럼은 0(=아직 완료 안 됨)을
+  // 빼고 세므로 total_events 와 다르다 — 필터를 걸면 더 벌어진다.
+  // 없으면 화면이 건수를 짐작해야 해서 필터 걸었을 때 틀린 수가 나온다.
+  int64 count = 11;
 }
 
 message CmdStats {

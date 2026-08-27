@@ -3378,17 +3378,21 @@ func (x *MgmtStats) GetDtoc() *LatencyStats {
 }
 
 type LatencyStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Min           float64                `protobuf:"fixed64,1,opt,name=min,proto3" json:"min,omitempty"`
-	Max           float64                `protobuf:"fixed64,2,opt,name=max,proto3" json:"max,omitempty"`
-	Avg           float64                `protobuf:"fixed64,3,opt,name=avg,proto3" json:"avg,omitempty"`
-	Stddev        float64                `protobuf:"fixed64,4,opt,name=stddev,proto3" json:"stddev,omitempty"`
-	Median        float64                `protobuf:"fixed64,5,opt,name=median,proto3" json:"median,omitempty"`
-	P99           float64                `protobuf:"fixed64,6,opt,name=p99,proto3" json:"p99,omitempty"`
-	P999          float64                `protobuf:"fixed64,7,opt,name=p999,proto3" json:"p999,omitempty"`
-	P9999         float64                `protobuf:"fixed64,8,opt,name=p9999,proto3" json:"p9999,omitempty"`
-	P99999        float64                `protobuf:"fixed64,9,opt,name=p99999,proto3" json:"p99999,omitempty"`
-	P999999       float64                `protobuf:"fixed64,10,opt,name=p999999,proto3" json:"p999999,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Min     float64                `protobuf:"fixed64,1,opt,name=min,proto3" json:"min,omitempty"`
+	Max     float64                `protobuf:"fixed64,2,opt,name=max,proto3" json:"max,omitempty"`
+	Avg     float64                `protobuf:"fixed64,3,opt,name=avg,proto3" json:"avg,omitempty"`
+	Stddev  float64                `protobuf:"fixed64,4,opt,name=stddev,proto3" json:"stddev,omitempty"`
+	Median  float64                `protobuf:"fixed64,5,opt,name=median,proto3" json:"median,omitempty"`
+	P99     float64                `protobuf:"fixed64,6,opt,name=p99,proto3" json:"p99,omitempty"`
+	P999    float64                `protobuf:"fixed64,7,opt,name=p999,proto3" json:"p999,omitempty"`
+	P9999   float64                `protobuf:"fixed64,8,opt,name=p9999,proto3" json:"p9999,omitempty"`
+	P99999  float64                `protobuf:"fixed64,9,opt,name=p99999,proto3" json:"p99999,omitempty"`
+	P999999 float64                `protobuf:"fixed64,10,opt,name=p999999,proto3" json:"p999999,omitempty"`
+	// 이 통계에 실제로 들어간 행 수. latency 컬럼은 0(=아직 완료 안 됨)을
+	// 빼고 세므로 total_events 와 다르다 — 필터를 걸면 더 벌어진다.
+	// 없으면 화면이 건수를 짐작해야 해서 필터 걸었을 때 틀린 수가 나온다.
+	Count         int64 `protobuf:"varint,11,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3489,6 +3493,13 @@ func (x *LatencyStats) GetP99999() float64 {
 func (x *LatencyStats) GetP999999() float64 {
 	if x != nil {
 		return x.P999999
+	}
+	return 0
+}
+
+func (x *LatencyStats) GetCount() int64 {
+	if x != nil {
+		return x.Count
 	}
 	return 0
 }
@@ -8425,7 +8436,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x05count\x18\x03 \x01(\x03R\x05count\x12!\n" +
 	"\fpaired_count\x18\x04 \x01(\x03R\vpairedCount\x12\"\n" +
 	"\rtotal_time_ms\x18\x05 \x01(\x01R\vtotalTimeMs\x12'\n" +
-	"\x04dtoc\x18\x06 \x01(\v2\x13.agent.LatencyStatsR\x04dtoc\"\xe2\x01\n" +
+	"\x04dtoc\x18\x06 \x01(\v2\x13.agent.LatencyStatsR\x04dtoc\"\xf8\x01\n" +
 	"\fLatencyStats\x12\x10\n" +
 	"\x03min\x18\x01 \x01(\x01R\x03min\x12\x10\n" +
 	"\x03max\x18\x02 \x01(\x01R\x03max\x12\x10\n" +
@@ -8437,7 +8448,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x05p9999\x18\b \x01(\x01R\x05p9999\x12\x16\n" +
 	"\x06p99999\x18\t \x01(\x01R\x06p99999\x12\x18\n" +
 	"\ap999999\x18\n" +
-	" \x01(\x01R\ap999999\"\x87\x03\n" +
+	" \x01(\x01R\ap999999\x12\x14\n" +
+	"\x05count\x18\v \x01(\x03R\x05count\"\x87\x03\n" +
 	"\bCmdStats\x12\x10\n" +
 	"\x03cmd\x18\x01 \x01(\tR\x03cmd\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x14\n" +

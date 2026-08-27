@@ -795,3 +795,47 @@ func TestBlockUnfinishedReachesWire(t *testing.T) {
 	}
 	t.Logf("미완결 %d행 표시됨", unfinished)
 }
+
+// LatencyStats.Count — 이 통계가 **몇 건 기준인지**. 화면(Latency 표의 Count 열)이
+// 이 값을 그대로 쓴다. 없던 시절엔 프론트가 total-send 로 짐작했는데, latency
+// 필터를 걸면 그 짐작이 조용히 틀렸다.
+//
+// 모수는 각 집계의 FILTER 와 **같아야** 한다 — count(*) 로 세면 dtoc=0 인 행까지
+// 세어 "0.275ms 가 2건" 같은 거짓말이 된다.
+func TestLatencyStatsCountMatchesAggregationBase(t *testing.T) {
+	dir := writeFsioParquet(t, "fsio_ufs")
+
+	stats, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 전체 dtoc — 데이터 3행 중 dtoc>0 인 건 0x2a complete 1행뿐.
+	if stats.Dtoc.Count != 1 {
+		t.Errorf("dtoc count = %d, want 1 (dtoc=0 인 행이 모수에 섞였다)", stats.Dtoc.Count)
+	}
+	// qd 는 0 을 빼지 않으므로 데이터 3행 전부.
+	if stats.Qd.Count != 3 {
+		t.Errorf("qd count = %d, want 3", stats.Qd.Count)
+	}
+
+	byCmd := map[string]*pb.CmdStats{}
+	for _, c := range stats.CmdStats {
+		byCmd[c.Cmd] = c
+	}
+
+	// 0x2a — send + complete 2행이지만 dtoc 를 아는 건 complete 1행.
+	if w := byCmd["0x2a"]; w == nil {
+		t.Fatalf("cmd 0x2a 가 없다 (got %v)", byCmd)
+	} else if w.Dtoc.Count != 1 {
+		t.Errorf("0x2a dtoc count = %d, want 1 (send 행의 dtoc=0 이 세어졌다)", w.Dtoc.Count)
+	}
+
+	// 0x28 — 미완결 send 1행뿐이라 dtoc 를 아는 행이 없다. 0 이어야 한다.
+	// 여기가 1 이면 미완결 IO 를 완료된 것처럼 센 것이다.
+	if r := byCmd["0x28"]; r == nil {
+		t.Fatalf("cmd 0x28 가 없다 (got %v)", byCmd)
+	} else if r.Dtoc.Count != 0 {
+		t.Errorf("0x28 dtoc count = %d, want 0 (미완결 IO 가 모수에 들어갔다)", r.Dtoc.Count)
+	}
+}

@@ -305,6 +305,9 @@ func queryLatencyStats(db *sql.DB, glob, where, col string) (*pb.LatencyStats, e
 		extraFilter = where
 	}
 
+	// count(col) 는 위 extraFilter(0 제외 + 사용자 필터)를 그대로 탄 뒤의 행 수다.
+	// 화면이 건수를 따로 짐작하지 않아도 되도록 같은 쿼리에서 함께 얻는다 —
+	// 별도 쿼리로 세면 필터가 어긋날 여지가 생긴다.
 	q := fmt.Sprintf(`SELECT
 		min(%s), max(%s), avg(%s), stddev_pop(%s),
 		percentile_cont(0.5) WITHIN GROUP (ORDER BY %s),
@@ -312,14 +315,19 @@ func queryLatencyStats(db *sql.DB, glob, where, col string) (*pb.LatencyStats, e
 		percentile_cont(0.999) WITHIN GROUP (ORDER BY %s),
 		percentile_cont(0.9999) WITHIN GROUP (ORDER BY %s),
 		percentile_cont(0.99999) WITHIN GROUP (ORDER BY %s),
-		percentile_cont(0.999999) WITHIN GROUP (ORDER BY %s)
+		percentile_cont(0.999999) WITHIN GROUP (ORDER BY %s),
+		count(%s)
 	FROM read_parquet(%s) %s`,
-		col, col, col, col, col, col, col, col, col, col, glob, extraFilter)
+		col, col, col, col, col, col, col, col, col, col, col, glob, extraFilter)
 
 	ls := &pb.LatencyStats{}
 	var minV, maxV, avgV, stdV, medV, p99, p999, p9999, p99999, p999999 sql.NullFloat64
-	if err := db.QueryRow(q).Scan(&minV, &maxV, &avgV, &stdV, &medV, &p99, &p999, &p9999, &p99999, &p999999); err != nil {
+	var cnt sql.NullInt64
+	if err := db.QueryRow(q).Scan(&minV, &maxV, &avgV, &stdV, &medV, &p99, &p999, &p9999, &p99999, &p999999, &cnt); err != nil {
 		return ls, err
+	}
+	if cnt.Valid {
+		ls.Count = cnt.Int64
 	}
 	if minV.Valid {
 		ls.Min = minV.Float64
@@ -398,6 +406,12 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		percentile_cont(0.999) WITHIN GROUP (ORDER BY ctoc) FILTER (WHERE ctoc > 0),
 		min(qd), max(qd), avg(qd), stddev_pop(qd),
 		percentile_cont(0.99) WITHIN GROUP (ORDER BY qd),
+		-- 각 latency 의 모수. 위 집계들과 **같은 FILTER** 를 걸어야 "이 수치가 몇 건
+		-- 기준인지" 가 실제로 맞는다. count(*) 를 쓰면 0 인 행까지 세어 표가 거짓말한다.
+		count(dtoc) FILTER (WHERE dtoc > 0),
+		count(ctod) FILTER (WHERE ctod > 0),
+		count(ctoc) FILTER (WHERE ctoc > 0),
+		count(qd),
 		COALESCE(sum(CAST(size AS BIGINT)) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as total_size,
 		count(*) FILTER (WHERE continuous = true) as cont_count,
 		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as cont_ratio,
@@ -423,6 +437,7 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		var ctodMin, ctodMax, ctodAvg, ctodStd, ctodP99, ctodP999 sql.NullFloat64
 		var ctocMin, ctocMax, ctocAvg, ctocStd, ctocP99, ctocP999 sql.NullFloat64
 		var qdMin, qdMax, qdAvg, qdStd, qdP99 sql.NullFloat64
+		var dtocCnt, ctodCnt, ctocCnt, qdCnt sql.NullInt64
 
 		var contRatio sql.NullFloat64
 		if err := rows.Scan(
@@ -431,6 +446,7 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 			&ctodMin, &ctodMax, &ctodAvg, &ctodStd, &ctodP99, &ctodP999,
 			&ctocMin, &ctocMax, &ctocAvg, &ctocStd, &ctocP99, &ctocP999,
 			&qdMin, &qdMax, &qdAvg, &qdStd, &qdP99,
+			&dtocCnt, &ctodCnt, &ctocCnt, &qdCnt,
 			&cs.TotalSizeBytes,
 			&cs.ContinuousCount, &contRatio,
 			&cs.SendCount,
@@ -440,6 +456,10 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		assignNullable(cs.Dtoc, dtocMin, dtocMax, dtocAvg, dtocStd, dtocP99, dtocP999)
 		assignNullable(cs.Ctod, ctodMin, ctodMax, ctodAvg, ctodStd, ctodP99, ctodP999)
 		assignNullable(cs.Ctoc, ctocMin, ctocMax, ctocAvg, ctocStd, ctocP99, ctocP999)
+		assignCount(cs.Dtoc, dtocCnt)
+		assignCount(cs.Ctod, ctodCnt)
+		assignCount(cs.Ctoc, ctocCnt)
+		assignCount(cs.Qd, qdCnt)
 		if qdMin.Valid {
 			cs.Qd.Min = qdMin.Float64
 		}
@@ -461,6 +481,13 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		results = append(results, cs)
 	}
 	return results, nil
+}
+
+// assignCount — 해당 통계의 모수. NULL(집계 대상 0건)이면 0 이 맞다.
+func assignCount(ls *pb.LatencyStats, cnt sql.NullInt64) {
+	if cnt.Valid {
+		ls.Count = cnt.Int64
+	}
 }
 
 func assignNullable(ls *pb.LatencyStats, min, max, avg, std, p99, p999 sql.NullFloat64) {
