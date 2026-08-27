@@ -40,12 +40,12 @@ Trace 분석 화면은 세 벌 존재하고(**portal `/trace`**, portal `/agent`
 ## 드리프트 확인
 
 ```bash
-P=~/project/portal/frontend/src/routes/trace
-for f in cmdColors.ts TraceChartView.svelte TraceStatsView.svelte BoundaryLegend.svelte; do
-  diff <(sed 's#\$lib/api/trace.js#./types.js#; s#\$lib/utils/arrow-decoder.js#./types.js#' "$P/$f") "$f" \
-    > /dev/null && echo "OK   $f" || echo "DIFF $f"
-done
+cd ui && bash scripts/check-trace-sync.sh
 ```
+
+원본에도 같은 import 치환을 걸어 비교하므로, 허용된 그 한 줄 때문에 DIFF 가 뜨지 않는다.
+portal 체크아웃이 없으면 조용히 통과한다(빌드를 막지 않는다). 다른 위치에 있으면
+`PORTAL_REPO=/path/to/portal` 로 알려준다.
 
 ## 여기에 없는 것 (의도적)
 
