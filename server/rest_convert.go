@@ -210,6 +210,9 @@ func latencyStatsToMap(l *pb.LatencyStats) map[string]any {
 		"p9999":   l.GetP9999(),
 		"p99999":  l.GetP99999(),
 		"p999999": l.GetP999999(),
+		// 이 통계의 모수. 빠뜨리면 화면이 건수를 알 길이 없어 '-' 만 뜬다 —
+		// proto·DuckDB 에는 값이 있는데 여기서 조용히 버려지고 있었다.
+		"count": l.GetCount(),
 	}
 }
 
