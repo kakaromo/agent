@@ -108,17 +108,12 @@
 	// 하나를 껐다 켬) 굳이 다시 부르지 않는다.
 	let lastStatsRange = $state('');
 	$effect(() => {
-		// noneSelected 도 키에 넣는다 — 전부 숨김 ↔ 전부 표시 전환이 zoomRange 로는
-		// 둘 다 null 이라 구분되지 않아, 재조회가 안 되고 표만 이전 값으로 남는다.
-		const key = noneSelected ? 'none' : zoomRange ? `${zoomRange.min}:${zoomRange.max}` : '';
+		// 전부 숨김도 "전체" 와 같은 범위(제한 없음)라 키가 겹친다. 그래도 상관없다 —
+		// 결과가 같으므로 재조회할 이유가 없다.
+		const key = zoomRange ? `${zoomRange.min}:${zoomRange.max}` : '';
 		if (key === lastStatsRange) return;
 		lastStatsRange = key;
 		if (!open || serverId == null || activeJobIds.length === 0) return;
-		if (noneSelected) {
-			// 서버에 물을 게 없다. 빈 결과로 두면 다른 탭(빈 목록)과 말이 맞는다.
-			statsResult = null;
-			return;
-		}
 		loadStats(buildFilter());
 	});
 
@@ -141,21 +136,15 @@
 		allBoundaries.filter((b, i) => !hiddenSteps.has(boundaryKey(b, i)))
 	);
 
-	// 구간을 하나도 안 남긴 상태. zoomRange 로는 표현할 수 없다(위 주석 참고).
-	const noneSelected = $derived(
-		allBoundaries.length > 0 && hiddenSteps.size > 0 && usableBoundaries.length === 0
-	);
-
 	// 구간을 골라 보면 차트도 **그 구간으로 확대**한다.
 	//
 	// 골라 놓고 축은 전체라면 점이 한쪽에 뭉쳐 보여서 고른 의미가 없다. 일부만 켜져
 	// 있을 때만 좁힌다 — 전체가 켜져 있으면 원래대로 전 구간을 본다.
 	const zoomRange = $derived.by<{ min: number; max: number } | null>(() => {
 		if (hiddenSteps.size === 0) return null;          // 전부 보는 중 → 확대 안 함
-		// ⚠ 전부 숨긴 경우는 **별도 플래그(noneSelected)로 다룬다.**
-		// 여기서 {min:0,max:0} 을 돌려주면 서버 필터에 startTime=0 이 실리는데,
-		// 백엔드는 `> 0` 을 "미설정" 으로 보므로 **Statistics 만 전 구간을 보여준다** —
-		// 다른 화면은 비어 있는데 표만 꽉 찬, 가장 헷갈리는 상태가 된다.
+		// 전부 숨긴 경우도 null — "구분 없이 전체를 보겠다" 는 뜻이다.
+		// (여기서 {min:0,max:0} 을 돌려주면 서버 필터에 startTime=0 이 실리는데,
+		//  백엔드는 `> 0` 을 "미설정" 으로 봐서 화면마다 모수가 어긋난다.)
 		if (usableBoundaries.length === 0) return null;
 		let lo = Infinity, hi = -Infinity;
 		for (const b of usableBoundaries) {
@@ -553,7 +542,13 @@
 
 
 	// Action tab: Send vs Complete
-	let activeActionTab = $state('complete');
+	// Raw Data / Behavior 의 Send/Complete 선택.
+	//
+	// 기본값이 'complete' 였다. 차트에서는 그게 맞다(완료 이벤트에만 latency 가 있다).
+	// 하지만 Raw Data 는 "그 시각에 무슨 일이 있었나" 를 보는 화면이라 절반만 뜨면
+	// 행이 없어진 것처럼 보인다 — 5133 행짜리 trace 가 2674 행으로 나왔다.
+	// 표는 전부 보여주고, 좁히고 싶으면 사용자가 고르게 한다.
+	let activeActionTab = $state('all');
 
 	/**
 	 * 이 action 이 현재 탭에 보여야 하는가.
@@ -603,7 +598,9 @@
 		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
 		// Statistics 도 전체 기준이었다 — 화면마다 모수가 달라 "고른 구간의 p99" 를
 		// 물어도 답이 안 나왔다. 여기서 자르면 Raw/Behavior/차트가 같은 모수를 본다.
-		if (noneSelected) return [];   // 아무 구간도 안 고름 — 보여줄 게 없다
+		// zoomRange 가 null 이면 범위 제한이 없다 — 전부 켬과 **전부 끔이 모두 여기**다.
+		// 전부 끔을 [] 로 다루면 "전체 해제" 가 차트를 백지로 만든다 (밴드만 꺼야
+		// 하는데 데이터까지 지우는 셈).
 		if (!zoomRange) return rawResult.events;
 		return rawResult.events.filter(e => e.time >= zoomRange.min && e.time <= zoomRange.max);
 	});
@@ -1416,6 +1413,13 @@
 						<div class="flex items-center gap-2 mb-1">
 							<div class="text-[9px] text-muted-foreground">
 								{tableRows.length.toLocaleString()} 행
+								<!-- 행이 줄어든 이유를 **항상** 밝힌다. 안 그러면 필터가 걸린 표를
+								     "데이터가 안 나온다" 로 읽게 된다. -->
+								{#if tableRows.length < slicedEvents.length}
+									· {slicedEvents.length.toLocaleString()} 중
+									{activeActionTab === 'send' ? 'Send' : 'Complete'} 만
+								{/if}
+								{#if zoomRange}· 선택 구간만{/if}
 								{#if rawResult.isSampled}
 									· 전체 {rawResult.totalEvents.toLocaleString()} 중 샘플
 								{/if}
