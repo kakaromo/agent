@@ -3,6 +3,8 @@
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import { DataTable } from '$lib/components/data-table';
 	import TraceChartView from './trace/TraceChartView.svelte';
+	import TraceStatsView from './trace/TraceStatsView.svelte';
+	import type { StatsResponse, StatsLatency } from './trace/types.js';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
 	import BehaviorTimeline from './BehaviorTimeline.svelte';
@@ -696,6 +698,47 @@
 		applyFilter();
 	}
 
+	// 통계 표시(포맷터·표 구성·탭)는 전부 TraceStatsView 가 들고 있다.
+	// 여기서 다시 정의하면 /trace 와 숫자 표기가 갈라지므로 두지 않는다.
+
+	/**
+	 * agent TraceStats → /trace StatsResponse.
+	 *
+	 * 두 타입은 필드 이름·의미가 그대로 겹친다(연속/정렬 비율도 양쪽 다 이미 % 값).
+	 * 그래서 값을 손대지 않고 넘긴다 — 여기서 계산을 끼워 넣으면 화면은 멀쩡한데
+	 * 숫자만 조용히 달라진다.
+	 *
+	 * LatencyStats.count : 서버가 보내주면 그 값을 쓴다(모수를 정확히 안다).
+	 * 구버전 agent 는 이 필드가 없으므로 NaN 을 넣어 표가 '-' 로 그리게 한다 —
+	 * 여기서 totalEvents-sendCount 같은 걸로 **짐작하면 안 된다**. 필터를 걸면
+	 * 실제 모수는 줄어드는데 짐작은 그대로라 조용히 틀린 수가 나온다.
+	 */
+	function toStatsResponse(s: TraceStats): StatsResponse {
+		// count 가 없으면 NaN → TraceStatsView 가 '-' 로 그린다 (0 은 "없다"는 거짓말).
+		const withCount = (l: LatencyStats): StatsLatency =>
+			({ ...l, count: l.count ?? Number.NaN }) as StatsLatency;
+		return {
+			...s,
+			schemaVersion: '',
+			dtoc: withCount(s.dtoc),
+			ctoc: withCount(s.ctoc),
+			ctod: withCount(s.ctod),
+			qd: withCount(s.qd),
+			cmdStats: s.cmdStats.map((c) => ({
+				...c,
+				dtoc: withCount(c.dtoc),
+				ctoc: withCount(c.ctoc),
+				ctod: withCount(c.ctod),
+				qd: withCount(c.qd)
+			})),
+			latencyHistograms: s.latencyHistograms as StatsResponse['latencyHistograms'],
+			// ⚠ **...s 뒤에 덮어써야 한다.** standalone 은 이 필드가 non-optional 이라
+			// 스프레드로 이미 들어오지만, 타입(kind: string ↔ 유니온)이 어긋나 캐스팅이
+			// 필요하다. 여기서 빠뜨리면 지금 보이던 mgmt 표가 사라지는 회귀가 된다.
+			mgmtStats: s.mgmtStats as StatsResponse['mgmtStats']
+		};
+	}
+
 	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
 	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
@@ -1020,14 +1063,8 @@
 
 
 	// ── Stats helpers ──
-	function fmtDuration(seconds: number): string {
-		if (seconds < 0) seconds = Math.abs(seconds);
-		if (seconds < 60) return `${seconds.toFixed(2)}s`;
-		const min = Math.floor(seconds / 60);
-		const sec = seconds % 60;
-		return `${min}m ${sec.toFixed(1)}s`;
-	}
-
+	// 지연/기간 포맷은 TraceStatsView 가 자체적으로 갖는다.
+	// 아래 둘은 Behavior 구간별 표에서만 쓴다.
 	function fmtBytes(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -1085,22 +1122,6 @@
 		if (v < 1) return v.toFixed(3);
 		return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
 	}
-
-	const latencyFields: { key: keyof LatencyStats; label: string }[] = [
-		{ key: 'min', label: 'Min' }, { key: 'max', label: 'Max' },
-		{ key: 'avg', label: 'Avg' }, { key: 'stddev', label: 'StdDev' },
-		{ key: 'median', label: 'Median' }, { key: 'p99', label: 'P99' },
-		{ key: 'p999', label: 'P99.9' }, { key: 'p9999', label: 'P99.99' },
-		{ key: 'p99999', label: 'P99.999' }, { key: 'p999999', label: 'P99.9999' }
-	];
-
-	let activeLatencyTab = $state('dtoc');
-
-	// Duration from raw data (max time - min time)
-	let rawDurationSeconds = $derived<number | null>(() => {
-		if (!rawResult || rawResult.events.length < 2) return null;
-		return rawResult.events[rawResult.events.length - 1].time - rawResult.events[0].time;
-	});
 </script>
 
 <Sheet.Root bind:open>
@@ -1390,298 +1411,11 @@
 					{#if loadingStats}
 						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
 					{:else if statsResult}
-						<!-- Overview -->
-						<div class="grid grid-cols-4 gap-2">
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Total Events</div>
-								<div class="text-sm font-semibold">{statsResult.totalEvents.toLocaleString()}</div>
-								<div class="text-[9px] text-muted-foreground">Send: {statsResult.sendCount.toLocaleString()}</div>
-							</div>
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Duration</div>
-								<div class="text-sm font-semibold">{fmtDuration(rawDurationSeconds() ?? statsResult.durationSeconds)}</div>
-								{#if rawDurationSeconds() && Math.abs(rawDurationSeconds()! - statsResult.durationSeconds) > 1}
-									<div class="text-[8px] text-muted-foreground">server: {fmtDuration(statsResult.durationSeconds)}</div>
-								{/if}
-							</div>
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Continuous</div>
-								<div class="text-sm font-semibold">{statsResult.continuousRatio.toFixed(1)}%</div>
-								<div class="text-[9px] text-muted-foreground">{statsResult.continuousCount.toLocaleString()} / {statsResult.sendCount.toLocaleString()}</div>
-							</div>
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Aligned</div>
-								<div class="text-sm font-semibold">{statsResult.alignedRatio.toFixed(1)}%</div>
-								<div class="text-[9px] text-muted-foreground">{statsResult.alignedCount.toLocaleString()}</div>
-							</div>
-							</div>
-						<!-- Read/Write/Discard I/O Amount -->
-						<div class="grid grid-cols-3 gap-2">
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Read Total</div>
-								<div class="text-sm font-semibold">{fmtBytes(statsResult.readTotalBytes)}</div>
-							</div>
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Write Total</div>
-								<div class="text-sm font-semibold">{fmtBytes(statsResult.writeTotalBytes)}</div>
-							</div>
-							<div class="border rounded-md p-2">
-								<div class="text-[9px] text-muted-foreground">Discard Total</div>
-								<div class="text-sm font-semibold">{fmtBytes(statsResult.discardTotalBytes)}</div>
-							</div>
-						</div>
-
-						<!-- Latency Stats -->
-						<div>
-							<div class="flex items-baseline justify-between mb-1">
-								<h3 class="text-xs font-semibold">Latency Statistics</h3>
-								<span class="text-[9px] text-muted-foreground">셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사</span>
-							</div>
-							<Tabs.Root bind:value={activeLatencyTab}>
-								<Tabs.List class="flex gap-0.5 mb-1">
-									<Tabs.Trigger value="dtoc" class="text-[10px] px-2 py-0.5">DtoC</Tabs.Trigger>
-									<Tabs.Trigger value="ctod" class="text-[10px] px-2 py-0.5">CtoD</Tabs.Trigger>
-									<Tabs.Trigger value="ctoc" class="text-[10px] px-2 py-0.5">CtoC</Tabs.Trigger>
-									<Tabs.Trigger value="qd" class="text-[10px] px-2 py-0.5">QD</Tabs.Trigger>
-								</Tabs.List>
-								{#each ['dtoc', 'ctod', 'ctoc', 'qd'] as lt}
-									<Tabs.Content value={lt}>
-										{@const s = statsResult[lt as keyof TraceStats] as LatencyStats}
-										{#if s}
-											{@const latRow = Object.fromEntries(latencyFields.map(f => [f.key, fmtLatency(s[f.key])]))}
-											<DataTable
-												data={[latRow]}
-												columns={latencyFields.map(f => ({ accessorKey: f.key as string, header: f.label }))}
-												showPagination={false}
-												enableCellCopy={true}
-												getRowId={() => `agent-lat-${lt}`}
-											/>
-										{/if}
-									</Tabs.Content>
-								{/each}
-							</Tabs.Root>
-						</div>
-
-						<!-- CMD Stats -->
-						{#if statsResult.cmdStats.length > 0}
-							<div>
-								<h3 class="text-xs font-semibold mb-1">CMD Statistics</h3>
-								<Tabs.Root value="overview">
-									<Tabs.List class="flex gap-0.5 mb-1">
-										<Tabs.Trigger value="overview" class="text-[10px] px-2 py-0.5">Overview</Tabs.Trigger>
-										<Tabs.Trigger value="dtoc" class="text-[10px] px-2 py-0.5">DtoC</Tabs.Trigger>
-										<Tabs.Trigger value="ctod" class="text-[10px] px-2 py-0.5">CtoD</Tabs.Trigger>
-										<Tabs.Trigger value="ctoc" class="text-[10px] px-2 py-0.5">CtoC</Tabs.Trigger>
-										<Tabs.Trigger value="qd" class="text-[10px] px-2 py-0.5">QD</Tabs.Trigger>
-									</Tabs.List>
-									<Tabs.Content value="overview">
-										{@const rows = statsResult.cmdStats.map(c => ({
-											cmd: c.cmd, count: c.count.toLocaleString(),
-											send: c.sendCount.toLocaleString(),
-											ratio: c.ratio.toFixed(1) + '%',
-											totalSize: fmtBytes(c.totalSizeBytes),
-											continuous: `${c.continuousCount.toLocaleString()} (${c.continuousRatio.toFixed(1)}%)`,
-											dtocAvg: fmtLatency(c.dtoc.avg), ctodAvg: fmtLatency(c.ctod.avg), ctocAvg: fmtLatency(c.ctoc.avg), qdAvg: fmtLatency(c.qd.avg)
-										}))}
-										<DataTable data={rows} columns={[
-											{ accessorKey: 'cmd', header: 'CMD' }, { accessorKey: 'count', header: 'Total' }, { accessorKey: 'send', header: 'Send' }, { accessorKey: 'ratio', header: 'Ratio' },
-											{ accessorKey: 'totalSize', header: 'Size' }, { accessorKey: 'continuous', header: 'Continuous' },
-											{ accessorKey: 'dtocAvg', header: 'DtoC Avg' }, { accessorKey: 'ctodAvg', header: 'CtoD Avg' }, { accessorKey: 'ctocAvg', header: 'CtoC Avg' }, { accessorKey: 'qdAvg', header: 'QD Avg' }
-										]} filterColumn="cmd" filterPlaceholder="CMD 검색..."
-											enableCellCopy={true}
-											getRowId={(r: any) => `agent-cmd-overview-${r.cmd}`}
-										/>
-									</Tabs.Content>
-									{#each ['dtoc', 'ctod', 'ctoc', 'qd'] as lt}
-										<Tabs.Content value={lt}>
-											{@const rows = statsResult.cmdStats.map(c => {
-												const s = c[lt as keyof typeof c] as LatencyStats;
-												return {
-													cmd: c.cmd, count: c.count.toLocaleString(), ratio: c.ratio.toFixed(1) + '%',
-													min: fmtLatency(s.min), max: fmtLatency(s.max), avg: fmtLatency(s.avg), stddev: fmtLatency(s.stddev),
-													median: fmtLatency(s.median), p99: fmtLatency(s.p99), p999: fmtLatency(s.p999), p9999: fmtLatency(s.p9999)
-												};
-											})}
-											<DataTable data={rows} columns={[
-												{ accessorKey: 'cmd', header: 'CMD' }, { accessorKey: 'count', header: 'Count' }, { accessorKey: 'ratio', header: 'Ratio' },
-												{ accessorKey: 'min', header: 'Min' }, { accessorKey: 'max', header: 'Max' }, { accessorKey: 'avg', header: 'Avg' },
-												{ accessorKey: 'stddev', header: 'StdDev' }, { accessorKey: 'median', header: 'Median' },
-												{ accessorKey: 'p99', header: 'P99' }, { accessorKey: 'p999', header: 'P99.9' }, { accessorKey: 'p9999', header: 'P99.99' }
-											]} filterColumn="cmd" filterPlaceholder="CMD 검색..."
-												enableCellCopy={true}
-												getRowId={(r: any) => `agent-cmd-${lt}-${r.cmd}`}
-											/>
-										</Tabs.Content>
-									{/each}
-								</Tabs.Root>
-							</div>
-						{/if}
-
-						<!-- UFS Management Events (fsio_ufs 전용) -->
-						{#if (statsResult.mgmtStats?.length ?? 0) > 0}
-							{@const mgmt = statsResult.mgmtStats}
-							{@const mgmtTotalMs = mgmt.reduce((a, m) => a + m.totalTimeMs, 0)}
-							{@const mgmtRatio = statsResult.durationSeconds > 0
-								? (mgmtTotalMs / (statsResult.durationSeconds * 1000)) * 100 : 0}
-							<div>
-								<div class="flex items-baseline gap-2 mb-1">
-									<h3 class="text-xs font-semibold">UFS Management Events</h3>
-									<!-- 핵심 지표는 건수가 아니라 링크 점유 시간이다. idle 구간에서는
-									     데이터 IO 가 거의 없고 mgmt 가 행의 대부분을 차지한다. -->
-									<span class="text-[9px] text-muted-foreground">
-										링크 점유 {fmtLatency(mgmtTotalMs)}ms · 관측 기간의 {mgmtRatio.toFixed(1)}%
-									</span>
-								</div>
-								<!-- Overview(점유 시간 중심) / DtoC(분포 중심) 두 축.
-								     합계만 보면 "가끔 아주 느린 게 있나" 를 못 본다 — hibern8 exit 이
-								     평소 2ms 인데 p99.9 가 50ms 면 그게 stall 의 원인이다. -->
-								<Tabs.Root value="overview">
-									<Tabs.List class="flex gap-0.5 mb-1">
-										<Tabs.Trigger value="overview" class="text-[10px] px-2 py-0.5">Overview</Tabs.Trigger>
-										<Tabs.Trigger value="dtoc" class="text-[10px] px-2 py-0.5">DtoC 분포</Tabs.Trigger>
-									</Tabs.List>
-									<Tabs.Content value="overview">
-										<div class="border rounded-md overflow-x-auto">
-											<table class="w-full text-[10px]">
-												<thead class="bg-muted/50">
-													<tr>
-														<th class="text-left px-2 py-1 font-medium">Event</th>
-														<th class="text-left px-2 py-1 font-medium">Kind</th>
-														<th class="text-right px-2 py-1 font-medium">Count</th>
-														<th class="text-right px-2 py-1 font-medium">Paired</th>
-														<th class="text-right px-2 py-1 font-medium">Total (ms)</th>
-														<th class="text-right px-2 py-1 font-medium">Share</th>
-														<th class="text-right px-2 py-1 font-medium">Avg</th>
-														<th class="text-right px-2 py-1 font-medium">Max</th>
-													</tr>
-												</thead>
-												<tbody>
-													{#each mgmt as m}
-														<tr class="border-t">
-															<td class="px-2 py-0.5">{m.name}</td>
-															<td class="px-2 py-0.5 text-muted-foreground">{m.kind}</td>
-															<td class="text-right px-2 py-0.5">{m.count.toLocaleString()}</td>
-															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.totalTimeMs)}</td>
-															<td class="text-right px-2 py-0.5">
-																{mgmtTotalMs > 0 ? ((m.totalTimeMs / mgmtTotalMs) * 100).toFixed(1) : '0.0'}%
-															</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-									</Tabs.Content>
-									<Tabs.Content value="dtoc">
-										<!-- 모수는 Paired(짝지어진 건수) 다. send 만 있고 complete 를 못 받은
-										     mgmt 는 dtoc 가 0(=모름)이라 백분위 계산에서 빠진다. -->
-										<div class="border rounded-md overflow-x-auto">
-											<table class="w-full text-[10px]">
-												<thead class="bg-muted/50">
-													<tr>
-														<th class="text-left px-2 py-1 font-medium">Event</th>
-														<th class="text-right px-2 py-1 font-medium">Paired</th>
-														<th class="text-right px-2 py-1 font-medium">Min</th>
-														<th class="text-right px-2 py-1 font-medium">Max</th>
-														<th class="text-right px-2 py-1 font-medium">Avg</th>
-														<th class="text-right px-2 py-1 font-medium">StdDev</th>
-														<th class="text-right px-2 py-1 font-medium">Median</th>
-														<th class="text-right px-2 py-1 font-medium">P99</th>
-														<th class="text-right px-2 py-1 font-medium">P99.9</th>
-													</tr>
-												</thead>
-												<tbody>
-													{#each mgmt as m}
-														<tr class="border-t">
-															<td class="px-2 py-0.5">{m.name}</td>
-															<td class="text-right px-2 py-0.5">{m.pairedCount.toLocaleString()}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.min ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.max ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.avg ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.stddev ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.median ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p99 ?? 0)}</td>
-															<td class="text-right px-2 py-0.5">{fmtLatency(m.dtoc?.p999 ?? 0)}</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-									</Tabs.Content>
-								</Tabs.Root>
-							</div>
-						{/if}
-
-						<!-- Latency Histogram: type별 탭 -->
-						{#if statsResult.latencyHistograms.length > 0}
-							{@const histTypes = [...new Set(statsResult.latencyHistograms.map(h => h.latencyType))]}
-							<div>
-								<h3 class="text-xs font-semibold mb-1">Latency Histogram</h3>
-								<Tabs.Root value={histTypes[0]}>
-									<Tabs.List class="flex gap-0.5 mb-1">
-										{#each histTypes as lt}
-											<Tabs.Trigger value={lt} class="text-[10px] px-2 py-0.5 uppercase">{lt}</Tabs.Trigger>
-										{/each}
-									</Tabs.List>
-									{#each histTypes as lt}
-										<Tabs.Content value={lt}>
-											{@const rows = statsResult.latencyHistograms
-												.filter(h => h.latencyType === lt)
-												.flatMap(h => h.buckets.map(b => ({
-													cmd: h.cmd,
-													range: b.rangeEndMs > 0 ? `${b.rangeStartMs} ~ ${b.rangeEndMs}` : `${b.rangeStartMs}+`,
-													count: b.count.toLocaleString()
-												})))}
-											<DataTable
-												data={rows}
-												columns={[
-													{ accessorKey: 'cmd', header: 'CMD' },
-													{ accessorKey: 'range', header: 'Range (ms)' },
-													{ accessorKey: 'count', header: 'Count' }
-												]}
-												filterColumn="cmd"
-												filterPlaceholder="CMD 검색..."
-												enableCellCopy={true}
-												getRowId={(r: any) => `agent-hist-${lt}-${r.cmd}-${r.range}`}
-											/>
-										</Tabs.Content>
-									{/each}
-								</Tabs.Root>
-							</div>
-						{/if}
-
-						<!-- CMD+Size Count: cmd별 탭 -->
-						{#if statsResult.cmdSizeCounts.length > 0}
-							{@const sizeCmds = [...new Set(statsResult.cmdSizeCounts.map(c => c.cmd))]}
-							<div>
-								<h3 class="text-xs font-semibold mb-1">CMD + Size Count</h3>
-								<Tabs.Root value={sizeCmds[0]}>
-									<Tabs.List class="flex gap-0.5 mb-1">
-										{#each sizeCmds as cmd}
-											<Tabs.Trigger value={cmd} class="text-[10px] px-2 py-0.5">{cmd}</Tabs.Trigger>
-										{/each}
-									</Tabs.List>
-									{#each sizeCmds as cmd}
-										<Tabs.Content value={cmd}>
-											{@const rows = statsResult.cmdSizeCounts
-												.filter(c => c.cmd === cmd)
-												.map(c => ({ size: String(c.size), count: c.count.toLocaleString() }))}
-											<DataTable
-												data={rows}
-												columns={[
-													{ accessorKey: 'size', header: 'Size' },
-													{ accessorKey: 'count', header: 'Count' }
-												]}
-												enableCellCopy={true}
-												getRowId={(r: any) => `agent-size-${cmd}-${r.size}`}
-											/>
-										</Tabs.Content>
-									{/each}
-								</Tabs.Root>
-							</div>
-						{/if}
+						<!-- /trace 와 **같은 통계 화면**을 그대로 쓴다 (TraceStatsView).
+						     개요 카드, Latency/CMD 표, 2단 히스토그램 탭, 크기 그룹 탭,
+						     mgmt 표가 전부 그 안에 있다. toStatsResponse 가 필드 이름만
+						     맞춰 넘긴다. -->
+						<TraceStatsView stats={toStatsResponse(statsResult)} traceType={chartTraceType} />
 					{:else}
 						<div class="text-center text-xs text-muted-foreground py-8">
 							Raw Data 차트에서 드래그로 영역을 선택하거나, 필터를 설정 후 "조회" 버튼을 눌러주세요.
