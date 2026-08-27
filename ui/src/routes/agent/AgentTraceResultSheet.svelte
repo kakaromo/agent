@@ -4,6 +4,7 @@
 	import { DataTable } from '$lib/components/data-table';
 	import TraceChartView from './trace/TraceChartView.svelte';
 	import TraceStatsView from './trace/TraceStatsView.svelte';
+	import BoundaryLegend from './trace/BoundaryLegend.svelte';
 	import type { StatsResponse, StatsLatency } from './trace/types.js';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
@@ -1317,45 +1318,29 @@
 					{/if}
 
 					{#if hasBehavior}
-						<!-- 구간 범례 — 색 ↔ 스텝. 밴드에 라벨을 안 그리므로(촘촘하면 겹친다)
-						     여기가 유일한 색 대조표다. 클릭하면 그 구간만 껐다 켤 수 있다. -->
-						<div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px]">
-							<span class={captionMuted}>구간</span>
-							{#each allBoundaries as b, i (boundaryKey(b, i))}
-								{@const key = boundaryKey(b, i)}
-								{@const hidden = hiddenSteps.has(key)}
-								<button
-									onclick={() => toggleStep(key)}
-									class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 hover:bg-muted"
-									class:opacity-40={hidden}
-									title="클릭하면 {hidden ? '다시 표시' : '숨김'}">
-									<span class="inline-block size-2 rounded-sm"
-										style="background:{behaviorSolid(i)}; {hidden ? 'filter:grayscale(1);' : ''}"></span>
-									{behaviorLabel(b)}
-									{#if !b.success}<span class="text-red-500">실패</span>{/if}
-								</button>
-							{/each}
-							<!-- 항상 보인다 — 예전엔 뭔가 숨긴 뒤에만 나와서, 구간이 많을 때
-							     "하나만 보려면 나머지를 다 눌러야 하나" 가 됐다. -->
-							<button onclick={() => (hiddenSteps = new Set())}
-								class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}"
-								disabled={hiddenSteps.size === 0}
-								class:opacity-40={hiddenSteps.size === 0}>
-								전체 선택
-							</button>
-							<button onclick={() => (hiddenSteps = new Set(allBoundaries.map((b, i) => boundaryKey(b, i))))}
-								class="rounded border px-1.5 py-0.5 hover:bg-muted {captionMuted}"
-								disabled={hiddenSteps.size === allBoundaries.length}
-								class:opacity-40={hiddenSteps.size === allBoundaries.length}>
-								전체 해제
-							</button>
+						<!-- /trace 와 같은 구간 범례 (BoundaryLegend).
+						     밴드에 라벨을 안 그리므로(촘촘하면 겹친다) 여기가 유일한
+						     색 대조표이자 구간을 껐다 켜는 수단이다.
+
+						     ⚠ 컴포넌트는 구간을 **배열 index** 로 식별하고 이 시트는
+						     문자열 키로 식별한다. hiddenSteps 를 문자열로 두는 건 job 을
+						     바꿨을 때 위치 index 가 다른 구간을 가리키는 걸 막기 위해서다.
+						     그래서 변환은 넘기는 이 지점에서만 한다. -->
+						<div class="mb-2 space-y-0.5">
+							<BoundaryLegend
+								boundaries={allBoundaries}
+								hidden={hiddenBoundaryIdx}
+								color={behaviorSolid}
+								onToggle={(i) => toggleStep(boundaryKey(allBoundaries[i], i))}
+								onShowAll={() => (hiddenSteps = new Set())}
+								onHideAll={() => (hiddenSteps = new Set(allBoundaries.map((b, i) => boundaryKey(b, i))))}
+								allHiddenNote="표시할 구간이 없습니다 — “전체 선택”"
+							/>
 							{#if zoomRange && zoomRange.max > zoomRange.min}
 								<!-- 축이 좁혀졌다는 걸 알린다 — 모르면 "데이터가 왜 이것뿐이지" 가 된다. -->
-								<span class={captionMuted}>
+								<div class="text-[10px] {captionMuted}">
 									· 선택 구간으로 확대됨 ({(zoomRange.max - zoomRange.min).toFixed(2)}s)
-								</span>
-							{:else if noneSelected}
-								<span class="text-amber-600">· 표시할 구간이 없습니다 — “전체 선택”</span>
+								</div>
 							{/if}
 						</div>
 					{/if}
