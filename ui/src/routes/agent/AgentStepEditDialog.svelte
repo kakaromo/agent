@@ -9,7 +9,9 @@
 		type AppMacro, type BundledApk, type InstalledApp
 	} from '$lib/api/agent.js';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
+	import CrosshairIcon from '@lucide/svelte/icons/crosshair';
 	import IOTestEditor from './iotest/IOTestEditor.svelte';
+	import AgentCoordPickerDialog from './AgentCoordPickerDialog.svelte';
 	import AppSearchSelect from './AppSearchSelect.svelte';
 	import type { IOTestConfig } from './iotest/types.js';
 
@@ -132,6 +134,28 @@
 			activityHint = '조회 실패: ' + (e?.message ?? '');
 		} finally {
 			activityLoading = false;
+		}
+	}
+
+	// ── 좌표 찍기 ──
+	// tap 의 x/y, tap_element 의 폴백 좌표를 손으로 타이핑하지 않고
+	// 실제 디바이스 화면을 클릭해 채운다. target 이 어느 필드로 넣을지 정한다.
+	let coordPickerOpen = $state(false);
+	let coordTarget = $state<'tap' | 'element'>('tap');
+
+	function openCoordPicker(target: 'tap' | 'element') {
+		coordTarget = target;
+		coordPickerOpen = true;
+	}
+
+	function applyPickedCoord(x: number, y: number) {
+		if (!local) return;
+		if (coordTarget === 'tap') {
+			local.tapX = x;
+			local.tapY = y;
+		} else {
+			local.elementX = x;
+			local.elementY = y;
 		}
 	}
 
@@ -515,8 +539,17 @@
 								/>
 							</div>
 						</div>
+						<button
+							type="button"
+							onclick={() => openCoordPicker('tap')}
+							disabled={serverId == null || !deviceId}
+							class="w-full inline-flex items-center justify-center gap-1.5 rounded border border-pink-500/60 px-2 py-1.5 text-[11px] text-pink-600 dark:text-pink-400 hover:bg-pink-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+							title={serverId == null || !deviceId ? '디바이스를 먼저 선택하세요' : '디바이스 화면을 캡처해 클릭으로 좌표를 넣습니다'}
+						>
+							<CrosshairIcon class="size-3.5" /> 화면에서 좌표 찍기
+						</button>
 						<p class="{captionMuted}">
-							💡 라이브 화면에서 요소를 클릭하면 tap_element 로 잡히지만, 요소가 없는 버튼은 이 tap 으로 좌표를 직접 넣으세요.
+							💡 라이브 화면에서 요소를 클릭하면 tap_element 로 잡히지만, 요소가 없는 버튼은 위 버튼으로 화면을 보며 좌표를 찍으세요.
 						</p>
 					</div>
 
@@ -621,6 +654,15 @@
 								/>
 							</div>
 						</div>
+						<button
+							type="button"
+							onclick={() => openCoordPicker('element')}
+							disabled={serverId == null || !deviceId}
+							class="w-full inline-flex items-center justify-center gap-1.5 rounded border border-pink-500/60 px-2 py-1.5 text-[11px] text-pink-600 dark:text-pink-400 hover:bg-pink-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+							title={serverId == null || !deviceId ? '디바이스를 먼저 선택하세요' : '디바이스 화면을 캡처해 클릭으로 폴백 좌표를 넣습니다'}
+						>
+							<CrosshairIcon class="size-3.5" /> 화면에서 폴백 좌표 찍기
+						</button>
 					</div>
 
 				{:else if local.type === 'text'}
@@ -845,3 +887,13 @@
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>
+
+<!-- 좌표 찍기 — 스텝 편집 다이얼로그 위에 겹쳐 뜬다. -->
+<AgentCoordPickerDialog
+	bind:open={coordPickerOpen}
+	{serverId}
+	{deviceId}
+	initialX={coordTarget === 'tap' ? (local?.tapX ?? null) : (local?.elementX ?? null)}
+	initialY={coordTarget === 'tap' ? (local?.tapY ?? null) : (local?.elementY ?? null)}
+	onPick={applyPickedCoord}
+/>

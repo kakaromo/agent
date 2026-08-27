@@ -367,7 +367,20 @@
 		form.elementMatchMode = sel.matchMode ?? 'exact';
 		form.elementIndex = sel.index ?? 0;
 		form.elementContainerId = sel.containerId ?? '';
+		appendStepNode(form, 'tap_element');
+	}
 
+	// 라이브 화면에서 요소가 없는 지점을 클릭하거나 좌표 모드로 클릭하면
+	// 절대 좌표 tap 블록을 추가한다. (게임/커스텀뷰처럼 요소가 안 잡히는 화면)
+	export function addTapStep(x: number, y: number) {
+		const form = createDefaultStep('tap');
+		form.tapX = x;
+		form.tapY = y;
+		appendStepNode(form, 'tap');
+	}
+
+	// 새 step 노드를 마지막 step 아래에 쌓고 직전 step 에 자동 연결한다.
+	function appendStepNode(form: StepForm, stepType: string) {
 		const id = `step-${nodeIdCounter++}`;
 		// 마지막 step 아래에 세로로 쌓는다.
 		const stepNodesBefore = nodes.filter(n => n.type === 'step');
@@ -378,7 +391,7 @@
 			id,
 			type: 'step',
 			position: { x: 60, y: lastY },
-			data: { stepForm: form, label: stepSummary(form), stepType: 'tap_element' } satisfies StepNodeData
+			data: { stepForm: form, label: stepSummary(form), stepType } satisfies StepNodeData
 		} as any;
 		nodes = sortNodesParentFirst([...nodes, newNode]);
 

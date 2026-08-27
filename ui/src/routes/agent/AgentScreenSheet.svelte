@@ -10,6 +10,7 @@
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import XIcon from '@lucide/svelte/icons/x';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
+	import CrosshairIcon from '@lucide/svelte/icons/crosshair';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 
 	// tap_element 스텝을 만들 셀렉터. 부모(agent 페이지)가 캔버스에 블록으로 추가한다.
@@ -31,12 +32,18 @@
 		deviceId: string | null;
 		// 설정되면 "요소 선택 모드" 토글이 나타나고, 요소 클릭 시 호출된다.
 		onSelectElement?: (el: SelectedElement) => void;
+		// 설정되면 좌표 모드 토글이 나타나고, 화면 클릭 시 tap 스텝용 좌표를 넘긴다.
+		// 요소가 안 잡히는 커스텀뷰/게임 화면용.
+		onSelectCoord?: (x: number, y: number) => void;
 	}
 
-	let { open = $bindable(), serverId, deviceId, onSelectElement }: Props = $props();
+	let { open = $bindable(), serverId, deviceId, onSelectElement, onSelectCoord }: Props = $props();
 
 	// ── 요소 선택 모드 (요소 기반 시나리오 빌더) ──
 	let elementMode = $state(false);
+	// 좌표 모드: 요소를 무시하고 클릭 지점을 그대로 tap 좌표로 넣는다.
+	// (요소 모드 안의 하위 모드 — 오버레이/클릭 캐처를 그대로 재사용한다)
+	let coordMode = $state(false);
 	let uiElements = $state<UIElement[]>([]);
 	let elementsDeviceWidth = $state(0);
 	let elementsDeviceHeight = $state(0);
@@ -101,6 +108,16 @@
 			uiElements = [];
 			hoveredIdx = null;
 			elementFilter = '';
+			coordMode = false;
+		}
+	}
+
+	// 좌표 모드 토글. 켜면 요소 선택 모드도 함께 켜서 오버레이(조준 보조)를 띄운다.
+	function toggleCoordMode() {
+		coordMode = !coordMode;
+		if (coordMode && !elementMode) {
+			elementMode = true;
+			loadUiElements();
 		}
 	}
 
@@ -129,6 +146,10 @@
 
 	// 오버레이 레이어 클릭 → 클릭 지점(디바이스 픽셀)을 포함하는 요소 중 가장 작은 것 선택.
 	// 겹쳐도 사용자가 조준한 작은 버튼이 잡히도록 한다.
+	//
+	// 좌표 모드이거나 클릭 지점에 요소가 하나도 없으면 좌표 그대로 tap 스텝을 만든다.
+	// (예전엔 요소가 없으면 클릭이 아무 반응 없이 삼켜져, 게임/커스텀뷰 화면에서는
+	//  좌표를 손으로 타이핑하는 수밖에 없었다.)
 	function onOverlayClick(e: MouseEvent) {
 		const vr = getVideoRect();
 		const dw = elementsDeviceWidth || deviceWidth;
@@ -137,6 +158,11 @@
 		// 화면 좌표 → 디바이스 픽셀
 		const dx = ((e.clientX - vr.left) / vr.width) * dw;
 		const dy = ((e.clientY - vr.top) / vr.height) * dh;
+
+		if (coordMode) {
+			emitCoord(dx, dy);
+			return;
+		}
 
 		let best: UIElement | null = null;
 		let bestArea = Infinity;
@@ -150,7 +176,26 @@
 				}
 			}
 		}
-		if (best) pickElement(best);
+		if (best) {
+			pickElement(best);
+		} else {
+			// 요소 없음 → 좌표 폴백
+			emitCoord(dx, dy);
+		}
+	}
+
+	// 클릭 지점을 tap 스텝 좌표로 방출. 디바이스 픽셀 범위로 클램프한다.
+	function emitCoord(dxRaw: number, dyRaw: number) {
+		if (!onSelectCoord) {
+			toast.info('이 화면에서는 좌표를 스텝으로 추가할 수 없습니다');
+			return;
+		}
+		const dw = elementsDeviceWidth || deviceWidth;
+		const dh = elementsDeviceHeight || deviceHeight;
+		const x = Math.round(Math.min(Math.max(dxRaw, 0), dw));
+		const y = Math.round(Math.min(Math.max(dyRaw, 0), dh));
+		onSelectCoord(x, y);
+		toast.success(`좌표 추가: ${x}, ${y}`);
 	}
 
 	// ── 콘텐츠 셀렉터 자동 감지 ──
@@ -562,9 +607,11 @@
 								>
 									{#each uiElements as el, i (i)}
 										<div
-											class="absolute rounded-sm border-2 transition-colors {hoveredIdx === i
-												? 'border-fuchsia-500 bg-fuchsia-400/30'
-												: 'border-fuchsia-500/40 bg-fuchsia-400/5'}"
+											class="absolute rounded-sm transition-colors {coordMode
+												? 'border border-fuchsia-500/20'
+												: hoveredIdx === i
+													? 'border-2 border-fuchsia-500 bg-fuchsia-400/30'
+													: 'border-2 border-fuchsia-500/40 bg-fuchsia-400/5'}"
 											style={elementBoxStyle(el)}
 										></div>
 									{/each}
@@ -594,6 +641,16 @@
 					{#if elementMode}
 						<!-- 사이드 요소 리스트 패널 -->
 						<div class="w-52 shrink-0 flex flex-col border rounded bg-background/50 overflow-hidden">
+							<!-- 클릭이 무엇으로 잡히는지 항상 보여준다 (모드 착각 방지) -->
+							<div class="px-1.5 py-1 text-[9px] leading-tight border-b {coordMode
+								? 'bg-pink-500/10 text-pink-600 dark:text-pink-400'
+								: 'bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400'}">
+								{#if coordMode}
+									좌표 모드 — 클릭 지점이 <b>tap</b> 스텝(좌표)으로 들어갑니다
+								{:else}
+									요소 모드 — 클릭한 요소가 <b>tap_element</b> 로, 요소가 없는 지점은 <b>tap</b>(좌표)으로 들어갑니다
+								{/if}
+							</div>
 							<div class="p-1.5 border-b space-y-1">
 								<div class="flex items-center justify-between">
 									<span class="text-[10px] font-medium text-muted-foreground">요소 {uiElements.length}개</span>
@@ -656,10 +713,19 @@
 						<div class="w-px h-4 bg-border"></div>
 						<button
 							onclick={toggleElementMode}
-							class="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs transition-colors {elementMode ? 'bg-fuchsia-600 text-white border-fuchsia-600' : 'hover:bg-muted'}"
-							title="요소 선택 모드: 화면에서 요소를 클릭해 tap_element 블록을 추가"
+							class="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs transition-colors {elementMode && !coordMode ? 'bg-fuchsia-600 text-white border-fuchsia-600' : 'hover:bg-muted'}"
+							title="요소 선택 모드: 화면에서 요소를 클릭해 tap_element 블록을 추가 (요소가 없는 지점은 좌표로 잡힘)"
 						>
 							<MousePointerClickIcon class="size-3.5" /> 요소 선택
+						</button>
+					{/if}
+					{#if onSelectCoord}
+						<button
+							onclick={toggleCoordMode}
+							class="inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs transition-colors {coordMode ? 'bg-pink-600 text-white border-pink-600' : 'hover:bg-muted'}"
+							title="좌표 모드: 요소를 무시하고 클릭 지점 좌표로 tap 블록을 추가"
+						>
+							<CrosshairIcon class="size-3.5" /> 좌표 찍기
 						</button>
 					{/if}
 					<div class="w-px h-4 bg-border"></div>

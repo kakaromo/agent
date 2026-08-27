@@ -774,6 +774,9 @@
 	onSelectElement={centerMode === 'scenario'
 		? (el) => scenarioCanvasRef?.addTapElementStep(el)
 		: undefined}
+	onSelectCoord={centerMode === 'scenario'
+		? (x, y) => scenarioCanvasRef?.addTapStep(x, y)
+		: undefined}
 />
 
 <TerminalDialog
