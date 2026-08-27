@@ -2,11 +2,14 @@
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import { DataTable } from '$lib/components/data-table';
-	import TraceScatterChart from './TraceScatterChart.svelte';
+	import TraceChartView from './trace/TraceChartView.svelte';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
 	import BehaviorTimeline from './BehaviorTimeline.svelte';
 	import { columnsFor } from './rawDataColumns.js';
+	// 차트·통계·Behavior 가 **같은 분류기**를 쓰도록 공유 모듈에서 가져온다.
+	// 예전엔 이 파일 안에 사본이 있어 차트 색과 Behavior 색이 갈릴 수 있었다.
+	import { getCmdGroup } from './trace/cmdColors.js';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
@@ -545,22 +548,6 @@
 	let filterMaxQd = $state('');
 	let latencyRangesText = $state('0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000');
 
-	// Legend sync across charts
-	let legendSelected = $state<Record<string, boolean>>({});
-
-	// Chart item selection (sidebar toggle)
-	const CHART_ITEMS = [
-		{ key: 'lba', label: 'LBA', yLabel: 'LBA', group: 'common' },
-		{ key: 'qd', label: 'Queue Depth', yLabel: 'QD', group: 'common' },
-		{ key: 'cpu', label: 'CPU', yLabel: 'CPU', group: 'common' },
-		{ key: 'ctod', label: 'CtoD Latency', yLabel: 'CtoD (ms)', group: 'send' },
-		{ key: 'dtoc', label: 'DtoC Latency', yLabel: 'DtoC (ms)', group: 'complete' },
-		{ key: 'ctoc', label: 'CtoC Latency', yLabel: 'CtoC (ms)', group: 'complete' },
-		// mgmt(UIC/Query/TM) 전용 DtoC. 데이터 IO 와 지연 크기대가 달라 같은 축에
-		// 두면(µs 단위 IO 옆에 ms 단위 hibern8) 한쪽이 바닥에 깔려 안 보인다.
-		{ key: 'dtoc_mgmt', label: 'DtoC (mgmt)', yLabel: 'DtoC (ms)', group: 'complete' }
-	] as const;
-	let visibleCharts = $state<Set<string>>(new Set(['lba', 'qd', 'dtoc']));
 
 	// Action tab: Send vs Complete
 	let activeActionTab = $state('complete');
@@ -601,262 +588,119 @@
 	// ⚠ `$derived(() => ...)` 로 쓰면 **함수 자체가 값**이 되어 타입이 TraceEvent[] 가
 	// 아니게 된다(호출부는 filteredEvents() 로 쓰고 있어 런타임은 맞지만 타입이 어긋난다).
 	// `$derived.by` 가 이 형태의 올바른 룬이다.
-	const filteredEvents = $derived.by<TraceEvent[]>(() => {
+	//
+	// ⚠ **action 필터를 여기서 걸지 않는다.** TraceChartView 가 Send/Complete/All 탭을
+	// 스스로 갖고 있고 내부에서 또 거른다. 여기서 미리 거른 배열을 넘기면 이중 필터가
+	// 되어 탭이 조용히 빈다 — 화면엔 "데이터 없음" 으로 보여 원인을 찾기 어렵다.
+	// 그래서 차트에는 이 배열(loop + 구간만 반영)을 넘기고, action 은 차트가 소유한다.
+	const slicedEvents = $derived.by<TraceEvent[]>(() => {
 		if (!rawResult) return [];
-		let evts = activeActionTab === 'all'
-			? rawResult.events
-			: rawResult.events.filter(e => actionMatchesTab(e.action, activeActionTab));
 		// 구간을 고르면 **데이터 자체**를 그 범위로 좁힌다.
 		//
 		// 예전엔 차트 x축만 좁혀서, Raw Data 는 전 구간 행을 그대로 보여주고
 		// Statistics 도 전체 기준이었다 — 화면마다 모수가 달라 "고른 구간의 p99" 를
 		// 물어도 답이 안 나왔다. 여기서 자르면 Raw/Behavior/차트가 같은 모수를 본다.
 		if (noneSelected) return [];   // 아무 구간도 안 고름 — 보여줄 게 없다
-		if (zoomRange) {
-			evts = evts.filter(e => e.time >= zoomRange.min && e.time <= zoomRange.max);
-		}
-		return evts;
+		if (!zoomRange) return rawResult.events;
+		return rawResult.events.filter(e => e.time >= zoomRange.min && e.time <= zoomRange.max);
 	});
+
+	// Raw Data / Behavior 용 — 여기는 action 탭을 **적용한다.**
+	// 그쪽 화면엔 자체 action 탭이 없고, 헤더의 Send/Complete 선택을 따라야 한다.
+	const filteredEvents = $derived.by<TraceEvent[]>(() =>
+		activeActionTab === 'all'
+			? slicedEvents
+			: slicedEvents.filter(e => actionMatchesTab(e.action, activeActionTab))
+	);
+
+	/**
+	 * agent TraceEvent[] (행) → TraceChartView 의 Series (열).
+	 *
+	 * 값은 손대지 않는다 — latency 0 제외 같은 판정은 TraceChartView 가 이미 한다
+	 * (여기서 또 걸러내면 이중 필터가 된다).
+	 */
+	const chartSeries = $derived.by(() => {
+		const ev = slicedEvents;
+		const n = ev.length;
+		const time = new Array<number>(n);
+		const lba = new Array<number>(n);
+		const qd = new Array<number>(n);
+		const cpu = new Array<number>(n);
+		const dtoc = new Array<number>(n);
+		const ctoc = new Array<number>(n);
+		const ctod = new Array<number>(n);
+		const action = new Array<string>(n);
+		const cmd = new Array<string>(n);
+		for (let i = 0; i < n; i++) {
+			const e = ev[i];
+			time[i] = e.time;
+			lba[i] = e.lba;
+			qd[i] = e.qd;
+			cpu[i] = e.cpu;
+			dtoc[i] = e.dtoc;
+			ctoc[i] = e.ctoc;
+			ctod[i] = e.ctod;
+			action[i] = e.action;
+			cmd[i] = e.cmd;
+		}
+		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd };
+	});
+
+	/** TraceChartView 상단 meta 바(총/샘플 건수). agent 응답 값 그대로. */
+	const chartMeta = $derived(
+		rawResult
+			? {
+					totalEvents: rawResult.totalEvents ?? rawResult.events.length,
+					sampledEvents: rawResult.sampledEvents ?? rawResult.events.length,
+					schemaVersion: '',
+					stats: null
+				}
+			: null
+	);
+
+	/**
+	 * TraceChartView 의 traceType — union 이라 'both' 가 없다.
+	 *
+	 * ⚠ ufs/block 두 값으로 **뭉개면 안 된다**: fsio_* 를 잃으면 mgmt 차트와
+	 * fsio Flags 패널이 조용히 사라진다. 'both' 만 ufs 로 떨어뜨린다
+	 * (UFS+Block 동시 수집이라 한쪽으로 단정할 수 없고, 이 값은 fsio 전용 패널
+	 * 노출만 정하므로 ufs/block 어느 쪽이든 화면 구성이 같다).
+	 */
+	const chartTraceType = $derived.by<'ufs' | 'block' | 'ufscustom' | 'fsio_ufs' | 'fsio_block'>(() => {
+		const t = activeTraceType;
+		if (t === 'fsio_ufs' || t === 'fsio_block' || t === 'block' || t === 'ufscustom') return t;
+		return 'ufs';
+	});
+
+	/**
+	 * hiddenSteps(문자열 키) → TraceChartView 의 hiddenBoundaries(배열 index).
+	 *
+	 * hiddenSteps 는 문자열 키인 채로 둔다 — job 을 바꾸면 위치 index 가 다른 구간을
+	 * 가리키게 되는데, 문자열 키라야 그 충돌을 피할 수 있다. 변환은 넘기는 지점에서만.
+	 */
+	const hiddenBoundaryIdx = $derived(
+		new Set(
+			allBoundaries
+				.map((_, i) => i)
+				.filter((i) => hiddenSteps.has(boundaryKey(allBoundaries[i], i)))
+		)
+	);
+
+	/**
+	 * 차트가 "되돌리기(전체 범위로)" 를 요청했을 때.
+	 * agent 는 서버사이드 zoom 재조회가 없으므로 시간 필터만 비우고 다시 조회한다.
+	 */
+	function handleResetZoom() {
+		filterStartTime = '';
+		filterEndTime = '';
+		applyFilter();
+	}
 
 	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
 	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
 
-	// Available chart items based on action tab
-	let availableChartItems = $derived.by(() => {
-		let items = activeActionTab === 'send'
-			? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'send')
-			: activeActionTab === 'complete'
-				? CHART_ITEMS.filter(c => c.group === 'common' || c.group === 'complete')
-				: [...CHART_ITEMS]; // all
-		// mgmt(UPIU/UIC)는 UFS 프로토콜 계층 개념이라 fsio_ufs 에만 존재한다.
-		// 다른 타입에서 빈 차트를 띄우면 "데이터가 없다" 로 오해하게 된다.
-		if (activeTraceType !== 'fsio_ufs') {
-			items = items.filter(c => c.key !== 'dtoc_mgmt');
-		}
-		return items;
-	});
 
-	function toggleChart(key: string) {
-		const next = new Set(visibleCharts);
-		if (next.has(key)) { if (next.size > 1) next.delete(key); } // 최소 1개
-		else next.add(key);
-		visibleCharts = next;
-	}
-
-	const defaultChartHeight = $derived(visibleCharts.size === 1 ? 500 : visibleCharts.size === 2 ? 350 : 280);
-	let userChartHeight = $state<number | null>(null);
-	let userChartWidth = $state<string | null>(null);
-	const chartHeightPx = $derived(userChartHeight ?? defaultChartHeight);
-	const chartHeight = $derived(`${chartHeightPx}px`);
-
-	// 카드 리사이즈 감지 → 모든 카드 높이+너비 동기화
-	function observeResize(node: HTMLElement) {
-		const ro = new ResizeObserver(() => {
-			const newH = node.offsetHeight;
-			const newW = node.offsetWidth;
-			if (newH > 0 && Math.abs(newH - chartHeightPx) > 5) {
-				userChartHeight = Math.max(150, Math.min(800, newH));
-			}
-			if (newW > 0) {
-				userChartWidth = `${newW}px`;
-			}
-		});
-		ro.observe(node);
-		return { destroy: () => ro.disconnect() };
-	}
-
-	// CMD colors — 계열별 색상 톤
-	// Read 계열: 파란색, Write 계열: 주황/빨강, Flush 계열: 초록, Discard/Trim 계열: 보라
-	const CMD_COLOR_MAP: Record<string, string[]> = {
-		// Read 계열 (파랑)
-		read: ['#3b82f6', '#2563eb', '#1d4ed8', '#60a5fa', '#93c5fd'],
-		// Write 계열 (주황/빨강)
-		write: ['#f97316', '#ea580c', '#dc2626', '#fb923c', '#fdba74'],
-		// Flush 계열 (초록)
-		flush: ['#22c55e', '#16a34a', '#15803d', '#4ade80', '#86efac'],
-		// Discard/Trim/Unmap 계열 (보라)
-		discard: ['#a855f7', '#9333ea', '#7c3aed', '#c084fc', '#d8b4fe'],
-		// 기타 (회색/청록)
-		other: ['#64748b', '#475569', '#6b7280', '#94a3b8', '#78716c'],
-		// ── UFS management ──
-		// 데이터 IO 가 아니라 링크 점유·장치 제어다. 전용 차트(DtoC (mgmt))를 따로
-		// 두면서 "같은 mgmt" 로 뭉뚱그리지 않고 **성질별로** 색을 가른다. 차트만 봐도
-		// "링크가 자주 잠들었다" vs "WB 를 계속 건드린다" 가 구분되도록.
-		//
-		// mgmt_link  링크 전원/상태 (UIC: hibern8 enter/exit, link startup) — 보라
-		// mgmt_read  장치 상태 조회 (Read Attribute/Descriptor/Flag)        — 청록
-		// mgmt_write 장치 설정 변경 (Set/Clear/Toggle Flag, Write ...)      — 주황
-		// mgmt_tm    Task Management (Abort Task, LU Reset 등)              — 빨강(이상 신호)
-		mgmt_link: ['#8b5cf6', '#7c3aed', '#6d28d9', '#a78bfa', '#c4b5fd'],
-		mgmt_read: ['#06b6d4', '#0891b2', '#0e7490', '#22d3ee', '#67e8f9'],
-		mgmt_write: ['#f59e0b', '#d97706', '#b45309', '#fbbf24', '#fcd34d'],
-		mgmt_tm: ['#ef4444', '#dc2626', '#b91c1c', '#f87171', '#fca5a5'],
-		// 종류를 특정 못 한 mgmt (producer 가 정보를 안 준 폴백) — 회청색
-		mgmt: ['#64748b', '#94a3b8', '#475569', '#cbd5e1', '#78716c']
-	};
-
-	// cmd별 계열 인덱스 카운터
-	const cmdColorAssigned: Record<string, string> = {};
-	const groupCounters: Record<string, number> = {
-		read: 0, write: 0, flush: 0, discard: 0, other: 0,
-		mgmt_link: 0, mgmt_read: 0, mgmt_write: 0, mgmt_tm: 0, mgmt: 0
-	};
-
-	/**
-	 * UFS management 이벤트 이름인가?
-	 *
-	 * 아래 getCmdGroup 의 문자열 스니핑보다 **먼저** 판정해야 한다. 그냥 두면
-	 * "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard(보라), "Read Flag(...)" 는
-	 * 'read' 포함으로 read(파랑) 가 되어 **데이터 IO 와 구분이 안 된다.**
-	 * 깨지는 게 아니라 그럴듯하게 틀려서 더 위험하다.
-	 *
-	 * 판정 기준은 서버가 굽는 mgmt_name 의 형태다 (trace/parser/ufs_names.go).
-	 * 데이터 IO 의 cmd 는 항상 '0x28' 같은 hex 라 겹칠 일이 없다.
-	 */
-	function isMgmtCmd(cmd: string): boolean {
-		const s = (cmd ?? '').trim();
-		if (!s || s.startsWith('0x')) return false; // 데이터 IO 는 hex opcode
-		if (s.startsWith('DME_')) return true; // UIC
-		// Query — opcode 이름 + 괄호 안 IDN
-		if (/^(Read|Write|Set|Clear|Toggle)\s+(Descriptor|Attribute|Flag)\b/.test(s)) return true;
-		// Task Management
-		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) return true;
-		// 파서가 못 푼 값은 "Unknown(0x..)" 로 온다. 데이터 IO 색을 뺏지 않도록 mgmt 로.
-		if (s.startsWith('Unknown(')) return true;
-		// Query NOP — QueryDisplay(0x00) 은 idn 없이 이름만 돌려줘 "NOP" 이 된다
-		// (trace/parser/ufs_names.go). 아래 소문자 규칙에 안 걸려서 예전엔 데이터
-		// IO 로 샜다.
-		if (/^NOP\b/i.test(s)) return true;
-		// producer 가 qop/idn/uic_cmd 를 안 준 경우 mgmt_name 이 action 으로 폴백된다
-		// (uic / upiu_send / upiu_response / nop_out / rtt / exception).
-		// 대소문자 무시 — producer/파서가 대문자로 낼 수 있다.
-		if (/^(uic|upiu_|nop_|rtt|exception)/i.test(s)) return true;
-		return false;
-	}
-
-	/**
-	 * mgmt 이벤트의 **성질** 판정. 색 그룹 키를 그대로 돌려준다.
-	 *
-	 * 판정 순서가 중요하다:
-	 *   - TM 을 먼저 — "Query Task" 는 TM 인데 뒤의 Read/Write 규칙에 걸리면 안 된다.
-	 *   - 그 다음 UIC(DME_) — 이름에 다른 키워드가 없어 안전.
-	 *   - Query 는 opcode 이름이 앞에 오므로(Read Attribute / Set Flag) 그걸로 구분.
-	 */
-	function getMgmtGroup(cmd: string): string {
-		const s = (cmd ?? '').trim();
-		// Task Management — 이상 신호라 가장 먼저, 그리고 눈에 띄는 색으로.
-		if (/^(Abort Task|Clear Task Set|Logical Unit Reset|Query Task|Target Reset)/.test(s)) {
-			return 'mgmt_tm';
-		}
-		// UIC / NOP (링크 계층) — DME_HIBER_ENTER/EXIT, DME_LINK_STARTUP, NOP(링크 확인)
-		if (s.startsWith('DME_') || /^uic(_|$)/i.test(s) || /^(NOP|nop_)/i.test(s)) return 'mgmt_link';
-		// Query — 장치 설정을 **바꾸는** 쪽
-		if (/^(Write Descriptor|Write Attribute|Set Flag|Clear Flag|Toggle Flag)\b/.test(s)) {
-			return 'mgmt_write';
-		}
-		// Query — 장치 상태를 **읽는** 쪽
-		if (/^(Read Descriptor|Read Attribute|Read Flag)\b/.test(s)) return 'mgmt_read';
-		// 폴백(upiu_send / nop_out / rtt / exception / Unknown(0x..))
-		return 'mgmt';
-	}
-
-	/**
-	 * 이 이벤트가 mgmt 인가 — **서버가 준 is_mgmt 가 정본**이다.
-	 *
-	 * 이름 스니핑(isMgmtCmd)은 폴백일 뿐이다. mgmt_name 이 "NOP" 처럼 어떤
-	 * 규칙에도 안 걸리는 값일 수 있고, 그러면 mgmt 행이 데이터 IO 로 분류돼
-	 * lba/qd 가 0 인 채로 LBA/QD 차트에 가짜 가로줄을 그린다.
-	 *
-	 * is_mgmt 가 없는 경로(ftrace, 구버전 응답)를 위해 이름 폴백을 남긴다.
-	 */
-	function isMgmtEvent(e: TraceEvent): boolean {
-		const v = (e as unknown as Record<string, unknown>).is_mgmt;
-		if (typeof v === 'boolean') return v;
-		return isMgmtCmd(e.cmd);
-	}
-
-	/**
-	 * 차트에서 감출 mgmt 이벤트.
-	 *
-	 * 요청/응답이 1:1 로 붙는 mgmt 는 차트에 둘 다 그리면 같은 왕복이 두 번
-	 * 보인다. 통계/Raw Data 에는 그대로 남기고 **차트 시리즈에서만** 뺀다.
-	 *
-	 * ⚠ 판정은 **action** 으로 한다. 예전엔 cmd 에 upiu_response 정규식을
-	 * 걸었는데, cmd 에는 mgmt_name("Read Descriptor(geometry)")이 들어가지
-	 * 실제 action 이 안 들어간다. 게다가 producer 가 내는 이름은 upiu_response
-	 * 가 아니라 query_rsp / tm_rsp / nop_in 이라 **어떤 행에도 안 맞아 dedup 이
-	 * 아예 동작하지 않았다.**
-	 *
-	 * 빼는 쪽은 **요청**이다 — dtoc(왕복 시간)는 응답 행에만 실리므로 응답을
-	 * 빼면 mgmt latency 가 통째로 사라진다.
-	 */
-	function isHiddenInChart(e: TraceEvent): boolean {
-		if (!isMgmtEvent(e)) return false;
-		const a = (e.action ?? '').toLowerCase();
-		return a.endsWith('_req') || a.endsWith('_out') || a === 'uic_send';
-	}
-
-	// SCSI opcode → group 매핑 (UFS)
-	const SCSI_CMD_GROUPS: Record<string, string> = {
-		'0x28': 'read',   // READ(10)
-		'0xa8': 'read',   // READ(12)
-		'0x88': 'read',   // READ(16)
-		'0x08': 'read',   // READ(6)
-		'0x2a': 'write',  // WRITE(10)
-		'0xaa': 'write',  // WRITE(12)
-		'0x8a': 'write',  // WRITE(16)
-		'0x0a': 'write',  // WRITE(6)
-		'0x2e': 'write',  // WRITE AND VERIFY(10)
-		'0x35': 'flush',  // SYNCHRONIZE CACHE(10)
-		'0x91': 'flush',  // SYNCHRONIZE CACHE(16)
-		'0x42': 'discard', // UNMAP
-		'0x12': 'other',  // INQUIRY
-		'0x1a': 'other',  // MODE SENSE(6)
-		'0x5a': 'other',  // MODE SENSE(10)
-		'0x25': 'other',  // READ CAPACITY(10)
-		'0x00': 'other',  // TEST UNIT READY
-	};
-
-	function getCmdGroup(cmd: string): string {
-		const lower = cmd.toLowerCase().trim();
-		if (!lower) return 'other';
-
-		// ⚠ mgmt 판정이 **아래 문자열 스니핑보다 먼저**여야 한다. 그냥 두면
-		// "DME_HIBER_EXIT" 는 첫 글자 'd' 로 discard, "Read Flag(...)" 는 'read'
-		// 포함으로 read 가 되어 데이터 IO 와 색이 겹친다 — 그럴듯하게 틀린다.
-		if (isMgmtCmd(cmd)) return getMgmtGroup(cmd);
-
-		// SCSI hex opcode: 0x28, 0x2a 등
-		if (lower.startsWith('0x')) {
-			return SCSI_CMD_GROUPS[lower] ?? 'other';
-		}
-
-		// 전체 단어 매칭 (긴 키워드 우선)
-		if (lower.includes('discard') || lower.includes('trim') || lower.includes('unmap')) return 'discard';
-		if (lower.includes('flush') || lower.includes('sync')) return 'flush';
-		if (lower.includes('write')) return 'write';
-		if (lower.includes('read')) return 'read';
-
-		// Block trace io_type prefix (R/W/D/F + RA, WS, WSF, FUA 등 변형) — Rust 파서가 첫 글자로 분류.
-		const first = lower[0];
-		if (first === 'r') return 'read';
-		if (first === 'w') return 'write';
-		if (first === 'd') return 'discard';
-		if (first === 'f') return 'flush';
-
-		return 'other';
-	}
-
-	function getCmdColor(cmd: string): string {
-		if (!cmdColorAssigned[cmd]) {
-			const group = getCmdGroup(cmd);
-			const palette = CMD_COLOR_MAP[group];
-			const idx = groupCounters[group] % palette.length;
-			groupCounters[group]++;
-			cmdColorAssigned[cmd] = palette[idx];
-		}
-		return cmdColorAssigned[cmd];
-	}
+	// cmd 색상·그룹 분류는 './trace/cmdColors.js' 가 갖는다 (차트와 같은 기준).
 
 	// ── Load on open / loop 필터 변경 시 재로딩 ──
 	// activeJobIds 를 참조하므로 selectedLoop 가 바뀌면 이 effect 가 다시 돈다.
@@ -1057,10 +901,6 @@
 		applyFilter();
 	}
 
-	function handleLegendChanged(selected: Record<string, boolean>) {
-		legendSelected = selected;
-	}
-
 	// ── Behavior 구간별 집계 ──
 	//
 	// 이미 클라이언트에 있는 raw 이벤트를 구간으로 자른다. `time` 은 parquet 원본
@@ -1178,104 +1018,6 @@
 		});
 	});
 
-	// ── Scatter chart builders ──
-	// latency 필드는 0값 제외 (send 이벤트의 latency는 0)
-	const LATENCY_FIELDS = new Set(['dtoc', 'ctod', 'ctoc']);
-
-	function buildScatter(events: TraceEvent[], yKey: string, yLabel: string) {
-		// dtoc_mgmt 는 **가상 키** — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
-		// mgmt latency 는 데이터 IO 와 자릿수가 달라(µs IO vs ms hibern8) 같은 축에
-		// 두면 한쪽이 바닥에 깔려 안 보인다. 그래서 축을 분리한다.
-		const isMgmtChart = yKey === 'dtoc_mgmt';
-		const yField = (isMgmtChart ? 'dtoc' : yKey) as keyof TraceEvent;
-		const excludeZero = LATENCY_FIELDS.has(yField);
-		// mgmt 요청/응답 쌍 중 요청 쪽을 뺀다 — 안 그러면 같은 왕복이 두 번 그려진다.
-		const visible = events.filter(e => !isHiddenInChart(e));
-		// mgmt 차트에는 mgmt 만, 나머지 차트에는 데이터 IO 만.
-		//
-		// ⚠ 판정은 서버가 준 **is_mgmt 필드**로 한다 (isMgmtEvent). 이름 스니핑만
-		// 쓰면 Query NOP(mgmt_name="NOP") 처럼 규칙에 안 걸리는 mgmt 가 데이터 IO 로
-		// 분류돼, lba/qd 가 NULL(→0)인 채로 LBA/QD 차트에 **Y=0 가짜 가로줄**을
-		// 그린다 — mgmtNullExpr 로 없애려던 바로 그 현상이다.
-		const scoped = visible.filter(e => isMgmtEvent(e) === isMgmtChart);
-		const cmdSet = [...new Set(scoped.map(e => e.cmd))];
-		const series = cmdSet.map(cmd => ({
-			name: cmd,
-			type: 'scatter' as const,
-			data: scoped
-				.filter(e => e.cmd === cmd && (!excludeZero || (e[yField] as number) > 0))
-				.map(e => [e.time, e[yField]]),
-			symbolSize: 2,
-			itemStyle: { color: getCmdColor(cmd) }
-		}));
-		// 구간 밴드 — 스텝 경계를 차트 위에 겹친다.
-		//
-		// 별도 레인(간트)을 위에 얹지 않는 이유: 차트마다 ECharts 인스턴스가 독립이고
-		// echarts.connect 도 안 걸려 있어서, 사용자가 한 차트를 zoom 하면 레인과
-		// 어긋난다. markArea 는 **차트 좌표계 안**이라 zoom/pan 을 데이터와 함께
-		// 따라가므로 어긋날 수가 없다.
-		if (hasBehavior) {
-			// ⚠ 밴드를 series[0] 에 붙이면 안 된다. series[0] 은 임의의 cmd(UFS 면
-			// 보통 0x28)라, 사용자가 legend 에서 그 cmd 를 끄는 순간 ECharts 가
-			// markArea 까지 같이 숨겨 **모든 차트의 밴드가 한꺼번에 사라진다.**
-			// legend 에 안 잡히는 전용 빈 series 에 매단다.
-			series.push({
-				name: '',
-				type: 'scatter' as const,
-				data: [],
-				silent: true,
-				markArea: {
-					silent: true,
-					itemStyle: { opacity: 1 },
-					// 라벨은 안 그린다 — 구간이 촘촘하면 글자가 겹쳐 오히려 지저분하다.
-					// 어느 구간인지는 위 범례(색)와 점 tooltip("구간: ...")으로 확인한다.
-					label: { show: false },
-					emphasis: { disabled: true },
-					data: usableBoundaries.map(b => [
-						{
-							xAxis: b.startedMono,
-							itemStyle: { color: behaviorColor(colorIndexOf(b)) },
-							name: behaviorLabel(b)
-						},
-						{ xAxis: b.finishedMono }
-					])
-				}
-			} as any);
-		}
-		return {
-			tooltip: {
-				trigger: 'item' as const,
-				// 점을 짚으면 **그 IO 가 어느 스텝 구간인지**까지 알려준다. 밴드 라벨은
-				// 구간이 촘촘하면 읽기 어려워서, 확실한 확인 수단이 하나 더 필요하다.
-				formatter: (p: any) => {
-					const t = p.data[0];
-					const base = `${p.seriesName}<br/>time: ${t}<br/>${yLabel}: ${p.data[1]}`;
-					const b = usableBoundaries.find(x => t >= x.startedMono && t <= x.finishedMono);
-					return b ? `${base}<br/><b>구간: ${behaviorLabel(b)}</b>` : base;
-				}
-			},
-			legend: { data: cmdSet, top: 0, right: 0, textStyle: { fontSize: 9 }, selected: legendSelected },
-			// 구간을 고르면 그 범위로 좁힌다(zoomRange). 안 고르면 데이터 전체.
-			xAxis: {
-				type: 'value' as const, name: 'Time (s)',
-				min: zoomRange ? zoomRange.min : ('dataMin' as const),
-				...(zoomRange ? { max: zoomRange.max } : {}),
-				nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 }
-			},
-			yAxis: { type: 'value' as const, name: yLabel, nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 8 } },
-			series,
-			grid: { left: 60, right: 20, top: 25, bottom: 35 },
-			dataZoom: [{ type: 'inside' as const }]
-		};
-	}
-
-	function getChartOption(key: string): ReturnType<typeof buildScatter> | null {
-		const events = filteredEvents;
-		if (events.length === 0) return null;
-		const item = CHART_ITEMS.find(c => c.key === key);
-		if (!item) return null;
-		return buildScatter(events, key, item.yLabel);
-	}
 
 	// ── Stats helpers ──
 	function fmtDuration(seconds: number): string {
@@ -1599,69 +1341,31 @@
 					{#if loadingRaw}
 						<div class="flex items-center justify-center py-12"><LoaderIcon class="size-5 animate-spin text-muted-foreground" /></div>
 					{:else if rawResult && rawResult.events.length > 0}
-						<div class="flex items-center gap-2 mb-1">
-							<div class="text-[9px] text-muted-foreground">
-								{filteredEvents.length.toLocaleString()} events
-								{#if rawResult.isSampled} (sampled from {rawResult.totalEvents.toLocaleString()}){/if}
-								{#if zoomRange}
-									<!-- 행 수가 줄어든 이유를 밝힌다 — 모르면 데이터가 없어진 줄 안다. -->
-									· 선택 구간만
-								{/if}
-							</div>
-							<!-- Action tabs: Send / Complete -->
-							<div class="flex gap-0.5 ml-auto">
-								{#each ['send', 'complete'] as tab}
-									<button
-										onclick={() => activeActionTab = tab}
-										class="px-2 py-0.5 rounded text-[9px] transition-colors
-											{activeActionTab === tab ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}"
-									>
-										{tab === 'send' ? 'Send' : 'Complete'}
-									</button>
-								{/each}
-								<button
-									onclick={() => activeActionTab = 'all'}
-									class="px-2 py-0.5 rounded text-[9px] transition-colors
-										{activeActionTab === 'all' ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}"
-								>
-									All
-								</button>
-							</div>
-						</div>
-						<div class="flex gap-2 min-h-[400px]">
-							<!-- Sidebar: chart selector -->
-							<div class="w-32 shrink-0 space-y-0.5 border-r pr-2 sticky top-0 self-start">
-								{#each availableChartItems as item}
-									<button
-										onclick={() => toggleChart(item.key)}
-										class="w-full text-left px-2 py-1.5 rounded text-[10px] transition-colors
-											{visibleCharts.has(item.key)
-												? 'bg-primary/10 text-primary font-medium'
-												: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-									>
-										{item.label}
-									</button>
-								{/each}
-							</div>
-							<!-- Charts -->
-							<div class="flex-1 space-y-2 relative">
-								{#each availableChartItems as item}
-									{#if visibleCharts.has(item.key)}
-										{@const opt = getChartOption(item.key)}
-										{#if opt}
-											<div
-												class="border rounded overflow-hidden resize"
-												style="height: {chartHeight}; {userChartWidth ? `width: ${userChartWidth};` : ''} min-height: 150px; max-height: 800px;"
-												use:observeResize
-											>
-												<div class="text-[10px] font-medium px-2 py-0.5 shrink-0">{item.label}</div>
-												<TraceScatterChart option={opt} height="100%" chartKey={item.key} {legendSelected} onLegendChanged={handleLegendChanged} onBrushSelected={handleBrushSelected} />
-											</div>
-										{/if}
-									{/if}
-								{/each}
-								</div>
-						</div>
+						<!-- /trace 와 **같은 차트 화면**을 그대로 쓴다 (TraceChartView).
+						     차트 종류 사이드바, Send/Complete/All 탭, 범례, brush, 구간 밴드가
+						     전부 그 안에 있다. 여기서 다시 만들면 두 화면이 또 갈라진다.
+
+						     ⚠ series 에는 slicedEvents(=loop·구간만 반영)를 넘긴다.
+						     action 은 TraceChartView 가 소유하므로 미리 거르면 이중 필터가
+						     되어 탭이 조용히 빈다. -->
+						{#if zoomRange}
+							<div class="text-[9px] text-muted-foreground mb-1">· 선택 구간만</div>
+						{/if}
+						<TraceChartView
+							series={chartSeries}
+							meta={chartMeta}
+							traceType={chartTraceType}
+							zoomed={!!zoomRange}
+							boundaries={allBoundaries}
+							hiddenBoundaries={hiddenBoundaryIdx}
+							onZoomChange={(start, end) => {
+								filterStartTime = String(start);
+								filterEndTime = String(end);
+								applyFilter();
+							}}
+							onResetZoom={handleResetZoom}
+							onBrushSelected={handleBrushSelected}
+						/>
 					{:else}
 						<div class="text-center text-xs text-muted-foreground py-8">데이터 없음</div>
 					{/if}
