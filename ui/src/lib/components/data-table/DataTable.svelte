@@ -171,7 +171,13 @@
 
 	// Large-data windowing: when scrollHeight is set and data exceeds threshold,
 	// feed only a window of data to tanstack table to avoid OOM from Row object creation.
-	const VIRTUAL_WINDOW_THRESHOLD = 500;
+	//
+	// 주의: window slice 가 갱신될 때마다 (virtualWindowStart 변동) tanstack table 의
+	// data prop 이 새 배열로 교체되어 row 인스턴스 재생성 → 사용자 시점에서 scroll 이
+	// 위로 튕기는 현상 발생. 따라서 threshold 를 충분히 높여 일반적인 데이터셋
+	// (수천 row) 은 그냥 통째로 table 에 넣고, virtual-core 가 DOM 가상화만 담당.
+	// windowing 은 진짜 거대한 데이터 (수만 row) 에서 OOM 방지용으로만 발동.
+	const VIRTUAL_WINDOW_THRESHOLD = 10000;
 	let virtualWindowStart = $state(0);
 	const VIRTUAL_WINDOW_BUFFER = 100; // extra rows above/below visible range
 
@@ -369,6 +375,19 @@
 		return set;
 	}
 
+	/**
+	 * 한 셀의 복사 텍스트. 컬럼이 `meta.copyText` 를 선언하면 그걸 쓰고, 없으면 raw 값.
+	 *
+	 * 셀을 `cell:` 로 가공해 보여주는 컬럼(io_flags 의 `0x... (WRITE, DATA)` 처럼 합성한
+	 * 값, hex 표기, 소수점 자리 고정 등)은 raw 값만 복사하면 화면과 다른 내용이 붙는다.
+	 * 복사는 "보이는 그대로" 가 기대값이라 컬럼이 직접 직렬화를 정하게 한다.
+	 */
+	function cellCopyText(colDef: unknown, row: TData, rawValue: unknown): string {
+		const fn = (colDef as { meta?: { copyText?: (row: TData) => string } })?.meta?.copyText;
+		if (typeof fn === 'function') return fn(row);
+		return String(rawValue ?? '');
+	}
+
 	function getRectTsv(anchor: {row: number, col: number}, current: {row: number, col: number}): string {
 		const r0 = Math.min(anchor.row, current.row), r1 = Math.max(anchor.row, current.row);
 		const c0 = Math.min(anchor.col, current.col), c1 = Math.max(anchor.col, current.col);
@@ -378,7 +397,9 @@
 			const cells = rows[r].getVisibleCells().filter(c => c.column.id !== 'select');
 			const vals: string[] = [];
 			for (let c = c0; c <= c1 && c < cells.length; c++) {
-				vals.push(String(cells[c].getValue() ?? ''));
+				vals.push(
+					cellCopyText(cells[c].column.columnDef, rows[r].original as TData, cells[c].getValue())
+				);
 			}
 			lines.push(vals.join('\t'));
 		}
@@ -386,17 +407,42 @@
 	}
 
 	function getTableTsv(): string {
-		const headers = table.getHeaderGroups().flatMap(hg =>
-			hg.headers.filter(h => !h.isPlaceholder && h.id !== 'select')
-				.map(h => typeof h.column.columnDef.header === 'string' ? h.column.columnDef.header : h.id)
+		// useVirtualWindow 가 켜진 큰 데이터셋에서는 table 인스턴스의 row 가
+		// windowed slice (300~500개) 만 가지므로, Ctrl-A 전체 복사는 원본 data
+		// 배열에서 직접 값을 뽑아야 한다.
+		const visibleColDefs = columns.filter((c) => {
+			const id = (c as { id?: string; accessorKey?: string }).id
+				?? (c as { accessorKey?: string }).accessorKey;
+			return id !== 'select';
+		});
+		const headerOf = (c: ColumnDef<TData, unknown>): string => {
+			const h = (c as { header?: unknown }).header;
+			if (typeof h === 'string') return h;
+			const id = (c as { id?: string; accessorKey?: string }).id
+				?? (c as { accessorKey?: string }).accessorKey
+				?? '';
+			return id;
+		};
+		const valueOf = (c: ColumnDef<TData, unknown>, row: TData): unknown => {
+			const af = (c as { accessorFn?: (row: TData, idx: number) => unknown }).accessorFn;
+			if (typeof af === 'function') return af(row, 0);
+			const ak = (c as { accessorKey?: string }).accessorKey;
+			if (ak) {
+				const parts = ak.split('.');
+				let v: unknown = row;
+				for (const p of parts) {
+					if (v == null) return '';
+					v = (v as Record<string, unknown>)[p];
+				}
+				return v;
+			}
+			return '';
+		};
+		const headers = visibleColDefs.map(headerOf);
+		const lines = data.map((row) =>
+			visibleColDefs.map((c) => cellCopyText(c, row, valueOf(c, row))).join('\t')
 		);
-		const rows = visibleRows.map(row =>
-			row.getVisibleCells()
-				.filter(cell => cell.column.id !== 'select')
-				.map(cell => cell.getValue() ?? '')
-				.join('\t')
-		);
-		return [headers.join('\t'), ...rows].join('\n');
+		return [headers.join('\t'), ...lines].join('\n');
 	}
 
 	function parseCellPos(td: HTMLElement): {row: number, col: number} | null {
@@ -444,6 +490,12 @@
 			anchorPos = null;
 			currentPos = null;
 			window.dispatchEvent(new CustomEvent('datatable-select-all', { detail: tableInstanceId }));
+			// Ctrl-A 한 번으로 전체 데이터 클립보드 복사 (Ctrl-C 별도 필요 없음).
+			const text = getTableTsv();
+			navigator.clipboard.writeText(text).then(() => {
+				copiedAll = true;
+				setTimeout(() => { copiedAll = false; }, 800);
+			}).catch(() => {});
 			return;
 		}
 		if ((e.ctrlKey || e.metaKey) && e.key === 'c' && (selectedCells.size > 0 || selectAll)) {
