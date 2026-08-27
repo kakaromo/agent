@@ -9,7 +9,9 @@
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
 	import BehaviorTimeline from './BehaviorTimeline.svelte';
-	import { columnsFor } from './rawDataColumns.js';
+	import { columnsFor, displayValue, isHexDisplay, rowMatchesFilters, type ColumnFilter } from './rawDataColumns.js';
+	import ColumnFilterHeader from './trace/ColumnFilterHeader.svelte';
+	import { renderComponent } from '$lib/components/ui/data-table/index.js';
 	// 차트·통계·Behavior 가 **같은 분류기**를 쓰도록 공유 모듈에서 가져온다.
 	// 예전엔 이 파일 안에 사본이 있어 차트 색과 Behavior 색이 갈릴 수 있었다.
 	import { getCmdGroup } from './trace/cmdColors.js';
@@ -737,8 +739,95 @@
 		};
 	}
 
+	// ── Raw Data 컬럼 필터 ──────────────────────────────────────────────
+	//
+	// 이벤트를 전부 클라이언트에 들고 있으므로 여기서 거른다 (서버 왕복 없음).
+	let columnFilters = $state<ColumnFilter[]>([]);
+
+	function filterFor(col: string): ColumnFilter | null {
+		return columnFilters.find((c) => c.column === col) ?? null;
+	}
+	function setColumnFilter(col: string, next: ColumnFilter | null) {
+		const rest = columnFilters.filter((c) => c.column !== col);
+		columnFilters = next ? [...rest, next] : rest;
+	}
+
+	// job / trace type 이 바뀌면 필터를 버린다 — 컬럼 구성이 달라지면
+	// 남은 필터가 없는 컬럼을 가리켜 "행이 왜 0 이지" 가 된다.
+	$effect(() => {
+		void activeTraceType;
+		void activeJobIds;
+		if (columnFilters.length > 0) columnFilters = [];
+	});
+
+	const rawTableType = $derived(activeTraceType ?? 'ufs');
+
+	/** 필터 후보 — 지금 표에 실제로 있는 값만. 너무 많으면 직접 입력이 낫다. */
+	function suggestionsFor(col: string): string[] {
+		const seen = new Set<string>();
+		for (const r of filteredEvents as unknown as Record<string, unknown>[]) {
+			const v = displayValue(rawTableType, col, r);
+			if (v === '') continue;
+			seen.add(v);
+			if (seen.size > 40) return [];
+		}
+		return [...seen].sort().slice(0, 24);
+	}
+
+	/** 숫자 컬럼이면 '범위' 를 기본 연산자로. hex 표기는 제외(0x2a 는 범위에 못 넣는다). */
+	function isNumericHint(col: string): boolean {
+		if (isHexDisplay(rawTableType, col)) return false;
+		for (const r of filteredEvents as unknown as Record<string, unknown>[]) {
+			const v = r[col];
+			if (v == null || v === '') continue;
+			return typeof v === 'number';
+		}
+		return false;
+	}
+
+	/** 값이 긴 컬럼(경로·파일명)은 '포함' 이 기본. */
+	function isLongTextHint(col: string): boolean {
+		let n = 0, long = 0;
+		for (const r of filteredEvents as unknown as Record<string, unknown>[]) {
+			const v = r[col];
+			if (v == null || v === '' || typeof v === 'number') continue;
+			n++;
+			if (String(v).length >= 24) long++;
+			if (n >= 20) break;
+		}
+		return n > 0 && long * 2 > n;
+	}
+
+	/** 컬럼 헤더에 필터 버튼을 단다. */
+	const rawColumns = $derived.by(() =>
+		columnsFor(rawTableType).map((c) => {
+			const key = (c as { accessorKey?: string }).accessorKey;
+			if (!key) return c;
+			const label = typeof c.header === 'string' ? c.header : key;
+			return {
+				...c,
+				// ⚠ FlexRender 는 문자열 또는 **함수**만 렌더한다. renderComponent 결과를
+				// 그대로 두면 둘 다 아니라서 헤더가 통째로 빈칸이 된다.
+				header: () =>
+					renderComponent(ColumnFilterHeader, {
+						label,
+						column: key,
+						get numericHint() { return isNumericHint(key); },
+						get longTextHint() { return isLongTextHint(key); },
+						get current() { return filterFor(key); },
+						get suggestions() { return suggestionsFor(key); },
+						onApply: (next: ColumnFilter | null) => setColumnFilter(key, next)
+					})
+			} as unknown as (typeof c);
+		})
+	);
+
 	// Raw Data 표에 넘길 행. DataTable 이 컬럼 정의의 키로 값을 뽑는다.
-	const tableRows = $derived(filteredEvents as unknown as Record<string, unknown>[]);
+	const tableRows = $derived.by(() => {
+		const rows = filteredEvents as unknown as Record<string, unknown>[];
+		if (columnFilters.length === 0) return rows;
+		return rows.filter((r) => rowMatchesFilters(rawTableType, r, columnFilters));
+	});
 
 
 	// cmd 색상·그룹 분류는 './trace/cmdColors.js' 가 갖는다 (차트와 같은 기준).
@@ -1415,9 +1504,11 @@
 								{tableRows.length.toLocaleString()} 행
 								<!-- 행이 줄어든 이유를 **항상** 밝힌다. 안 그러면 필터가 걸린 표를
 								     "데이터가 안 나온다" 로 읽게 된다. -->
-								{#if tableRows.length < slicedEvents.length}
-									· {slicedEvents.length.toLocaleString()} 중
-									{activeActionTab === 'send' ? 'Send' : 'Complete'} 만
+								{#if activeActionTab !== 'all'}
+									· {activeActionTab === 'send' ? 'Send' : 'Complete'} 만
+								{/if}
+								{#if columnFilters.length > 0}
+									· {filteredEvents.length.toLocaleString()} 중 필터
 								{/if}
 								{#if zoomRange}· 선택 구간만{/if}
 								{#if rawResult.isSampled}
@@ -1444,9 +1535,39 @@
 								셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사
 							</div>
 						</div>
+						{#if columnFilters.length > 0}
+							<!-- 적용된 필터를 칩으로 노출. 헤더 아이콘만으로는 가로 스크롤
+							     밖의 필터를 놓쳐 "행이 왜 이것뿐이지" 로 이어진다. -->
+							<div class="mb-1 flex flex-wrap items-center gap-1">
+								{#each columnFilters as cf (cf.column)}
+									<button
+										class="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-[10px] hover:bg-blue-500/20 transition-colors"
+										title="클릭해서 해제"
+										onclick={() => setColumnFilter(cf.column, null)}
+									>
+										<span class="font-medium">{cf.column}</span>
+										<span class="text-muted-foreground">
+											{cf.op === 'IN' ? '=' : cf.op === 'NOT_IN' ? '≠' : cf.op === 'CONTAINS' ? '⊃' : ''}
+											{cf.op === 'RANGE'
+												? `${cf.values[0] || '-∞'}~${cf.values[1] || '∞'}`
+												: cf.values.join(', ')}
+										</span>
+										<XIcon class="size-2.5" />
+									</button>
+								{/each}
+								{#if columnFilters.length > 1}
+									<button
+										class="text-[10px] text-muted-foreground hover:text-foreground underline"
+										onclick={() => (columnFilters = [])}
+									>
+										전체 해제
+									</button>
+								{/if}
+							</div>
+						{/if}
 						<DataTable
 							data={tableRows}
-							columns={columnsFor(activeTraceType ?? 'ufs')}
+							columns={rawColumns}
 							enableCellCopy={true}
 							showPagination={false}
 							compact

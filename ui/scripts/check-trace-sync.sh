@@ -22,7 +22,8 @@ normalize() {
 }
 
 rc=0
-for f in cmdColors.ts TraceChartView.svelte TraceStatsView.svelte BoundaryLegend.svelte; do
+for f in cmdColors.ts TraceChartView.svelte TraceStatsView.svelte BoundaryLegend.svelte \
+         ColumnFilterHeader.svelte ColumnFilterPopover.svelte; do
   if [ ! -f "$PORTAL/$f" ]; then echo "WARN 원본 없음: $f"; continue; fi
   if diff -q <(normalize "$PORTAL/$f") "$HERE/$f" >/dev/null; then
     echo "OK   $f"

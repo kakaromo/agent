@@ -108,3 +108,20 @@ export type StatsResponse = {
 	 */
 	mgmtStats?: StatsMgmt[];
 };
+
+/**
+ * Raw Data 의 컬럼 필터.
+ *
+ * ⚠ portal 은 이걸 **서버로 보낸다**(parquet 을 1000행씩 서버 페이징하므로 로드된
+ * 행만 걸러선 안 된다). standalone 은 `/trace/raw` 가 이벤트를 **한 번에 다** 주므로
+ * 클라이언트에서 거른다 — 왕복이 없어 즉시 반영되고, 뒤쪽 페이지를 놓칠 위험도 없다.
+ * 그래서 타입만 공유하고 적용은 각자 한다.
+ */
+export type ColumnFilterOp = 'IN' | 'NOT_IN' | 'CONTAINS' | 'RANGE';
+
+export type ColumnFilter = {
+	column: string;
+	op: ColumnFilterOp;
+	/** IN/NOT_IN 은 전체, CONTAINS 는 [0], RANGE 는 [min, max] (빈 문자열 = 무제한) */
+	values: string[];
+};

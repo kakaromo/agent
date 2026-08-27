@@ -19,11 +19,19 @@ const strFmt = (v: unknown) => (v == null ? '' : String(v));
 // 건 "예외적으로 참인 행" 을 눈에 띄게 하는 것이다.
 const boolFmt = (v: unknown) => (v === true || v === 'true' ? 'Y' : '');
 
-const hexFmt = (digits: number) => (v: unknown) => {
-	if (v == null) return '';
-	const n = typeof v === 'number' ? v : Number(v);
-	if (!Number.isFinite(n)) return '';
-	return '0x' + n.toString(16).padStart(digits, '0');
+// 화면 표기가 hex 인 컬럼 집합. 필터가 "범위" 연산자를 먼저 보여줄지 판단하는 데 쓴다 —
+// 사용자가 보는 값(0x2a)은 범위 입력에 넣을 수 있는 모양이 아니다.
+const HEX_FMTS = new Set<(v: unknown) => string>();
+
+const hexFmt = (digits: number) => {
+	const f = (v: unknown) => {
+		if (v == null) return '';
+		const n = typeof v === 'number' ? v : Number(v);
+		if (!Number.isFinite(n)) return '';
+		return '0x' + n.toString(16).padStart(digits, '0');
+	};
+	HEX_FMTS.add(f);
+	return f;
 };
 
 function col(key: string, header: string, fmt: (v: unknown) => string, w = 110): ColumnDef<AnyRow> {
@@ -33,7 +41,7 @@ function col(key: string, header: string, fmt: (v: unknown) => string, w = 110):
 		cell: ({ row }) => fmt((row.original as AnyRow)[key]),
 		// 복사도 화면과 같은 표기로 (hex 는 0x28, time 은 자리수 고정).
 		// 없으면 DataTable 이 raw 값을 복사해 opcode 가 40, time 이 2.785376214 로 붙는다.
-		meta: { copyText: (row: AnyRow) => fmt(row[key]) },
+		meta: { copyText: (row: AnyRow) => fmt(row[key]), hex: HEX_FMTS.has(fmt) },
 		size: w
 	};
 }
@@ -284,4 +292,73 @@ export function columnsFor(traceType: string): ColumnDef<AnyRow>[] {
 		default:
 			return ufsColumns;
 	}
+}
+
+// ── Raw Data 컬럼 필터 (클라이언트) ──────────────────────────────────────
+//
+// portal 은 같은 UI 를 쓰되 필터를 **서버로 보낸다**(parquet 을 페이징하므로 로드된
+// 행만 걸러선 안 된다). standalone 은 `/trace/raw` 가 이벤트를 한 번에 다 주므로
+// 여기서 거른다 — 왕복이 없어 즉시 반영되고 뒤쪽 페이지를 놓칠 위험도 없다.
+
+/**
+ * 한 행·한 컬럼의 **화면 표시값**. 필터는 이 값으로 판정한다.
+ *
+ * ⚠ raw 값으로 비교하면 안 된다 — 화면엔 `0x2a` 인데 raw 는 `42` 라서,
+ * 보이는 대로 `0x2a` 를 입력하면 아무것도 안 걸린다.
+ */
+export function displayValue(traceType: string, column: string, row: AnyRow): string {
+	const c = columnsFor(traceType).find(
+		(d) => (d as { accessorKey?: string }).accessorKey === column
+	);
+	const copy = (c?.meta as { copyText?: (r: AnyRow) => string } | undefined)?.copyText;
+	if (copy) return copy(row);
+	const v = row[column];
+	return v == null ? '' : String(v);
+}
+
+/** 화면 표기가 hex 인 컬럼인가 — '범위' 연산자를 기본으로 보여줄지 판단용. */
+export function isHexDisplay(traceType: string, column: string): boolean {
+	const c = columnsFor(traceType).find(
+		(d) => (d as { accessorKey?: string }).accessorKey === column
+	);
+	return !!(c?.meta as { hex?: boolean } | undefined)?.hex;
+}
+
+export type ColumnFilterOp = 'IN' | 'NOT_IN' | 'CONTAINS' | 'RANGE';
+export type ColumnFilter = { column: string; op: ColumnFilterOp; values: string[] };
+
+/**
+ * 한 행이 필터 전부를 통과하는가 (AND 결합).
+ *
+ * RANGE 만 raw 숫자로 비교한다 — 크기 비교는 표시 문자열로는 뜻이 없기 때문이다
+ * ("10" < "9"). 나머지는 표시값 기준이라 눈에 보이는 대로 걸린다.
+ */
+export function rowMatchesFilters(
+	traceType: string,
+	row: AnyRow,
+	filters: ColumnFilter[]
+): boolean {
+	for (const f of filters) {
+		if (f.op === 'RANGE') {
+			const n = Number(row[f.column]);
+			if (!Number.isFinite(n)) return false;
+			const lo = f.values[0] === '' ? null : Number(f.values[0]);
+			const hi = f.values[1] === '' ? null : Number(f.values[1]);
+			if (lo != null && Number.isFinite(lo) && n < lo) return false;
+			if (hi != null && Number.isFinite(hi) && n > hi) return false;
+			continue;
+		}
+		const shown = displayValue(traceType, f.column, row);
+		if (f.op === 'CONTAINS') {
+			const needle = (f.values[0] ?? '').toLowerCase();
+			if (needle && !shown.toLowerCase().includes(needle)) return false;
+			continue;
+		}
+		// IN / NOT_IN — 표시값 완전 일치. 대소문자는 무시한다(0X2A 로 쳐도 걸리게).
+		const set = f.values.map((v) => v.toLowerCase());
+		if (set.length === 0) continue; // 값이 없는 필터는 없는 셈
+		const hit = set.includes(shown.toLowerCase());
+		if (f.op === 'IN' ? !hit : hit) return false;
+	}
+	return true;
 }

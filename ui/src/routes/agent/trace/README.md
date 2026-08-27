@@ -35,6 +35,8 @@ Trace 분석 화면은 세 벌 존재하고(**portal `/trace`**, portal `/agent`
 | `TraceChartView.svelte` | `routes/trace/TraceChartView.svelte` | `StepBoundary`, `ChartMeta` |
 | `TraceStatsView.svelte` | `routes/trace/TraceStatsView.svelte` | `Stats*` |
 | `BoundaryLegend.svelte` | `routes/trace/BoundaryLegend.svelte` | `StepBoundary` |
+| `ColumnFilterHeader.svelte` | `routes/trace/ColumnFilterHeader.svelte` | `ColumnFilter` |
+| `ColumnFilterPopover.svelte` | `routes/trace/ColumnFilterPopover.svelte` | `ColumnFilter` |
 | `types.ts` | (사본 아님 — standalone 전용) | — |
 
 ## 드리프트 확인
