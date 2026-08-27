@@ -412,6 +412,16 @@ export interface TraceFilter {
 export interface LatencyStats {
 	min: number; max: number; avg: number; stddev: number; median: number;
 	p99: number; p999: number; p9999: number; p99999: number; p999999: number;
+	/**
+	 * 집계에 실제로 쓰인 행 수(모수).
+	 *
+	 * optional 인 이유 — 구버전 agent 는 이 필드를 안 보낸다. 그때는 표가 '-' 를
+	 * 그려야 한다. **0 으로 채우면 안 된다**: 0 은 "0ms" 도 "없음" 도 아니고
+	 * "모름" 인데, 0 을 넣으면 "집계 대상이 없다" 는 틀린 사실이 된다.
+	 * totalEvents-sendCount 같은 것으로 **짐작해서도 안 된다** — 필터를 걸면
+	 * 실제 모수는 줄어드는데 짐작은 그대로라 조용히 틀린 수가 나온다.
+	 */
+	count?: number;
 }
 
 export interface CmdStatsItem {
