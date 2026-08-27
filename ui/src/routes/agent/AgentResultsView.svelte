@@ -220,6 +220,15 @@
 		confirmOpen = true;
 	}
 
+	/**
+	 * 성공률 표시. API 는 비율(0~1)로 준다 (docs/05-rest-api.md: "successRate":0.0556).
+	 * 그대로 뿌리면 54.7% 가 "0.5471698113207547%" 로 나온다.
+	 */
+	function formatSuccessRate(ratio: number): string {
+		if (!Number.isFinite(ratio)) return '-';
+		return `${(ratio * 100).toFixed(1)}%`;
+	}
+
 	function parseDeviceCount(deviceIds: string): number {
 		try { return JSON.parse(deviceIds).length; } catch { return 0; }
 	}
@@ -287,7 +296,7 @@
 				<span>총 {stats.total}건</span>
 				<span class="text-green-600">{stats.completed} 성공</span>
 				<span class="text-red-600">{stats.failed} 실패</span>
-				<span>성공률 {stats.successRate}%</span>
+				<span>성공률 {formatSuccessRate(stats.successRate)}</span>
 			</div>
 		{/if}
 	</div>
