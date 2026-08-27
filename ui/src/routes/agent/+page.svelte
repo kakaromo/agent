@@ -10,7 +10,8 @@
 		type JobProgress,
 		type DeviceMetricsData,
 		type StepBoundary,
-		fetchExecutions
+		fetchExecutions,
+		fetchExecutionByJobId
 	} from '$lib/api/agent.js';
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -553,11 +554,22 @@
 		saveHistory();
 	}
 
-	function viewResult(serverId: number, jobId: string) {
-		// trace job이면 trace 시트로 바로 열기
+	async function viewResult(serverId: number, jobId: string, knownType?: string) {
+		// 잡 종류 판별 우선순위: 호출부가 준 서버 레코드 → 활성 잡 → localStorage.
+		//
+		// ⚠ localStorage(jobHistory)를 **유일한 출처로 쓰면 안 된다.** 거기엔 이
+		// 브라우저에서 시작한 잡만 들어있어서, 다른 세션/PC 에서 돌린 trace 잡은
+		// 타입 판별에 실패하고 benchmark 상세("결과 데이터가 없습니다")로 열렸다.
+		// fsio 결과가 "안 나온다" 던 것의 정체가 이것이다 — Raw Data 화면에 도달조차
+		// 못 했다. 셋 다 모르면 서버에 직접 물어본다.
 		const record = jobHistory.find(j => j.jobId === jobId);
 		const active = activeJobs.find(j => j.jobId === jobId);
-		const jobType = record?.type ?? active?.type;
+		let jobType = knownType ?? record?.type ?? active?.type;
+		if (!jobType) {
+			try {
+				jobType = (await fetchExecutionByJobId(jobId))?.type;
+			} catch { /* 조회 실패 시 아래 기본 경로(benchmark 상세)로 */ }
+		}
 
 		if (jobType === 'trace') {
 			viewingServerId = serverId;

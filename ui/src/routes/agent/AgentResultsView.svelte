@@ -22,7 +22,12 @@
 	interface Props {
 		jobHistory: JobRecord[]; // 활성 job용 (localStorage, 하위 호환)
 		serverId: number | null;
-		onViewDetail: (serverId: number, jobId: string) => void;
+		// jobType 은 서버 레코드(executions)의 값이다.
+		// 예전엔 안 넘겨서 호출부가 localStorage(jobHistory)로 타입을 되찾았는데,
+		// 그 목록엔 **이 브라우저에서 시작한 잡만** 들어있다. 다른 세션/PC 에서 돌린
+		// trace 잡은 타입 판별에 실패해 benchmark 상세로 열렸다 — fsio 결과가
+		// "안 나온다" 의 정체가 이것이었다.
+		onViewDetail: (serverId: number, jobId: string, jobType?: string) => void;
 		onDeleteJob: (jobId: string, serverId: number) => void;
 	}
 
@@ -300,7 +305,7 @@
 				{#each executions as j (j.id)}
 					<Table.Row
 						class="text-xs cursor-pointer hover:bg-muted/50"
-						onclick={() => onViewDetail(j.serverId, j.jobId)}
+						onclick={() => onViewDetail(j.serverId, j.jobId, j.type)}
 					>
 						<Table.Cell>
 							<div class="flex items-center gap-1">
@@ -347,7 +352,7 @@
 						<Table.Cell>
 							<div class="flex items-center gap-0.5">
 								<button
-									onclick={(e) => { e.stopPropagation(); onViewDetail(j.serverId, j.jobId); }}
+									onclick={(e) => { e.stopPropagation(); onViewDetail(j.serverId, j.jobId, j.type); }}
 									class="p-0.5 rounded hover:bg-muted"
 									title="상세 보기"
 								>

@@ -516,6 +516,37 @@ export interface TraceEvent {
 	dtoc: number; ctod: number; ctoc: number;
 	cmd: string; size: number; continuous: boolean;
 	action: string;  // "send_req"/"complete_rsp" (UFS) or "block_rq_issue"/"block_rq_complete" (Block)
+
+	// ── 아래는 fsio_*(bpftrace) 산출물에만 채워진다. ftrace 잡에서는 undefined. ──
+	//
+	// 서버는 예전부터 이 값들을 다 보내고 있었는데 여기 타입이 11개 필드에서 멈춰
+	// 있었다. 런타임엔 그대로 들어오니 표는 그려지지만, TS 로는 존재하지 않는
+	// 필드라 "백엔드가 안 보내나" 로 오해하기 쉽다. 계약을 실제 응답에 맞춘다.
+	aligned?: boolean;
+	line_number?: number;
+	pid?: number;
+	tid?: number;
+	comm?: string;
+	process?: string;   // comm 별칭 (표의 process 컬럼)
+	syscall?: string;
+	fs?: string;
+	ino?: number;
+	name?: string;      // 풀패스 / "ino:N" / "(라벨)"
+	io_flags?: string;  // u64 라 문자열로 온다 (JSON number 는 2^53 초과분이 깨진다)
+
+	// fsio_ufs 전용
+	tag?: number; opcode?: number; lun?: number; groupid?: number; hwqid?: number;
+	txn?: number; upiu_flags?: number; upiu_func?: number; upiu_attr?: string; upiu_cp?: number;
+	is_mgmt?: boolean; mgmt_name?: string;
+	upiu_resp?: number; upiu_status?: number;
+	query_opcode?: number; query_idn?: number; query_index?: number; query_selector?: number;
+	uic_cmd?: number;
+
+	// fsio_block 전용
+	devmajor?: number; devminor?: number; rwbs?: string; flags?: string; extra?: number; sector?: number;
+
+	// 미완결 IO — 이 행의 dtoc 0 은 "0ms" 가 아니라 "모름" 이다.
+	is_unfinished?: boolean;
 }
 
 export interface TraceRawDataResult {
