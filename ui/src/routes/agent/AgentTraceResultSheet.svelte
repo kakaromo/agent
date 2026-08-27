@@ -1421,7 +1421,22 @@
 								{/if}
 								{#if activeTraceType}· {activeTraceType}{/if}
 							</div>
-							<div class="text-[9px] text-muted-foreground ml-auto">
+							<!-- Send / Complete / All.
+							     예전엔 Charts 탭에 있었는데, 그 자리는 TraceChartView 가
+							     자체 탭을 갖고 있어 사라졌다. Raw Data 와 Behavior 는 이
+							     선택을 따르므로 여기 둔다 — 없으면 'complete' 에 갇힌다. -->
+							<div class="flex gap-0.5 ml-auto">
+								{#each ['send', 'complete', 'all'] as tab}
+									<button
+										onclick={() => (activeActionTab = tab)}
+										class="px-2 py-0.5 rounded text-[9px] transition-colors
+											{activeActionTab === tab ? 'bg-primary text-primary-foreground' : 'border hover:bg-muted'}"
+									>
+										{tab === 'send' ? 'Send' : tab === 'complete' ? 'Complete' : 'All'}
+									</button>
+								{/each}
+							</div>
+							<div class="text-[9px] text-muted-foreground">
 								셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사
 							</div>
 						</div>
