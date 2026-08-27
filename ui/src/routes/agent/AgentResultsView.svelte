@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Table from '$lib/components/ui/table/index.js';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
 	import { btnIcon } from '$lib/styles/common.js';
 	import { getJobStatus, deleteJob, fetchExecutions, deleteExecution, fetchExecutionStats, openLocalFolder, type JobExecutionRecord } from '$lib/api/agent.js';
@@ -55,6 +56,29 @@
 	// 통계
 	let stats = $state<{ total: number; completed: number; failed: number; successRate: number } | null>(null);
 
+	// 선택 (일괄 삭제용). 현재 페이지 기준 — 페이지 이동/필터 변경 시 초기화한다.
+	let selectedIds = $state<Set<number>>(new SvelteSet());
+	let bulkDeleting = $state(false);
+
+	const selectedCount = $derived(selectedIds.size);
+	// 헤더 체크박스 상태. 현재 페이지가 전부 선택됐는지로 판정한다.
+	const allSelected = $derived(executions.length > 0 && executions.every((j) => selectedIds.has(j.id)));
+
+	function clearSelection() {
+		selectedIds = new SvelteSet();
+	}
+
+	function toggleOne(id: number) {
+		// SvelteSet 은 mutate 로 반응성이 전파된다.
+		if (selectedIds.has(id)) selectedIds.delete(id);
+		else selectedIds.add(id);
+	}
+
+	function toggleAll() {
+		if (allSelected) clearSelection();
+		else selectedIds = new SvelteSet(executions.map((j) => j.id));
+	}
+
 	$effect(() => {
 		if (serverId != null) {
 			loadExecutions();
@@ -80,6 +104,8 @@
 			executions = [];
 		} finally {
 			loading = false;
+			// 목록이 바뀌면 선택은 무효 — 안 지우면 화면에 없는 행이 삭제 대상으로 남는다.
+			clearSelection();
 		}
 	}
 
@@ -144,9 +170,7 @@
 		confirmDesc = `Job ${j.jobId.slice(0, 8)}… 을 삭제하시겠습니까?`;
 		confirmAction = async () => {
 			try {
-				await deleteExecution(j.id);
-				try { await deleteJob(j.serverId, j.jobId); } catch { /* Go Agent에서 이미 삭제됐을 수 있음 */ }
-				onDeleteJob(j.jobId, j.serverId);
+				await deleteOne(j);
 				toast.success('삭제되었습니다');
 				loadExecutions();
 				loadStats();
@@ -154,6 +178,44 @@
 				toast.error('삭제 실패');
 			}
 			confirmOpen = false;
+		};
+		confirmOpen = true;
+	}
+
+	/** 한 건 삭제. 일괄 삭제와 단건 삭제가 공유한다. 실패하면 throw 해서 호출부가 집계한다. */
+	async function deleteOne(j: JobExecutionRecord) {
+		await deleteExecution(j.id);
+		try { await deleteJob(j.serverId, j.jobId); } catch { /* Go Agent에서 이미 삭제됐을 수 있음 */ }
+		onDeleteJob(j.jobId, j.serverId);
+	}
+
+	function requestBulkDelete() {
+		const targets = executions.filter((j) => selectedIds.has(j.id));
+		if (targets.length === 0) return;
+		confirmDesc = `선택한 ${targets.length}건을 삭제하시겠습니까?`;
+		confirmAction = async () => {
+			confirmOpen = false;
+			bulkDeleting = true;
+			// 순차 삭제. 동시에 던지면 SQLite 쓰기 경합 + agent 측 부하가 겹친다.
+			// 한 건 실패해도 나머지는 계속 진행하고, 끝에 실패 건수를 보고한다.
+			let failed = 0;
+			for (const j of targets) {
+				try {
+					await deleteOne(j);
+				} catch {
+					failed++;
+				}
+			}
+			bulkDeleting = false;
+			if (failed === 0) toast.success(`${targets.length}건 삭제되었습니다`);
+			else if (failed === targets.length) toast.error('삭제 실패');
+			else toast.warning(`${targets.length - failed}건 삭제, ${failed}건 실패`);
+			// 마지막 페이지를 통째로 지우면 그 페이지가 사라진다 — 범위를 넘지 않게 되돌린다.
+			const remaining = Math.max(0, totalElements - (targets.length - failed));
+			const lastPage = Math.max(0, Math.ceil(remaining / 30) - 1);
+			if (currentPage > lastPage) currentPage = lastPage;
+			loadExecutions();
+			loadStats();
 		};
 		confirmOpen = true;
 	}
@@ -282,6 +344,32 @@
 		</div>
 	{/if}
 
+	<!-- 선택 액션 바 -->
+	{#if selectedCount > 0}
+		<div class="flex items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-[10px]">
+			<span class="font-medium">{selectedCount}건 선택됨</span>
+			<button
+				onclick={requestBulkDelete}
+				disabled={bulkDeleting}
+				class="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-0.5 text-red-600 hover:bg-red-50 disabled:opacity-50"
+			>
+				{#if bulkDeleting}
+					<LoaderIcon class="size-3 animate-spin" />
+				{:else}
+					<TrashIcon class="size-3" />
+				{/if}
+				선택 삭제
+			</button>
+			<button
+				onclick={clearSelection}
+				disabled={bulkDeleting}
+				class="text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+			>
+				선택 해제
+			</button>
+		</div>
+	{/if}
+
 	<!-- Results table -->
 	{#if loading}
 		<div class="flex items-center justify-center py-12">
@@ -291,6 +379,16 @@
 		<Table.Root>
 			<Table.Header>
 				<Table.Row class="text-[10px]">
+					<Table.Head class="w-8">
+						<input
+							type="checkbox"
+							class="size-3 cursor-pointer align-middle"
+							checked={allSelected}
+							indeterminate={selectedCount > 0 && !allSelected}
+							onchange={toggleAll}
+							title="현재 페이지 전체 선택"
+						/>
+					</Table.Head>
 					<Table.Head>Job ID</Table.Head>
 					<Table.Head>Type</Table.Head>
 					<Table.Head>Tool/Name</Table.Head>
@@ -307,6 +405,14 @@
 						class="text-xs cursor-pointer hover:bg-muted/50"
 						onclick={() => onViewDetail(j.serverId, j.jobId, j.type)}
 					>
+						<Table.Cell onclick={(e: MouseEvent) => e.stopPropagation()}>
+							<input
+								type="checkbox"
+								class="size-3 cursor-pointer align-middle"
+								checked={selectedIds.has(j.id)}
+								onchange={() => toggleOne(j.id)}
+							/>
+						</Table.Cell>
 						<Table.Cell>
 							<div class="flex items-center gap-1">
 								<span class="font-mono text-[10px]" title={j.jobId}>{j.jobId.slice(0, 8)}</span>
