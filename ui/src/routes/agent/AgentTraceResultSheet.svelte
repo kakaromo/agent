@@ -83,7 +83,8 @@
 			b.finishedMono > b.startedMono &&
 			b.startedMono > 0 &&
 			!BOUNDARY_SKIP_TYPES.has(b.type) &&
-			(selectedLoop <= 0 || b.loopIndex === selectedLoop)
+			(selectedLoop <= 0 || b.loopIndex === selectedLoop) &&
+			(selectedRepeat <= 0 || b.repeatIndex === selectedRepeat)
 		)
 	);
 
@@ -226,10 +227,33 @@
 		}
 		return [...set].sort((a, b) => a - b);
 	});
-	// 실제 조회에 쓸 jobIds — loop 선택 시 해당 loop 의 traceJobId 만.
+
+	// ── Repeat 필터 ──
+	//
+	// repeat 는 시나리오 **전체를 처음부터 다시** 돌리므로 trace_start/stop 도 매 회차
+	// 다시 실행된다 → 회차마다 traceJobId 가 따로 생긴다. 그런데 시트는 그 job 들을
+	// 한꺼번에 받아 합산하므로, 3회 반복을 봐도 화면엔 "합쳐진 하나"만 나왔다.
+	// 워밍업 효과(1회차 콜드 read 폭발 → 2회차부터 급감)가 평균에 묻혀 안 보인다.
+	//
+	// selectedRepeat: 0 = 전체, 그 외 = 해당 repeatIndex 만.
+	let selectedRepeat = $state(0);
+	const repeatOptions = $derived.by(() => {
+		const set = new Set<number>();
+		for (const m of mappings) {
+			if (m.repeatIndex && m.repeatIndex > 0) set.add(m.repeatIndex);
+		}
+		return [...set].sort((a, b) => a - b);
+	});
+
+	// 실제 조회에 쓸 jobIds — loop/repeat 선택 시 해당 회차의 traceJobId 만.
+	// 두 필터는 AND 로 걸린다(선택된 것만 적용).
 	const activeJobIds = $derived.by(() => {
-		if (selectedLoop <= 0 || mappings.length === 0) return jobIds;
-		const ids = mappings.filter(m => m.loopIndex === selectedLoop).map(m => m.traceJobId);
+		if (mappings.length === 0) return jobIds;
+		if (selectedLoop <= 0 && selectedRepeat <= 0) return jobIds;
+		const ids = mappings
+			.filter(m => (selectedLoop <= 0 || m.loopIndex === selectedLoop))
+			.filter(m => (selectedRepeat <= 0 || m.repeatIndex === selectedRepeat))
+			.map(m => m.traceJobId);
 		return ids.length > 0 ? ids : jobIds;
 	});
 
@@ -381,7 +405,7 @@
 	});
 	const isFsio = $derived(activeTraceType === 'fsio_ufs' || activeTraceType === 'fsio_block');
 
-	// 다른 job 의 trace 를 열면 loop 선택을 초기화한다 (이전 job 의 Loop N 잔존 방지).
+	// 다른 job 의 trace 를 열면 loop/repeat 선택을 초기화한다 (이전 job 의 선택 잔존 방지).
 	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
 	let lastFirstJob = $state('');
 	$effect(() => {
@@ -389,6 +413,7 @@
 		if (first !== lastFirstJob) {
 			lastFirstJob = first;
 			selectedLoop = 0;
+			selectedRepeat = 0;
 			// ⚠ 구간 선택도 함께 비운다. boundaryKey 는 위치 기반(stepIndex-loop-repeat-i)이라
 			// **잡이 달라도 키가 겹친다** — 안 지우면 시나리오 A 에서 숨긴 스텝이 B 에도
 			// 적용돼, 아무 조작 없이 연 화면이 이미 일부 구간만 보고 있게 된다.
@@ -1231,6 +1256,18 @@
 							<button
 								class="px-1.5 py-0.5 rounded text-[10px] transition-colors {selectedLoop === lp ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'hover:bg-muted'}"
 								onclick={() => selectedLoop = lp}>Loop {lp}</button>
+						{/each}
+					</div>
+				{/if}
+				{#if repeatOptions.length > 1}
+					<div class="inline-flex items-center gap-0.5 rounded border p-0.5" title="반복 실행(repeat) 회차별로 나눠 보기">
+						<button
+							class="px-1.5 py-0.5 rounded text-[10px] transition-colors {selectedRepeat === 0 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'hover:bg-muted'}"
+							onclick={() => selectedRepeat = 0}>전체</button>
+						{#each repeatOptions as rp}
+							<button
+								class="px-1.5 py-0.5 rounded text-[10px] transition-colors {selectedRepeat === rp ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'hover:bg-muted'}"
+								onclick={() => selectedRepeat = rp}>#{rp}</button>
 						{/each}
 					</div>
 				{/if}
