@@ -239,7 +239,8 @@ export function protoToCanvas(
 			}
 
 			// extra params (formParams에 없는 것들)
-			const knownKeys = new Set(['use_file_from_step', 'delete_files_from_steps', 'path', 'trace', 'trace_type', 'config']);
+			// label 은 전용 입력칸(구간 이름)이 따로 있다 — extraText 로 새면 저장 시 중복된다.
+			const knownKeys = new Set(['use_file_from_step', 'delete_files_from_steps', 'path', 'trace', 'trace_type', 'config', 'label']);
 			const extraLines: string[] = [];
 			const formParams: Record<string, string> = {};
 			const basicOpts = getBasicOptions(tool);
@@ -288,6 +289,10 @@ export function protoToCanvas(
 				iotestConfig
 			};
 
+			// 공통 label(구간 이름) 복원 — 타입 분기와 무관하게 항상.
+			// (아래 분기들이 extraText 를 비우므로, 여기서 안 꺼내면 편집 시 사라진다.)
+			form.stepLabel = params.label ?? '';
+
 			// 요소 기반 탭 / 텍스트 입력 params 복원 (extraText 로 새지 않게 formParams/extraText 를 비운다)
 			if (s.type === 'tap_element') {
 				form.elementResourceId = params.element_resource_id ?? '';
@@ -307,6 +312,10 @@ export function protoToCanvas(
 				form.extraText = '';
 			} else if (s.type === 'key') {
 				form.keycode = params.keycode != null ? Number(params.keycode) : 4;
+				form.formParams = {};
+				form.extraText = '';
+			} else if (s.type === 'sleep') {
+				form.sleepSeconds = params.seconds != null ? Number(params.seconds) : 1;
 				form.formParams = {};
 				form.extraText = '';
 			} else if (s.type === 'stop_app') {
@@ -492,7 +501,24 @@ function topologicalSort(nodes: ScenarioNode[], edges: Edge[]): ScenarioNode[] {
 	return sorted;
 }
 
+/**
+ * buildStepParams — step 폼을 params 맵으로.
+ *
+ * 공통 label(구간 이름)은 여기서 한 번만 붙인다. 타입별 분기가 전부 early return 이라
+ * 각 분기에 넣으면 하나 빠뜨려도 조용히 라벨만 사라진다.
+ *
+ * 빈 값이면 키 자체를 넣지 않는다 — 실행부(describeStep)는 빈 값도 자동 요약으로
+ * 넘어가지만, 빈 키가 저장되면 시나리오 JSON 이 지저분해지고 contentHash 가 달라져
+ * export/import 중복 판정이 어긋난다.
+ */
 function buildStepParams(s: StepForm): Record<string, string> {
+	const params = buildStepParamsInner(s);
+	const lbl = (s.stepLabel ?? '').trim();
+	if (lbl) params.label = lbl;
+	return params;
+}
+
+function buildStepParamsInner(s: StepForm): Record<string, string> {
 	if (s.type === 'cleanup') {
 		const params: Record<string, string> = {};
 		if (s.cleanupMode === 'steps' && s.cleanupSteps.size > 0) {
@@ -529,6 +555,10 @@ function buildStepParams(s: StepForm): Record<string, string> {
 	// 키 이벤트 (뒤로/홈/제어)
 	if (s.type === 'key') {
 		return { keycode: String(s.keycode ?? 4) };
+	}
+
+	if (s.type === 'sleep') {
+		return { seconds: String(s.sleepSeconds ?? 1) };
 	}
 
 	// 텍스트 입력 (+ 입력 후 Enter)

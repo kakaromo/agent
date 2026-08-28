@@ -73,7 +73,8 @@ export function stepSummary(form: StepForm): string {
 		case 'iotest': return `${form.iotestConfig?.threads.length ?? 0} threads`;
 		case 'shell': return form.extraText.slice(0, 30) || 'shell';
 		case 'cleanup': return form.cleanupMode === 'all' ? '전체 삭제' : form.cleanupMode === 'steps' ? 'step 파일 삭제' : form.cleanupPath || '삭제';
-		case 'sleep': return `${form.extraText.replace('seconds=', '')}s`;
+		// 구간 이름을 붙였으면 그것을 보여준다 — 캔버스에서도 "무엇을 기다리는 중"인지 읽혀야 한다.
+		case 'sleep': return form.stepLabel?.trim() || `${form.sleepSeconds ?? 1}s`;
 		case 'trace_start': return `${form.formParams.trace_type ?? 'ufs'} trace`;
 		case 'trace_stop': return 'stop';
 		case 'launch_app': {

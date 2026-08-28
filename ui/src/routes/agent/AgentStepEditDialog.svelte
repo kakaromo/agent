@@ -68,6 +68,11 @@
 		keycode?: number;
 		// stop_app 스텝 (앱 완전 종료 — PIP 재생까지 중단)
 		stopPackage?: string;
+		// 모든 step 공통 — Behavior 타임라인 구간 이름 (params.label).
+		// 실행부(describeStep)가 타입과 무관하게 최우선으로 읽는다.
+		stepLabel?: string;
+		// sleep 스텝 (대기 — 영상 재생/다운로드 등 "기다리는 동안의 활동"을 표현)
+		sleepSeconds?: number;
 		// launch_app 스텝 (앱 깨끗하게 시작)
 		launchPackage?: string;
 		launchClearMode?: string;     // clear | cache | force_stop | none
@@ -266,6 +271,29 @@
 							</select>
 						</div>
 					{/if}
+				</div>
+
+				<!-- 구간 이름 — 모든 step 공통 (params.label).
+				     실행부 describeStep 이 타입과 무관하게 최우선으로 읽어 Behavior
+				     타임라인 구간 이름으로 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는
+				     구간(영상 재생 대기 등)에 특히 필요하다. -->
+				<div class="space-y-1">
+					<label class="{sectionLabel}">구간 이름 (선택)</label>
+					<input type="text"
+						value={local.stepLabel ?? ''}
+						oninput={(e) => { if (local) local.stepLabel = (e.target as HTMLInputElement).value; }}
+						placeholder={local.type === 'sleep' ? '예: 영상 재생 30초' : '비워두면 자동 요약'}
+						class="w-full border rounded px-2 py-1 text-xs bg-background"
+					/>
+					<p class="{captionMuted}">
+						Trace 결과의 Behavior 타임라인에 이 이름으로 표시됩니다.
+						{#if local.type === 'sleep'}
+							비워두면 <b>대기 {local.sleepSeconds ?? 1}s</b> 로만 나와, 그 구간의 I/O 가
+							재생 때문인지 그냥 유휴인지 나중에 구분할 수 없습니다.
+						{:else}
+							비워두면 step 내용으로 자동 요약됩니다.
+						{/if}
+					</p>
 				</div>
 
 				<!-- Auto trace (benchmark, iotest, shell) -->
@@ -866,15 +894,31 @@
 						</div>
 					</div>
 
+				{:else if local.type === 'sleep'}
+					<div class="space-y-2">
+						<p class="{captionMuted}">
+							지정한 시간만큼 기다립니다. 영상 재생·다운로드처럼 <b>기다리는 동안 무언가 일어나는</b>
+							구간이면 위의 <b>구간 이름</b>을 채워두세요.
+						</p>
+						<div class="space-y-1">
+							<label class="{sectionLabel}">대기 시간 (초)</label>
+							<input type="number" min="0" step="1"
+								value={local.sleepSeconds ?? 1}
+								oninput={(e) => { if (local) local.sleepSeconds = Number((e.target as HTMLInputElement).value); }}
+								class="w-full border rounded px-2 py-1 text-xs bg-background"
+							/>
+						</div>
+					</div>
+
 				{:else}
-					<!-- shell, sleep -->
+					<!-- shell -->
 					<div class="space-y-1">
 						<label class="{sectionLabel}">
 							{local.type === 'shell' ? 'Command' : 'Parameters'}
 						</label>
 						<textarea bind:value={local.extraText}
 							class="w-full border rounded px-2 py-1 text-[10px] bg-background font-mono h-12 resize-y"
-							placeholder={local.type === 'shell' ? 'cmd=...' : local.type === 'sleep' ? 'seconds=5' : ''}
+							placeholder={local.type === 'shell' ? 'cmd=...' : ''}
 						></textarea>
 					</div>
 				{/if}
