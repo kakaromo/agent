@@ -38,7 +38,14 @@ export type StepBoundary = {
  * (portal 에서 실제로 헤더 select 하나가 빠져 그런 적이 있다.)
  */
 export function boundaryLabel(b: StepBoundary): string {
-	return (b.labelOverride ?? '').trim() || b.label || b.type;
+	// 마지막 폴백까지 비면 "step N" — 칩이 빈칸이면 어느 구간인지 알 수 없고,
+	// 클릭할 것도 안 보여 토글조차 못 한다.
+	return (
+		(b.labelOverride ?? '').trim() ||
+		(b.label ?? '').trim() ||
+		(b.type ?? '').trim() ||
+		`step ${b.stepIndex}`
+	);
 }
 
 /** 차트 상단 meta 바(총/샘플 건수). */

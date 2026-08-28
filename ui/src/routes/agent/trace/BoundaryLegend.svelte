@@ -52,10 +52,20 @@
 		editing = i;
 		draft = boundaryLabel(boundaries[i]);
 	}
+	/** 빈 이름은 저장하지 않는다 — 칩이 빈칸이 되면 어느 구간인지 알 수 없다. */
+	const draftEmpty = $derived(draft.trim() === '');
+
 	function commit() {
 		if (editing == null) return;
 		const i = editing;
 		const next = draft.trim();
+		// ⚠ 빈 값은 **저장하지 않고 편집 상태를 유지**한다.
+		//
+		// 예전엔 빈 값을 "원래 이름으로 되돌리기" 로 처리했는데, 두 가지가 겹쳐
+		// 위험했다: 이름을 지우다가 실수로 포커스를 잃으면 조용히 되돌아갔고,
+		// 원본 label 마저 비어 있으면 칩이 빈칸이 돼 어느 구간인지 알 수 없었다.
+		// 되돌리기는 아래 '되돌리기' 버튼으로 **명시적으로만** 한다.
+		if (next === '') return;
 		editing = null;
 		// 자동 요약과 같아지면 override 를 다는 의미가 없다 → 해제해서 원본을 따르게.
 		const base = boundaries[i].label || boundaries[i].type;
@@ -63,6 +73,13 @@
 	}
 	function cancel() {
 		editing = null;
+	}
+	/** 사용자가 붙인 이름을 지우고 원래 이름으로. 원본이 있을 때만 노출한다. */
+	function resetLabel() {
+		if (editing == null) return;
+		const i = editing;
+		editing = null;
+		onRename?.(i, '');
 	}
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Enter') { e.preventDefault(); commit(); }
@@ -82,7 +99,11 @@
 		{#if editing === i}
 			<!-- 편집 중 — 칩 자리를 그대로 input 이 차지한다. 색 점을 남겨 어느
 			     구간을 고치는 중인지 잃지 않는다. -->
-			<span class="inline-flex items-center gap-1 rounded border border-primary px-1.5 py-0.5">
+			<span
+				class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5"
+				class:border-primary={!draftEmpty}
+				class:border-destructive={draftEmpty}
+			>
 				<span class="inline-block size-2 rounded-sm" style="background:{color(i)}"></span>
 				<input
 					bind:value={draft}
@@ -93,7 +114,24 @@
 					class="bg-transparent outline-none text-[10px] min-w-16"
 					placeholder={b.label || b.type}
 					aria-label="구간 이름"
+					aria-invalid={draftEmpty}
+					title={draftEmpty ? '이름을 비울 수 없습니다' : ''}
 				/>
+				{#if draftEmpty}
+					<!-- 왜 저장이 안 되는지 그 자리에서 말한다. 조용히 안 되면 버그로 읽힌다. -->
+					<span class="text-destructive">이름 필요</span>
+				{/if}
+				{#if (b.labelOverride ?? '').trim()}
+					<!-- 되돌리기는 **명시적으로만**. 빈 값 저장으로 겸하면 실수로 지워진다. -->
+					<button
+						onmousedown={(e) => e.preventDefault()}
+						onclick={resetLabel}
+						class="text-muted-foreground hover:text-foreground underline"
+						title="원래 이름({b.label || b.type})으로"
+					>
+						되돌리기
+					</button>
+				{/if}
 			</span>
 		{:else}
 			<span
