@@ -888,10 +888,24 @@ func (m *Manager) ReparseTrace(jobID string) error {
 	m.mu.Unlock()
 
 	if !ok {
-		// 디스크에서 복원 시도
+		// 디스크에서 복원 시도.
+		//
+		// ⚠ outputBase 만 보면 **시나리오로 수집한 trace 를 재시작 후 못 찾는다.**
+		// 그 산출물은 잡 폴더 안(<archiveBase>/jobs/<이름>/trace/<id>)에 있어서,
+		// outputBase/<id> 에는 아무것도 없다 → "trace.log not found" 로 실패했다.
+		// 조회(GetTraceJobInfo)는 findTraceDirByID 로 이미 두 곳을 다 보는데
+		// reparse 만 안 봐서, "화면엔 보이는데 재파싱만 안 되는" 상태였다.
 		baseDir := filepath.Join(m.outputBase, jobID)
 		logFile := filepath.Join(baseDir, "trace.log")
 
+		if _, err := os.Stat(logFile); err != nil {
+			if found := m.findTraceDirByID(jobID); found != "" {
+				alt := filepath.Join(found, "trace.log")
+				if _, err := os.Stat(alt); err == nil {
+					baseDir, logFile = found, alt
+				}
+			}
+		}
 		if _, err := os.Stat(logFile); err != nil {
 			return fmt.Errorf("trace.log not found for job %s — cannot reparse", jobID)
 		}
