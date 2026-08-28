@@ -577,6 +577,20 @@ func (m *Manager) GetJob(jobID string) (*TraceJob, error) {
 	return job, nil
 }
 
+// TraceTypeOf — 그 잡의 실제 trace_type. 모르는 잡이면 빈 문자열.
+//
+// 시나리오의 trace_stop 이 쓴다. 그 스텝의 params 를 믿으면 안 된다 — trace_type 은
+// trace_start 에서 고르는 값이라 stop 쪽엔 대개 없고, 폴백("ufs")이 그대로
+// TRACE_STOP 라인에 실려 화면의 trace_type 판정을 뒤집는다.
+func (m *Manager) TraceTypeOf(jobID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if job, ok := m.jobs[jobID]; ok {
+		return job.TraceType
+	}
+	return ""
+}
+
 // SubscribeProgress subscribes to trace job progress.
 func (m *Manager) SubscribeProgress(jobID string) (chan *pb.JobProgress, error) {
 	job, err := m.GetJob(jobID)

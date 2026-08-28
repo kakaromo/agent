@@ -10,14 +10,16 @@ import (
 
 // fakeTraceCtl — HostToDeviceMonotonic 만 쓰는 최소 구현.
 type fakeTraceCtl struct {
-	offset float64
-	usable bool
+	offset    float64
+	usable    bool
+	traceType string // TraceTypeOf 가 돌려줄 값 (빈 값 = 모르는 잡)
 }
 
 func (f *fakeTraceCtl) StartTrace(context.Context, *pb.StartTraceRequest) (string, error) {
 	return "", nil
 }
-func (f *fakeTraceCtl) StopTrace(string) error { return nil }
+func (f *fakeTraceCtl) StopTrace(string) error      { return nil }
+func (f *fakeTraceCtl) TraceTypeOf(string) string  { return f.traceType }
 func (f *fakeTraceCtl) HostToDeviceMonotonic(_ string, hostMillis int64) (float64, bool) {
 	if !f.usable {
 		return 0, false

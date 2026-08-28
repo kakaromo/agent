@@ -182,6 +182,14 @@ type TraceController interface {
 	// 하지 않는다.** 틀린 offset 으로 나눈 구간은 통째로 밀려도 그래프가 정상으로
 	// 보여서 검증에서 안 걸러진다 (trace/clockoffset.go 참고).
 	HostToDeviceMonotonic(traceJobID string, hostMillis int64) (float64, bool)
+
+	// TraceTypeOf — 그 잡이 실제로 어떤 trace_type 으로 돌고 있는지.
+	//
+	// trace_stop 스텝은 자기 params 에 trace_type 이 없는 게 보통이라(그 선택은
+	// trace_start 에서 한다) 스텝 값을 믿으면 "ufs" 로 폴백한다. 그 값이 그대로
+	// TRACE_STOP 라인에 실려 프론트의 trace_type 판정을 뒤집으므로, 잡에서 읽는다.
+	// 모르는 잡이면 빈 문자열.
+	TraceTypeOf(traceJobID string) string
 }
 
 // MacroController interface to avoid circular imports with macro package.

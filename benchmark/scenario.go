@@ -617,7 +617,18 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			return "", nil, fmt.Errorf("no active trace to stop")
 		}
 		stoppedID := *activeTraceJobID
-		traceType := step.Params["trace_type"]
+		// ⚠ trace_type 은 **실제로 돌고 있는 잡**에서 읽는다.
+		//
+		// 예전엔 trace_stop 스텝의 params 를 봤는데, 그 값은 trace_start 에서 고르는
+		// 것이라 stop 쪽엔 대개 비어 있다. 그러면 "ufs" 로 폴백해 TRACE_STOP 라인이
+		// fsio_ufs 를 ufs 라고 보고했다. 프론트는 이 줄로 trace_type 을 정하므로
+		// (mappings 가 서버 응답보다 우선) fsio 인데 fsio 가 아닌 걸로 읽혀
+		// **Attribution 탭·mgmt 차트·fsio 컬럼이 통째로 사라졌다.**
+		// 통계는 parquet 스키마를 직접 보므로 멀쩡했고, 그래서 화면마다 달랐다.
+		traceType := o.traceMgr.TraceTypeOf(stoppedID)
+		if traceType == "" {
+			traceType = step.Params["trace_type"] // 잡을 못 찾을 때만 스텝 값
+		}
 		if traceType == "" {
 			traceType = "ufs"
 		}
