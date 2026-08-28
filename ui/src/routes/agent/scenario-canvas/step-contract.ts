@@ -36,6 +36,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "rw", required: false, enum: ["read", "write", "randread", "randwrite"], desc: "I/O 패턴" },
 			{ name: "bs", required: false, desc: "블록 크기 (예 \"4k\")" },
 			{ name: "size", required: false, desc: "파일 크기 (예 \"1G\")" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -49,6 +50,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "config", required: false, desc: "iotest 설정" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -62,6 +64,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "cmd", required: true, desc: "실행할 셸 명령" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -76,6 +79,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "path", required: false, desc: "삭제할 경로 (미지정 시 테스트 디렉토리)" },
 			{ name: "delete_files_from_steps", required: false, desc: "해당 step 인덱스들이 만든 파일 삭제 (쉼표 구분)" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -89,6 +93,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "seconds", required: true, default: "1", desc: "대기 초 (예 \"30\")" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -103,6 +108,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "trace_type", required: false, enum: ["ufs", "block", "both", "fsio_ufs", "fsio_block"], default: "ufs", desc: "트레이스 종류 (fsio_* 는 eBPF 기반 — root 필요, 파일명/프로세스 귀속 제공)" },
 			{ name: "window_seconds", required: false, default: "1", desc: "수집 윈도우 (초)" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -116,6 +122,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "trace_type", required: false, enum: ["ufs", "block", "both", "fsio_ufs", "fsio_block"], default: "ufs", desc: "trace_start 와 같은 값" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -127,7 +134,9 @@ export const STEP_CONTRACTS: StepContract[] = [
 		destructive: false,
 		requiresTool: false,
 		aiUsable: false,
-		params: []
+		params: [
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
+		]
 	},
 	{
 		type: "install_apk",
@@ -141,6 +150,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "apk_filename", required: true, desc: "tools/apks 안의 파일명" },
 			{ name: "grant_permissions", required: false, enum: ["true", "false"], desc: "설치 시 권한 자동 허용" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -155,6 +165,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "package_name", required: true, desc: "제거할 패키지" },
 			{ name: "keep_data", required: false, enum: ["true", "false"], desc: "데이터 보존 여부" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -175,6 +186,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "element_index", required: false, desc: "여러 개 매칭 시 N번째" },
 			{ name: "x", required: false, desc: "폴백 좌표 X" },
 			{ name: "y", required: false, desc: "폴백 좌표 Y" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -189,6 +201,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "x", required: true, desc: "픽셀 좌표 X" },
 			{ name: "y", required: true, desc: "픽셀 좌표 Y" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -203,6 +216,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "input_text", required: true, desc: "입력할 문자열" },
 			{ name: "submit", required: false, enum: ["true", "false"], desc: "입력 후 엔터로 실행" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -219,6 +233,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "count", required: false, desc: "스크롤 횟수 (예 \"10\")" },
 			{ name: "pause", required: false, desc: "각 스크롤 사이 대기 **초** (예 \"1\"=1초 — 밀리초 아님)" },
 			{ name: "duration", required: false, desc: "스와이프 동작 시간 밀리초 (예 \"300\")" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -232,6 +247,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "keycode", required: true, desc: "키코드 (예 \"4\"=BACK, \"3\"=HOME, \"66\"=ENTER)" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -245,6 +261,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		aiUsable: true,
 		params: [
 			{ name: "package_name", required: true, desc: "종료할 패키지" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 	{
@@ -261,6 +278,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "clear_mode", required: false, enum: ["force_stop", "clear", "cache", "none"], default: "force_stop", desc: "실행 전 초기화 방식" },
 			{ name: "wait_seconds", required: false, default: "3", desc: "실행 후 대기 초" },
 			{ name: "wait_activity", required: false, desc: "이 activity 가 포커스될 때까지 대기 (선택)" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},
 ];

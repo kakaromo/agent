@@ -364,6 +364,13 @@ const scenarioPromptHead = koreanOnly + `당신은 Android 디바이스 자동�
 - schema 에 정의된 type 값만 쓰세요. 존재하지 않는 type 을 지어내지 마세요.
 - 잘 모르면 단순하게 만드세요. 확실하지 않은 step 은 넣지 마세요.
 
+### 대기 구간에는 label 을 붙이세요
+sleep 은 "무엇을 기다리는지"가 params 에 안 남습니다. 타임라인에는 "대기 30s" 로만 보여서,
+그 구간의 I/O 가 영상 재생 때문인지 그냥 유휴인지 나중에 구분할 수 없습니다.
+**대기가 어떤 활동을 나타내면**(영상·음악 재생, 다운로드, 로딩, 촬영 대기 등)
+label 에 그 활동을 적으세요 — 예: { "seconds": "30", "label": "영상 재생 30초" }.
+순수한 안정화 대기(탭 직후 1~2초 등)에는 굳이 붙이지 않아도 됩니다.
+
 ## 사용 가능한 step type 과 주요 params
 %s
 
@@ -389,7 +396,7 @@ startStep/endStep 은 0-based step 인덱스, count 는 반복 횟수. 모두 �
   "steps": [
     { "type": "launch_app", "tool": "", "params": { "package_name": "com.google.android.youtube", "clear_mode": "force_stop", "wait_seconds": "3" } },
     { "type": "scroll", "tool": "", "params": { "direction": "down", "count": "20", "pause": "1", "duration": "300" } },
-    { "type": "sleep", "tool": "", "params": { "seconds": "30" } },
+    { "type": "sleep", "tool": "", "params": { "seconds": "30", "label": "스크롤 후 대기 30초" } },
     { "type": "stop_app", "tool": "", "params": { "package_name": "com.google.android.youtube" } }
   ],
   "loops": []

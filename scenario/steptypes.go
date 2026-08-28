@@ -256,6 +256,39 @@ var Specs = []StepSpec{
 	},
 }
 
+// commonLabelParam — 모든 step 이 받는 구간 이름.
+//
+// **왜 공통인가.** describeStep(benchmark/scenario.go) 이 타입과 무관하게 params["label"]
+// 을 최우선으로 읽어 Behavior 타임라인의 구간 이름으로 쓴다. 실행부가 이미 전 타입
+// 공통으로 취급하므로 계약도 타입별로 흩뿌리지 않고 여기 한 번만 선언한다.
+//
+// **왜 필요한가.** 자동 생성 이름은 "무엇을 했나"까지는 못 간다. 영상 재생을
+// sleep 으로 기다리는 것이 대표적이다 — 타임라인에 "대기 30s" 로만 남아, 그 구간의
+// read 가 재생 때문인지 그냥 유휴인지 나중에 구분할 수 없다. label 을 붙이면
+// "영상 재생 30초" 로 남는다.
+var commonLabelParam = ParamSpec{
+	Name: "label",
+	Desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. " +
+		"sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")",
+}
+
+// specsReady — Specs 의 모든 항목에 공통 param 을 붙인다.
+// (선언부에 18번 복사하지 않기 위해서다. 값은 쓰지 않고 초기화 순서에만 쓴다.)
+//
+// **init() 을 쓰지 않는 이유.** specByType 같은 파생 var 은 init() 보다 먼저
+// 평가되면서 StepSpec 을 **값으로** 복사해 간다. init() 에서 param 을 붙이면
+// Specs 는 갱신돼도 파생 인덱스는 label 없는 사본을 들고 있어, ValidateParams /
+// Lookup 만 조용히 다르게 동작한다. 실제로 이 함정을 한 번 밟고 테스트로 잡았다.
+//
+// 그래서 var 초기화로 붙이고, 파생 var 이 이 값을 **참조**하게 해서 Go 의
+// 의존 순서 규칙이 "붙인 뒤에 복사"를 보장하도록 만든다.
+var specsReady = func() bool {
+	for i := range Specs {
+		Specs[i].Params = append(Specs[i].Params, commonLabelParam)
+	}
+	return true
+}()
+
 // controlOnlyTypes — 실행부 switch 에는 있지만 Specs 에 넣지 않는 제어 전용 타입.
 //
 // condition 은 캔버스 DAG 의 분기 노드라 params 계약이 다른 step 과 구조가 다르고
@@ -271,6 +304,7 @@ func IsControlOnly(stepType string) bool { return controlOnlyTypes[stepType] }
 
 // specByType — 조회용 인덱스.
 var specByType = func() map[string]StepSpec {
+	_ = specsReady // 공통 param 이 붙은 뒤에 복사되도록 초기화 순서를 고정한다.
 	m := make(map[string]StepSpec, len(Specs))
 	for _, s := range Specs {
 		m[s.Type] = s

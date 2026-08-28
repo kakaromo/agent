@@ -307,3 +307,40 @@ func TestDestructiveTypesFlagged(t *testing.T) {
 		}
 	}
 }
+
+// TestCommonLabelParamOnEveryType — label 이 모든 step 타입의 계약에 있는지.
+//
+// describeStep(benchmark/scenario.go) 이 타입과 무관하게 params["label"] 을 최우선으로
+// 읽어 Behavior 타임라인 구간 이름으로 쓴다. 실행부가 전 타입 공통으로 취급하는데
+// 계약에서 빠지면 프롬프트/스키마/UI 어디에도 안 나와서, 되는 기능인데 아무도 모르는
+// 상태가 된다 (실제로 그랬다).
+func TestCommonLabelParamOnEveryType(t *testing.T) {
+	for _, typ := range AllTypes() {
+		spec, ok := Lookup(typ)
+		if !ok {
+			t.Fatalf("Lookup(%q) 실패", typ)
+		}
+		found := false
+		for _, p := range spec.Params {
+			if p.Name == "label" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Lookup 은 specByType 인덱스를 거친다 — 여기서만 빠지면 초기화 순서 문제다.
+			t.Errorf("%q 계약에 공통 param label 이 없습니다 "+
+				"(Specs 에는 있는데 여기서 빠졌다면 specByType 초기화 순서를 확인하세요)", typ)
+		}
+	}
+}
+
+// TestLabelIsOptional — label 이 필수가 되면 기존 시나리오가 전부 거부된다.
+func TestLabelIsOptional(t *testing.T) {
+	if msg := ValidateParams("sleep", "", map[string]string{"seconds": "30"}); msg != "" {
+		t.Errorf("label 없는 sleep 이 거부됐습니다: %s", msg)
+	}
+	if msg := ValidateParams("sleep", "", map[string]string{"seconds": "30", "label": "영상 재생 30초"}); msg != "" {
+		t.Errorf("label 있는 sleep 이 거부됐습니다: %s", msg)
+	}
+}
