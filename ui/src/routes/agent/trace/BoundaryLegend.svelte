@@ -135,7 +135,7 @@
 			</span>
 		{:else}
 			<span
-				class="group inline-flex items-center rounded border hover:bg-muted"
+				class="inline-flex items-center rounded border hover:bg-muted"
 				class:opacity-40={off}
 			>
 				<button
@@ -155,11 +155,13 @@
 					{#if !b.success}<span class="text-destructive">실패</span>{/if}
 				</button>
 				{#if onRename}
-					<!-- 연필은 hover 때만 — 늘 보이면 구간이 많을 때 칩이 아이콘 밭이 된다.
-					     더블클릭도 되지만 발견 가능한 입구가 하나는 있어야 한다. -->
+					<!-- 연필은 **항상 보인다.**
+					     예전엔 hover 때만 나타나게 했는데(칩이 아이콘 밭이 되는 걸 피하려고)
+					     기능이 있는 줄 아무도 몰랐다 — 마우스를 올려야 알 수 있는 기능은
+					     없는 것과 같다. 대신 흐리게 깔아 두고 hover 에서 또렷해진다. -->
 					<button
 						onclick={() => startEdit(i)}
-						class="pr-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+						class="pr-1 opacity-40 transition-opacity hover:opacity-100"
 						title="이름 편집"
 						aria-label="구간 이름 편집"
 					>
