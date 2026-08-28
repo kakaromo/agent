@@ -23,7 +23,7 @@
 		serverId: number | null;
 		jobId: string | null;
 		activeJobs: ActiveJob[];
-		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[]) => void;
+		onViewTrace?: (deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[], execJobId?: string | null) => void;
 	}
 
 	let { open = $bindable(), serverId, jobId, activeJobs, onViewTrace }: Props = $props();
@@ -845,7 +845,7 @@
 					<button
 						onclick={() => {
 							const ids = selectedTraceIds.size > 0 ? [...selectedTraceIds] : traceJobIds;
-							onViewTrace(selectedResult?.deviceId ?? '', ids, allTraceJobMappings, getStepBoundaries());
+							onViewTrace(selectedResult?.deviceId ?? '', ids, allTraceJobMappings, getStepBoundaries(), jobId);
 						}}
 						class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
 					>
@@ -1113,7 +1113,7 @@
 										const selected = selectedTraceIds.size > 0 ? [...selectedTraceIds] : ids;
 										// mappings·boundaries 를 같이 넘긴다 — 빠지면 이 버튼으로 열었을 때만
 										// Loop 필터와 Behavior 탭이 사라져 "버튼마다 화면이 다른" 것처럼 보인다.
-										onViewTrace(selectedResult?.deviceId ?? '', selected, allTraceJobMappings, getStepBoundaries());
+										onViewTrace(selectedResult?.deviceId ?? '', selected, allTraceJobMappings, getStepBoundaries(), jobId);
 									}}
 									class="px-2.5 py-1 rounded text-[10px] bg-blue-600 text-white hover:bg-blue-700 transition-colors"
 								>

@@ -8,7 +8,8 @@
 	 * Raw Chart / Behavior / Statistics 세 탭이 **같은 컴포넌트와 같은 상태**를 쓴다.
 	 * 탭마다 따로 두면 "지금 보고 있는 구간" 이 화면마다 달라진다.
 	 */
-	import type { StepBoundary } from './types.js';
+	import { boundaryLabel, type StepBoundary } from './types.js';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 
 	interface Props {
 		boundaries: StepBoundary[];
@@ -19,6 +20,12 @@
 		onHideAll: () => void;
 		/** 전부 숨겼을 때 덧붙일 안내 문구. 탭마다 결과가 달라 문구도 다르다. */
 		allHiddenNote?: string;
+		/**
+		 * 이름 바꾸기. 안 넘기면 편집 UI 자체가 안 뜬다(하위호환 — 저장할 곳이
+		 * 없는 화면에서 편집만 되고 새로고침하면 사라지는 게 제일 나쁘다).
+		 * 빈 문자열이면 override 해제(= 원래 이름으로).
+		 */
+		onRename?: (i: number, next: string) => void;
 	}
 
 	let {
@@ -28,32 +35,101 @@
 		onToggle,
 		onShowAll,
 		onHideAll,
-		allHiddenNote
+		allHiddenNote,
+		onRename
 	}: Props = $props();
 
 	const allHidden = $derived(boundaries.length > 0 && hidden.size >= boundaries.length);
+
+	// ── 인라인 이름 편집 ──────────────────────────────────────────────
+	// 칩을 그 자리에서 input 으로 바꾼다. 다이얼로그를 띄우면 "어느 구간을
+	// 고치는 중인지" 가 화면에서 멀어져 색 대조가 끊긴다.
+	let editing = $state<number | null>(null);
+	let draft = $state('');
+
+	function startEdit(i: number) {
+		if (!onRename) return;
+		editing = i;
+		draft = boundaryLabel(boundaries[i]);
+	}
+	function commit() {
+		if (editing == null) return;
+		const i = editing;
+		const next = draft.trim();
+		editing = null;
+		// 자동 요약과 같아지면 override 를 다는 의미가 없다 → 해제해서 원본을 따르게.
+		const base = boundaries[i].label || boundaries[i].type;
+		onRename?.(i, next === base ? '' : next);
+	}
+	function cancel() {
+		editing = null;
+	}
+	function onKey(e: KeyboardEvent) {
+		if (e.key === 'Enter') { e.preventDefault(); commit(); }
+		else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+	}
+	/** 편집 input 이 뜨면 바로 타이핑할 수 있게. */
+	function focus(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
 </script>
 
 <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
 	<span class="text-muted-foreground">구간</span>
 	{#each boundaries as b, i (`${b.stepIndex}-${b.loopIndex}-${b.repeatIndex}-${i}`)}
 		{@const off = hidden.has(i)}
-		<button
-			onclick={() => onToggle(i)}
-			class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 hover:bg-muted"
-			class:opacity-40={off}
-			title="클릭하면 {off ? '다시 표시' : '숨김'}"
-		>
+		{#if editing === i}
+			<!-- 편집 중 — 칩 자리를 그대로 input 이 차지한다. 색 점을 남겨 어느
+			     구간을 고치는 중인지 잃지 않는다. -->
+			<span class="inline-flex items-center gap-1 rounded border border-primary px-1.5 py-0.5">
+				<span class="inline-block size-2 rounded-sm" style="background:{color(i)}"></span>
+				<input
+					bind:value={draft}
+					use:focus
+					onkeydown={onKey}
+					onblur={commit}
+					size={Math.max(8, draft.length + 1)}
+					class="bg-transparent outline-none text-[10px] min-w-16"
+					placeholder={b.label || b.type}
+					aria-label="구간 이름"
+				/>
+			</span>
+		{:else}
 			<span
-				class="inline-block size-2 rounded-sm"
-				style="background:{color(i)};{off ? ' filter:grayscale(1);' : ''}"
-			></span>
-			{b.label || b.type}
-			{#if b.loopIndex > 0}
-				<span class="text-muted-foreground">({b.loopIndex})</span>
-			{/if}
-			{#if !b.success}<span class="text-destructive">실패</span>{/if}
-		</button>
+				class="group inline-flex items-center rounded border hover:bg-muted"
+				class:opacity-40={off}
+			>
+				<button
+					onclick={() => onToggle(i)}
+					ondblclick={() => startEdit(i)}
+					class="inline-flex items-center gap-1 px-1.5 py-0.5"
+					title="클릭하면 {off ? '다시 표시' : '숨김'}{onRename ? ' · 더블클릭하면 이름 편집' : ''}"
+				>
+					<span
+						class="inline-block size-2 rounded-sm"
+						style="background:{color(i)};{off ? ' filter:grayscale(1);' : ''}"
+					></span>
+					{boundaryLabel(b)}
+					{#if b.loopIndex > 0}
+						<span class="text-muted-foreground">({b.loopIndex})</span>
+					{/if}
+					{#if !b.success}<span class="text-destructive">실패</span>{/if}
+				</button>
+				{#if onRename}
+					<!-- 연필은 hover 때만 — 늘 보이면 구간이 많을 때 칩이 아이콘 밭이 된다.
+					     더블클릭도 되지만 발견 가능한 입구가 하나는 있어야 한다. -->
+					<button
+						onclick={() => startEdit(i)}
+						class="pr-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+						title="이름 편집"
+						aria-label="구간 이름 편집"
+					>
+						<PencilIcon class="size-2.5" />
+					</button>
+				{/if}
+			</span>
+		{/if}
 	{/each}
 	<!-- 항상 보인다 — 뭔가 숨긴 뒤에만 나오면 구간이 많을 때
 		 "하나만 보려면 나머지를 다 눌러야 하나" 가 된다. -->

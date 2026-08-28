@@ -17,6 +17,11 @@ export type StepBoundary = {
 	repeatIndex: number;
 	type: string;
 	label: string;
+	/**
+	 * 사용자가 분석 화면에서 붙인 이름. 있으면 이걸 우선 표시한다.
+	 * label 을 덮어쓰지 않는 이유 — 덮어쓰면 자동 요약이 사라져 되돌릴 수 없다.
+	 */
+	labelOverride?: string;
 	startedAt: number; // host wall clock (epoch ms) — 로그 대조용
 	finishedAt: number;
 	startedMono: number; // 기기 boot 기준 절대초
@@ -24,6 +29,17 @@ export type StepBoundary = {
 	success: boolean;
 	error: string;
 };
+
+/**
+ * 구간을 화면에 표시할 이름.
+ *
+ * ⚠ 라벨을 그리는 모든 곳이 이 함수를 써야 한다 — 한 곳이라도 label 을 직접
+ * 읽으면 바꾼 이름이 그 화면에만 반영 안 돼서 "저장이 안 됐나" 로 보인다.
+ * (portal 에서 실제로 헤더 select 하나가 빠져 그런 적이 있다.)
+ */
+export function boundaryLabel(b: StepBoundary): string {
+	return (b.labelOverride ?? '').trim() || b.label || b.type;
+}
 
 /** 차트 상단 meta 바(총/샘플 건수). */
 export type ChartMeta = {

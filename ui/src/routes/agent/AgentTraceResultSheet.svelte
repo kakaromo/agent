@@ -5,6 +5,7 @@
 	import TraceChartView from './trace/TraceChartView.svelte';
 	import TraceStatsView from './trace/TraceStatsView.svelte';
 	import BoundaryLegend from './trace/BoundaryLegend.svelte';
+	import { boundaryLabel } from './trace/types.js';
 	import type { StatsResponse, StatsLatency } from './trace/types.js';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
@@ -18,7 +19,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -46,9 +47,17 @@
 		mappings?: TraceJobMapping[];
 		// 시나리오 스텝 구간. 있으면 Charts 에 구간 밴드 + Behavior 탭을 노출한다.
 		boundaries?: StepBoundary[];
+		/**
+		 * 실행(execution) jobId — trace job 이 아니라 시나리오 잡 쪽 id.
+		 * 구간 이름을 저장할 때 필요하다. 없으면 이름 편집 UI 를 아예 안 띄운다
+		 * (저장할 곳이 없는데 고칠 수 있으면 새로고침 때 사라져 더 나쁘다).
+		 */
+		execJobId?: string | null;
+		/** 구간 배열이 바뀌었을 때(이름 편집) 부모에게 알린다. */
+		onBoundariesChange?: (next: StepBoundary[]) => void;
 	}
 
-	let { open = $bindable(), serverId, jobIds, mappings = [], boundaries = [] }: Props = $props();
+	let { open = $bindable(), serverId, jobIds, mappings = [], boundaries = [], execJobId = null, onBoundariesChange }: Props = $props();
 
 	// ── 스텝 구간 (behavior) ──
 	//
@@ -211,9 +220,39 @@
 		return type === 'sleep';
 	}
 
+	// ⚠ 이름은 공용 boundaryLabel 로 얻는다 — 여기서 b.label 을 직접 읽으면
+	// 사용자가 바꾼 이름이 Behavior 레인·표에만 반영 안 돼서 "저장이 안 됐나" 로 보인다.
+	// loop 접미사만 여기서 덧붙인다.
 	function behaviorLabel(b: StepBoundary) {
-		const base = b.label || b.type || `step ${b.stepIndex}`;
+		const base = boundaryLabel(b) || `step ${b.stepIndex}`;
 		return b.loopIndex > 0 ? `${base} (loop ${b.loopIndex})` : base;
+	}
+
+	/**
+	 * 구간 이름 바꾸기 — 화면에 먼저 반영하고 서버에 저장한다.
+	 *
+	 * 서버 응답을 기다렸다 그리면 타이핑 끝에 한 박자 멈칫한다. 이름은 실패해도
+	 * 잃을 게 크지 않으니 낙관적으로 반영하고, 실패하면 되돌리고 알린다.
+	 *
+	 * ⚠ boundaries 는 prop 이라 직접 못 고친다. 부모(+page)가 들고 있는 배열을
+	 * 갱신해야 시트를 닫았다 열어도 유지된다 — onBoundariesChange 로 올려보낸다.
+	 */
+	async function renameBoundary(i: number, next: string) {
+		const b = allBoundaries[i];
+		if (!b || !execJobId) return;
+		const before = boundaries;
+		const after = boundaries.map((x) =>
+			x.stepIndex === b.stepIndex && x.loopIndex === b.loopIndex && x.repeatIndex === b.repeatIndex
+				? { ...x, labelOverride: next }
+				: x
+		);
+		onBoundariesChange?.(after);
+		try {
+			await setBoundaryLabel(execJobId, b, next);
+		} catch (e: any) {
+			onBoundariesChange?.(before);
+			toast.error(e?.message ?? '구간 이름을 저장하지 못했습니다.');
+		}
 	}
 
 	// ── Loop 필터 ──
@@ -1458,6 +1497,7 @@
 								onShowAll={() => (hiddenSteps = new Set())}
 								onHideAll={() => (hiddenSteps = new Set(allBoundaries.map((b, i) => boundaryKey(b, i))))}
 								allHiddenNote="표시할 구간이 없습니다 — “전체 선택”"
+								onRename={execJobId ? renameBoundary : undefined}
 							/>
 							{#if zoomRange && zoomRange.max > zoomRange.min}
 								<!-- 축이 좁혀졌다는 걸 알린다 — 모르면 "데이터가 왜 이것뿐이지" 가 된다. -->

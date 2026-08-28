@@ -78,6 +78,11 @@ export interface StepBoundary {
 	repeatIndex: number;
 	type: string;
 	label: string;
+	/**
+	 * 사용자가 분석 화면에서 붙인 이름. 있으면 이걸 우선 표시한다.
+	 * label 을 덮어쓰지 않는 이유 — 덮어쓰면 자동 요약이 사라져 되돌릴 수 없다.
+	 */
+	labelOverride?: string;
 	startedAt: number;
 	finishedAt: number;
 	startedMono: number;
@@ -1199,4 +1204,33 @@ function normalizeLoop(l: AiScenarioLoop): AiScenarioLoop {
 		return Number.isFinite(n) ? n : 0;
 	};
 	return { startStep: num(l?.startStep), endStep: num(l?.endStep), count: num(l?.count) };
+}
+
+
+/**
+ * 구간을 화면에 표시할 이름.
+ *
+ * 사용자가 붙인 이름(labelOverride) → agent 자동 요약(label) → 타입 순.
+ * ⚠ 라벨을 그리는 모든 곳이 이 함수를 써야 한다 — 한 곳이라도 label 을 직접
+ * 읽으면 바꾼 이름이 그 화면에만 반영 안 돼서 "저장이 안 됐나" 로 보인다.
+ */
+export function boundaryLabel(b: StepBoundary): string {
+	return (b.labelOverride ?? '').trim() || b.label || b.type;
+}
+
+/**
+ * 구간 이름 저장. 서버가 step_boundaries JSON 에서 해당 항목만 고친다.
+ * 빈 문자열이면 override 해제 = 원래 이름 복귀.
+ */
+export function setBoundaryLabel(
+	jobId: string,
+	b: { stepIndex: number; loopIndex: number; repeatIndex: number },
+	labelOverride: string
+): Promise<{ success: boolean }> {
+	return put(`/agent/executions/by-job-id/${encodeURIComponent(jobId)}/boundary-label`, {
+		stepIndex: b.stepIndex,
+		loopIndex: b.loopIndex,
+		repeatIndex: b.repeatIndex,
+		labelOverride
+	});
 }

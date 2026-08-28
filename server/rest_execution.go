@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -121,6 +122,58 @@ func registerExecutionRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 			return
 		}
 
+		// PUT /api/agent/executions/by-job-id/{jobId}/boundary-label
+		// body: {"stepIndex":N,"loopIndex":N,"repeatIndex":N,"labelOverride":"..."}
+		//
+		// 구간 이름을 분석 화면에서 고친다. 저장된 step_boundaries JSON 의 해당
+		// 항목에 labelOverride 만 얹는다 — **label 은 덮어쓰지 않는다.** 덮어쓰면
+		// agent 가 만든 자동 요약("탭: 검색")이 사라져 되돌릴 수 없다.
+		// 빈 문자열이면 override 해제 = 원래 이름 복귀.
+		//
+		// 구간 식별은 (step,loop,repeat) 3종 세트다. 배열 index 로 하면 정렬·필터로
+		// 순서가 달라졌을 때 엉뚱한 구간이 바뀐다.
+		if len(parts) == 3 && parts[0] == "by-job-id" && parts[2] == "boundary-label" {
+			if r.Method != http.MethodPut {
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				StepIndex     int    `json:"stepIndex"`
+				LoopIndex     int    `json:"loopIndex"`
+				RepeatIndex   int    `json:"repeatIndex"`
+				LabelOverride string `json:"labelOverride"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+				return
+			}
+			e, err := db.FindJobExecutionByJobID(r.Context(), parts[1])
+			if errors.Is(err, sqlitedb.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "execution not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			next, applied, err := applyBoundaryLabel(
+				e.StepBoundaries.String, body.StepIndex, body.LoopIndex, body.RepeatIndex, body.LabelOverride)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if !applied {
+				writeError(w, http.StatusNotFound, "step boundary not found")
+				return
+			}
+			if err := db.UpdateJobExecutionStepBoundaries(r.Context(), parts[1], next); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"success": true})
+			return
+		}
+
 		// GET /api/agent/executions/by-job-id/{jobId}
 		if len(parts) == 2 && parts[0] == "by-job-id" {
 			if r.Method != http.MethodGet {
@@ -182,34 +235,34 @@ func registerExecutionRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 // executionToMap — portal JobExecutionController.toMap 와 동일한 키/순서.
 func executionToMap(e *sqlitedb.JobExecution) map[string]any {
 	return map[string]any{
-		"id":                  e.ID,
-		"jobId":               e.JobID,
-		"serverId":            e.ServerID,
-		"serverName":          nullString(e.ServerName),
-		"type":                e.Type,
-		"tool":                nullString(e.Tool),
-		"jobName":             nullString(e.JobName),
-		"deviceIds":           nullString(e.DeviceIDs),
-		"state":               e.State,
-		"config":              nullString(e.Config),
-		"resultSummary":       nullString(e.ResultSummary),
-		"scheduledJobId":      nullInt64(e.ScheduledJobID),
-		"retryAttempt":        e.RetryAttempt,
-		"errorMessage":        nullString(e.ErrorMessage),
-		"startedAt":           nullTime(e.StartedAt),
-		"completedAt":         nullTime(e.CompletedAt),
-		"createdAt":           e.CreatedAt.Format(time.RFC3339Nano),
-		"traceRawKey":         nullString(e.TraceRawKey),
-		"traceRawFormat":      nullString(e.TraceRawFormat),
-		"traceRawSize":        nullInt64(e.TraceRawSize),
-		"traceRawUploadedAt":  nullTime(e.TraceRawUploadedAt),
-		"traceParquetKeys":    nullString(e.TraceParquetKeys),
-		"traceParsedAt":       nullTime(e.TraceParsedAt),
-		"traceParseState":     nullString(e.TraceParseState),
-		"traceParseError":     nullString(e.TraceParseError),
-		"workloadNote":        nullString(e.WorkloadNote),
-		"traceJobs":           nullJSONArray(e.TraceJobs),
-		"stepBoundaries":      nullJSONArray(e.StepBoundaries),
+		"id":                 e.ID,
+		"jobId":              e.JobID,
+		"serverId":           e.ServerID,
+		"serverName":         nullString(e.ServerName),
+		"type":               e.Type,
+		"tool":               nullString(e.Tool),
+		"jobName":            nullString(e.JobName),
+		"deviceIds":          nullString(e.DeviceIDs),
+		"state":              e.State,
+		"config":             nullString(e.Config),
+		"resultSummary":      nullString(e.ResultSummary),
+		"scheduledJobId":     nullInt64(e.ScheduledJobID),
+		"retryAttempt":       e.RetryAttempt,
+		"errorMessage":       nullString(e.ErrorMessage),
+		"startedAt":          nullTime(e.StartedAt),
+		"completedAt":        nullTime(e.CompletedAt),
+		"createdAt":          e.CreatedAt.Format(time.RFC3339Nano),
+		"traceRawKey":        nullString(e.TraceRawKey),
+		"traceRawFormat":     nullString(e.TraceRawFormat),
+		"traceRawSize":       nullInt64(e.TraceRawSize),
+		"traceRawUploadedAt": nullTime(e.TraceRawUploadedAt),
+		"traceParquetKeys":   nullString(e.TraceParquetKeys),
+		"traceParsedAt":      nullTime(e.TraceParsedAt),
+		"traceParseState":    nullString(e.TraceParseState),
+		"traceParseError":    nullString(e.TraceParseError),
+		"workloadNote":       nullString(e.WorkloadNote),
+		"traceJobs":          nullJSONArray(e.TraceJobs),
+		"stepBoundaries":     nullJSONArray(e.StepBoundaries),
 	}
 }
 
@@ -245,4 +298,60 @@ func nullTime(t sql.NullTime) any {
 		return nil
 	}
 	return t.Time.Format(time.RFC3339Nano)
+}
+
+// applyBoundaryLabel — step_boundaries JSON array 에서 한 구간의 labelOverride 만 바꾼다.
+//
+// 저장 형태가 JSON array 통짜라 **읽고 → 해당 항목만 수정 → 다시 쓰기** 다.
+// 다른 키는 손대지 않는다: map[string]any 로 받아 그대로 되돌려 쓰므로, 나중에
+// 필드가 늘어도 이 함수를 고칠 필요가 없고 모르는 키를 잃지도 않는다.
+//
+// 구간 식별은 (step, loop, repeat) 3종 세트다. 배열 index 로 하면 정렬·필터로
+// 순서가 달라졌을 때 엉뚱한 구간이 바뀐다.
+//
+// labelOverride 가 빈 문자열이면 **키를 지운다** — 원래 이름(label) 복귀.
+// 남겨두면 "빈 이름" 과 "override 없음" 이 구분되지 않는다.
+func applyBoundaryLabel(boundariesJSON string, step, loop, repeat int, override string) (string, bool, error) {
+	if strings.TrimSpace(boundariesJSON) == "" {
+		return "", false, fmt.Errorf("이 잡에는 저장된 스텝 구간이 없습니다")
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(boundariesJSON), &arr); err != nil {
+		return "", false, fmt.Errorf("스텝 구간 JSON 을 읽지 못했습니다: %w", err)
+	}
+
+	// JSON number 는 float64 로 풀린다 — int 비교 전에 맞춰 준다.
+	asInt := func(v any) int {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		}
+		return 0
+	}
+
+	applied := false
+	for _, b := range arr {
+		if asInt(b["stepIndex"]) != step || asInt(b["loopIndex"]) != loop || asInt(b["repeatIndex"]) != repeat {
+			continue
+		}
+		if strings.TrimSpace(override) == "" {
+			delete(b, "labelOverride")
+		} else {
+			b["labelOverride"] = override
+		}
+		applied = true
+		// break 하지 않는다 — 같은 (step,loop,repeat) 가 여러 기기에서 나오면
+		// (deviceId 별 결과를 한 배열에 모은다) 전부 같이 바뀌어야 한다.
+	}
+	if !applied {
+		return "", false, nil
+	}
+
+	data, err := json.Marshal(arr)
+	if err != nil {
+		return "", false, fmt.Errorf("스텝 구간을 저장하지 못했습니다: %w", err)
+	}
+	return string(data), true, nil
 }

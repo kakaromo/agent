@@ -69,6 +69,8 @@
 	let traceSheetOpen = $state(false);
 	let traceJobIds = $state<string[]>([]);
 	let traceMappings = $state<{ traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[]>([]);
+	// 실행(execution) jobId — 구간 이름 저장에 필요하다 (trace job id 와 다르다).
+	let traceExecJobId = $state<string | null>(null);
 	// 스텝 구간 — Charts 구간 밴드 + Behavior 탭의 시간 축.
 	let traceBoundaries = $state<StepBoundary[]>([]);
 	let traceDeviceId = $state<string | null>(null);
@@ -589,12 +591,13 @@
 		resultDetailSheetOpen = true;
 	}
 
-	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[]) {
+	function viewTraceResult(serverId: number, deviceId: string, jobIds: string[], mappings?: { traceJobId: string; stepIndex?: number; loopIndex?: number; repeatIndex?: number }[], boundaries?: StepBoundary[], execJobId?: string | null) {
 		viewingServerId = serverId;
 		traceDeviceId = deviceId;
 		traceJobIds = jobIds;
 		traceMappings = mappings ?? [];
 		traceBoundaries = boundaries ?? [];
+		traceExecJobId = execJobId ?? null;
 		traceSheetOpen = true;
 	}
 
@@ -768,7 +771,7 @@
 	serverId={viewingServerId}
 	jobId={viewingJobId}
 	{activeJobs}
-	onViewTrace={(deviceId, jobIds, mappings, boundaries) => viewTraceResult(viewingServerId!, deviceId, jobIds, mappings, boundaries)}
+	onViewTrace={(deviceId, jobIds, mappings, boundaries, execJobId) => viewTraceResult(viewingServerId!, deviceId, jobIds, mappings, boundaries, execJobId)}
 />
 
 <AgentTraceResultSheet
@@ -777,6 +780,8 @@
 	jobIds={traceJobIds}
 	mappings={traceMappings}
 	boundaries={traceBoundaries}
+	execJobId={traceExecJobId}
+	onBoundariesChange={(next) => (traceBoundaries = next)}
 />
 
 <AgentScreenSheet
