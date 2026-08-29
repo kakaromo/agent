@@ -155,17 +155,19 @@
 					{#if !b.success}<span class="text-destructive">실패</span>{/if}
 				</button>
 				{#if onRename}
-					<!-- 연필은 **항상 보인다.**
-					     예전엔 hover 때만 나타나게 했는데(칩이 아이콘 밭이 되는 걸 피하려고)
-					     기능이 있는 줄 아무도 몰랐다 — 마우스를 올려야 알 수 있는 기능은
-					     없는 것과 같다. 대신 흐리게 깔아 두고 hover 에서 또렷해진다. -->
+					<!-- 연필은 **항상, 또렷하게** 보인다.
+					     1차: hover 때만 → 기능이 있는 줄 아무도 몰랐다.
+					     2차: opacity-40 + size-2.5(10px) → 여전히 안 보였다. 구간이 35개쯤
+					     되면 칩이 3줄로 빽빽해져서, 흐린 10px 아이콘은 배경으로 묻힌다.
+					     지금: 세로 구분선으로 영역을 떼고 muted 색 + 12px. hover 시 배경이
+					     들어와 누를 수 있는 것임이 분명해진다. -->
 					<button
 						onclick={() => startEdit(i)}
-						class="pr-1 opacity-40 transition-opacity hover:opacity-100"
+						class="rounded-r border-l px-1 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						title="이름 편집"
 						aria-label="구간 이름 편집"
 					>
-						<PencilIcon class="size-2.5" />
+						<PencilIcon class="size-3" />
 					</button>
 				{/if}
 			</span>
