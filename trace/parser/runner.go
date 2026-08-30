@@ -63,6 +63,10 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 	var ufsCustomEvents []UFSCustomEvent
 	var fsioUfsEvents []FsioUfsEvent
 	var fsioBlockEvents []FsioBlockEvent
+	// fsio_read 는 독립 trace_type 이 아니라 fsio_* 수집에 **함께 딸려 나오는 형제**다.
+	// 같은 로그 안 VFS read 종료 요약 행에서 나오므로 같은 패스에서 모은다.
+	var fsioReadEvents []FsioReadEvent
+	var fsioSummary *FsioSummary
 
 	var lineNo uint64
 	for scanner.Scan() {
@@ -76,7 +80,13 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 		// bpftrace TSV 도 걸리는데, 포맷이 달라 그대로 넘기면 오파싱된다.
 		if wantFsioUFS || wantFsioBlock {
 			if quickFsioCheck(line) {
-				if wantFsioUFS {
+				// VFS read 종료 요약은 layer 가 UFS/BLK 가 아니라 VFS 라서 아래
+				// 두 파서에 안 걸린다. 선택한 레이어와 무관하게 같이 모은다 —
+				// page cache 판정은 UFS/Block 어느 쪽을 보든 같은 질문이다.
+				if ev, ok := parseFsioReadLine(line); ok {
+					ev.LineNumber = lineNo
+					fsioReadEvents = append(fsioReadEvents, ev)
+				} else if wantFsioUFS {
 					if ev, ok := parseFsioUfsLine(line); ok {
 						ev.LineNumber = lineNo
 						fsioUfsEvents = append(fsioUfsEvents, ev)
@@ -87,6 +97,10 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 						fsioBlockEvents = append(fsioBlockEvents, ev)
 					}
 				}
+			} else if fsioSummary == nil && len(line) > 0 && line[0] == '#' {
+				// FSIO_SUMMARY 는 `#` 주석 줄이라 quickFsioCheck 가 일부러 버린다.
+				// 여기서 별도로 집는다 — 이게 없으면 cache 판정이 전부 UNKNOWN 이 된다.
+				fsioSummary = ParseFsioSummaryLine(line)
 			}
 			// ⚠ 여기서 그냥 continue 하면 아래 진행률 보고를 건너뛴다.
 			// 멀티 GB trace.log 를 파싱하는 동안 UI 가 완전히 조용해진다.
@@ -174,8 +188,47 @@ func RunParquetOnly(logFile, outputDir, traceType string, progressFn ProgressFun
 		}
 	}
 
+	// fsio_read — fsio_ufs/fsio_block 과 같은 수집에서 함께 나오는 형제 산출물.
+	// 선택한 레이어와 무관하게, 로그에 VFS read 종료 요약이 있으면 언제나 쓴다.
+	if len(fsioReadEvents) > 0 {
+		report("classifying fsio_read page-cache...")
+		// ⚠ summary 가 nil 이면 전 행이 UNKNOWN 으로 강등된다. 그게 안전한 방향이다 —
+		// coverage 를 모르는 채 hit 이라고 하면 훅 미부착이 캐시 적중으로 둔갑한다.
+		fsioReadEvents = ClassifyFsioRead(fsioReadEvents, fsioSummary)
+		report(fmt.Sprintf("writing result_fsio_read.parquet (%s)", fsioReadNote(fsioReadEvents, fsioSummary)))
+		if err := WriteFsioReadParquet(fsioReadEvents, outputDir); err != nil {
+			return fmt.Errorf("write fsio_read parquet: %w", err)
+		}
+	}
+
 	report("done")
 	return nil
+}
+
+// fsioReadNote — 진행 로그에 남길 cache 판정 요약.
+//
+// hit/miss 만 세고 분모(CountsTowardRatio)를 함께 보인다 — DIRECT/EOF/ERROR/UNKNOWN 은
+// "캐시를 맞췄나" 라는 질문이 성립하지 않아 비율에서 빠지기 때문이다.
+// FSIO_SUMMARY 가 없으면 그 사실을 드러낸다. 조용히 전부 UNKNOWN 이 되면 원인 찾기가 어렵다.
+func fsioReadNote(events []FsioReadEvent, summary *FsioSummary) string {
+	if summary == nil {
+		return fmt.Sprintf("%d rows, FSIO_SUMMARY 없음 → 전부 UNKNOWN", len(events))
+	}
+	var hit, ratioBase int
+	for i := range events {
+		if events[i].CacheClass == CacheClassHit {
+			hit++
+		}
+		if CountsTowardRatio(events[i].CacheClass) {
+			ratioBase++
+		}
+	}
+	if ratioBase == 0 {
+		// 0 으로 나누지 않는다. "판정 대상 없음" 과 "0% hit" 은 다른 사실이다.
+		return fmt.Sprintf("%d rows, 판정 대상 없음", len(events))
+	}
+	return fmt.Sprintf("%d rows, hit %d/%d (%.1f%%)",
+		len(events), hit, ratioBase, float64(hit)*100/float64(ratioBase))
 }
 
 // 미완결 건수는 숨기지 않고 진행 로그에 드러낸다.

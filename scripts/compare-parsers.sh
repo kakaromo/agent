@@ -13,7 +13,7 @@
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
-  echo "usage: $0 <trace.log> <ufs|block|both|ufscustom>" >&2
+  echo "usage: $0 <trace.log> <ufs|block|both|ufscustom|fsio_ufs|fsio_block>" >&2
   exit 2
 fi
 
@@ -55,12 +55,19 @@ echo "[1/4] Rust --parquet-only → $RUST_DIR" >&2
 echo "[2/4] Go RunParquetOnly → $GO_DIR" >&2
 "$GO_BIN" "$LOG" "$GO_DIR" "$TYPE" >/dev/null
 
+# 비교할 parquet 종류. 입력 trace_type 하나가 산출물 여러 개를 낼 수 있다.
+#
+# fsio_ufs / fsio_block 은 result_fsio_read.parquet 을 **함께** 낸다 — VFS read 종료
+# 요약은 같은 로그에 섞여 오는 형제 산출물이라 독립 trace_type 이 아니다.
+# page-cache 판정(hit/miss)이 Rust 와 어긋나면 여기서 잡힌다.
 resolve_types() {
   case "$1" in
-    ufs)        echo "ufs" ;;
-    block)      echo "block" ;;
-    both)       echo "ufs block" ;;
-    ufscustom)  echo "ufscustom" ;;
+    ufs)         echo "ufs" ;;
+    block)       echo "block" ;;
+    both)        echo "ufs block" ;;
+    ufscustom)   echo "ufscustom" ;;
+    fsio_ufs)    echo "fsio_ufs fsio_read" ;;
+    fsio_block)  echo "fsio_block fsio_read" ;;
     *) echo "unknown trace type: $1" >&2; exit 1 ;;
   esac
 }

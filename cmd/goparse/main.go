@@ -3,7 +3,10 @@
 //	go run ./cmd/goparse <trace.log> <outputDir> <ufs|block|both|ufscustom|fsio_ufs|fsio_block>
 //
 // agent 본체와 동일한 trace/parser.RunParquetOnly 를 직접 호출해
-// outputDir/result_<type>.parquet 을 생성한다. scripts/compare-parsers.sh 가
+// outputDir/result_<type>.parquet 을 생성한다.
+//
+// fsio_ufs / fsio_block 을 주면 result_fsio_read.parquet 이 **함께** 나온다 —
+// VFS read 종료 요약은 같은 로그에 섞여 오는 형제 산출물이라 독립 타입이 아니다. scripts/compare-parsers.sh 가
 // 같은 trace.log 에 Rust tools/trace --parquet-only 와 이걸 둘 다 돌려
 // DuckDB EXCEPT 로 row-by-row 비교한다.
 package main

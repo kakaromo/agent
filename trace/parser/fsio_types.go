@@ -178,3 +178,89 @@ type FsioBlockEvent struct {
 	IsF2FSWarmData     bool    `parquet:"is_f2fs_warm_data"`
 	IsF2FSColdData     bool    `parquet:"is_f2fs_cold_data"`
 }
+
+// FsioReadEvent — bpftrace VFS read 종료 요약 한 줄 (`vfs_read:exit` / `readv:exit`).
+//
+// 스키마 정본: `../trace/src/output/fsio_read_parquet.rs` (33 컬럼, 순서까지 동일).
+// 모델 정본: `../trace/src/models/fsio_read.rs`.
+//
+// ## FsioUfs/FsioBlock 과 다른 점 — 페어링이 없다
+//
+// read **한 건당 정확히 한 줄**이라 send/complete 짝이 없다. dtoc/ctoc/ctod/qd 개념이
+// 성립하지 않으므로 latency 처리를 재사용하지 않고 cache 분류만 한다.
+// 기존 VFS row 의 size 는 *요청* 크기라 EOF(0)·error(<0)·short read 를 구분할 수 없는데,
+// 이 row 는 **실제 반환 바이트 + page-cache 증거**를 함께 싣는다.
+//
+// ## ⚠ CacheClass=CACHE_HIT_INFERRED 는 하드웨어 cache hit 이벤트가 아니다
+//
+// "read 가 도는 동안 FS page-fill 훅이 한 번도 안 불렸다" 는 **음성 증거** 추론이다
+// (`mm/filemap.c` filemap_get_pages() 는 완전 hit 이면 a_ops 콜백을 아예 안 부른다).
+// 그래서 "훅이 안 불렸다" 와 "훅이 애초에 안 붙었다" 를 반드시 갈라야 하며, 그 정보는
+// 행이 아니라 FSIO_SUMMARY 의 `<fs>_cache_coverage` 에 있다 (Coverage 필드).
+type FsioReadEvent struct {
+	// ── 시각 ──
+	// Time 은 read **종료** 시각이다 (kretprobe 시점, 시작 시각이 아니다).
+	Time float64 `parquet:"time"`
+	// DurationNs — extra `dur_ns=`. VFS 진입→kretprobe 구간.
+	// nil = 미상. producer 가 진입을 못 본 exit 에는 키 자체를 안 싣는다 —
+	// 0 으로 채우면 "정말 0ns" 와 구분이 안 되므로 nil 을 유지한다.
+	// ⚠ VFS 계층 소요 시간이지 장치 지연이 아니다. ns 그대로 둔다(표시 단위 변환은 소비 측).
+	DurationNs *uint64 `parquet:"duration_ns,optional"`
+	LineNumber uint64  `parquet:"line_number"`
+
+	// ── 주체 ──
+	Pid     uint32 `parquet:"pid"`
+	Tid     uint32 `parquet:"tid"`
+	CPU     uint32 `parquet:"cpu"`
+	Comm    string `parquet:"comm"`
+	Syscall string `parquet:"syscall"` // 진입 syscall — vfs_read / pread / readv / preadv
+	Action  string `parquet:"action"`  // "vfs_read:exit" | "readv:exit"
+	// ReadID — extra `rid=`. (cpu, tid, read_id) 로 유일.
+	// ⚠ enter row 에는 없어 enter↔exit 조인에는 못 쓴다.
+	ReadID uint32 `parquet:"read_id"`
+
+	// ── 대상 ──
+	// Fs 는 TSV col 9. **coverage 조회 키는 반드시 이것**이다 (EvidenceFs 아님).
+	Fs       string `parquet:"fs"`
+	DevMajor uint32 `parquet:"devmajor"`
+	DevMinor uint32 `parquet:"devminor"`
+	Ino      uint64 `parquet:"ino"`
+	Name     string `parquet:"name"`
+
+	// ── 결과 ──
+	Offset         uint64 `parquet:"offset"`          // extra `off=`
+	RequestedBytes uint64 `parquet:"requested_bytes"` // extra `req=`
+	ReturnedBytes  uint64 `parquet:"returned_bytes"`  // RawResult>0 이면 그 값, 아니면 0
+	// RawResult — extra `ret=`. **부호 있음**: >0 반환 바이트 / 0 EOF / <0 음수 errno.
+	RawResult int64 `parquet:"raw_result"`
+
+	// ── 증거 (원시값 — 판정의 정본) ──
+	IoFlags    uint64 `parquet:"io_flags"`
+	IsBuffered bool   `parquet:"is_buffered"` // io_flags bit 32 (IO_BUFFERED)
+	IsDirect   bool   `parquet:"is_direct"`   // bit 9 (IO_O_DIRECT) 또는 bit 33 (IO_DIRECT_IO)
+	// FillUnits — extra `fill=`. PRIMARY page-fill 훅 호출 수. **miss 의 1차 증거**.
+	// ⚠ 훅 발화 **횟수**다. page 수도 byte 수도 아니다 — large folio·압축·merge 때문에
+	//   `units × 4096 ≠ 장치 bytes`.
+	FillUnits uint32 `parquet:"fill_units"`
+	// SyncRaUnits — extra `sync_ra=`. page_cache_sync_ra 호출 수 = **demand miss**.
+	SyncRaUnits uint32 `parquet:"sync_ra_units"`
+	// AsyncRaUnits — extra `async_ra=`. **반환 바이트는 hit 인데** 다음 창을 미리 채운 것.
+	// 이것만으로 miss 가 아니다.
+	AsyncRaUnits uint32 `parquet:"async_ra_units"`
+	FillPages    uint32 `parquet:"fill_pages"` // extra `fill_pg=` (근사, 4K 가정)
+	// EvidenceFs — extra `evfs=`. 증거를 낸 filesystem.
+	// ⚠ **coverage 조회 키로 쓰면 안 된다.** evid_fs 는 evid_fill() 안에서만 설정되므로
+	//   진짜 cache hit 은 fill 이 0 이라 **항상 'none'** 이다.
+	EvidenceFs string `parquet:"evidence_fs"`
+
+	// ── 판정 (분류기가 채운다) ──
+	FsReadSeen bool   `parquet:"fs_read_seen"` // FillUnits>0 || SyncRaUnits>0
+	Coverage   string `parquet:"coverage"`     // "ok" | "missing" | "unknown"
+	CacheClass string `parquet:"cache_class"`  // CACHE_HIT_INFERRED | CACHE_MISS | DIRECT_IO | EOF | ERROR | UNKNOWN
+	Quality    string `parquet:"quality"`      // "ok" | "suspect"
+	// QualityReason — 빈 문자열 = 이상 없음. 여러 개면 `,` 로 연결.
+	QualityReason string `parquet:"quality_reason"`
+	// BpfCls — extra `cls=`. BPF 의 1차 판정, **참고용 보존**(대조 디버깅).
+	// 정본은 위 원시 카운터이고 CacheClass 는 우리가 재계산한 값이다.
+	BpfCls string `parquet:"bpf_cls"`
+}

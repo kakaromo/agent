@@ -140,3 +140,22 @@ func WriteFsioBlockParquet(events []FsioBlockEvent, outputDir string) error {
 		return w.Close()
 	})
 }
+
+// WriteFsioReadParquet — VFS read 종료 요약 parquet 쓰기.
+//
+// 파일명은 Rust `save_to_parquet` 의 `{prefix}_fsio_read.parquet` 과 맞춘다.
+// fsio_ufs/fsio_block 과 **같은 수집에서 함께 나오는 형제 산출물**이다 —
+// 독립 trace_type 이 아니라 Page Cache 화면이 이걸 곁들여 읽는다.
+func WriteFsioReadParquet(events []FsioReadEvent, outputDir string) error {
+	if len(events) == 0 {
+		return nil
+	}
+	return writeAtomic(outputDir, "result_fsio_read.parquet", func(f *os.File) error {
+		comp := chooseCompression(len(events))
+		w := parquet.NewGenericWriter[FsioReadEvent](f, parquet.Compression(comp))
+		if _, err := w.Write(events); err != nil {
+			return err
+		}
+		return w.Close()
+	})
+}
