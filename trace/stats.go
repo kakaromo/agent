@@ -32,9 +32,46 @@ func parquetGlobPatterns(traceType string) []string {
 		return []string{"result_fsio_ufs.parquet", "fsio_ufs.parquet"}
 	case "fsio_block":
 		return []string{"result_fsio_block.parquet", "fsio_block.parquet"}
+	// fsio_read 는 여기서 돌려주지 않는다 — 독립 trace_type 이 아니라
+	// fsio_ufs/fsio_block 의 **형제**다. Page Cache 조회는 FindFsioReadParquets 를 쓴다.
 	default:
 		return []string{"*.parquet"}
 	}
+}
+
+// fsioReadParquetPatterns — VFS read 종료 요약 parquet 파일 패턴.
+var fsioReadParquetPatterns = []string{"result_fsio_read.parquet", "fsio_read.parquet"}
+
+// isFsioReadParquet — 이 경로가 fsio_read 산출물인가.
+//
+// ⚠ `*.parquet` 와일드카드(trace_type 이 "both"/"" 인 잡)가 이 파일을 **빨아들이면
+// 안 된다.** 스키마가 33컬럼으로 전혀 달라 union_by_name 으로 붙으면 행 수가
+// 통째로 부풀고(실측 471 → 834) 모든 통계가 조용히 틀린다.
+func isFsioReadParquet(path string) bool {
+	base := filepath.Base(path)
+	for _, p := range fsioReadParquetPatterns {
+		if base == p {
+			return true
+		}
+	}
+	return false
+}
+
+// FindFsioReadParquets — 이 잡들에 딸린 fsio_read parquet 경로.
+//
+// 없으면 빈 슬라이스. 호출부는 이걸로 "Page Cache 를 보여줄 수 있는 잡인가" 를 판단한다
+// — portal 은 parquet 레지스트리에서 형제를 찾지만 standalone 은 디렉토리를 본다.
+func FindFsioReadParquets(infos []*TraceJobInfo) []string {
+	var found []string
+	for _, info := range infos {
+		for _, p := range fsioReadParquetPatterns {
+			matches, err := filepath.Glob(filepath.Join(info.Dir, p))
+			if err == nil {
+				found = append(found, matches...)
+			}
+		}
+	}
+	return found
 }
 
 // findParquetFiles finds actual parquet files in a directory matching the trace type.
@@ -43,8 +80,16 @@ func findParquetFiles(dir, traceType string) []string {
 	var found []string
 	for _, p := range patterns {
 		matches, err := filepath.Glob(filepath.Join(dir, p))
-		if err == nil && len(matches) > 0 {
-			found = append(found, matches...)
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			// ⚠ fsio_read 는 스키마가 달라 섞이면 행 수가 부풀고 통계가 조용히 틀린다.
+			// `*.parquet` 와일드카드로 들어오는 경로를 여기서 막는다.
+			if isFsioReadParquet(m) {
+				continue
+			}
+			found = append(found, m)
 		}
 	}
 	return found

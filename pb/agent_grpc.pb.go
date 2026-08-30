@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v5.29.3
-// source: proto/agent.proto
+// source: agent.proto
 
 package pb
 
@@ -34,6 +34,7 @@ const (
 	DeviceAgent_GetTraceResult_FullMethodName         = "/agent.DeviceAgent/GetTraceResult"
 	DeviceAgent_GetTraceRawData_FullMethodName        = "/agent.DeviceAgent/GetTraceRawData"
 	DeviceAgent_GetIoAttribution_FullMethodName       = "/agent.DeviceAgent/GetIoAttribution"
+	DeviceAgent_GetFsioReadStats_FullMethodName       = "/agent.DeviceAgent/GetFsioReadStats"
 	DeviceAgent_UploadTraceToMinio_FullMethodName     = "/agent.DeviceAgent/UploadTraceToMinio"
 	DeviceAgent_UploadBenchmarkToMinio_FullMethodName = "/agent.DeviceAgent/UploadBenchmarkToMinio"
 	DeviceAgent_UploadTraceArchive_FullMethodName     = "/agent.DeviceAgent/UploadTraceArchive"
@@ -77,6 +78,8 @@ type DeviceAgentClient interface {
 	GetTraceRawData(ctx context.Context, in *GetTraceRawDataRequest, opts ...grpc.CallOption) (*GetTraceRawDataResponse, error)
 	// I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
 	GetIoAttribution(ctx context.Context, in *GetIoAttributionRequest, opts ...grpc.CallOption) (*GetIoAttributionResponse, error)
+	// VFS buffered read page-cache 통계 (fsio_read 형제 parquet 전용)
+	GetFsioReadStats(ctx context.Context, in *GetFsioReadStatsRequest, opts ...grpc.CallOption) (*GetFsioReadStatsResponse, error)
 	// Upload
 	UploadTraceToMinio(ctx context.Context, in *UploadTraceRequest, opts ...grpc.CallOption) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(ctx context.Context, in *UploadBenchmarkRequest, opts ...grpc.CallOption) (*UploadBenchmarkResponse, error)
@@ -267,6 +270,16 @@ func (c *deviceAgentClient) GetIoAttribution(ctx context.Context, in *GetIoAttri
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetIoAttributionResponse)
 	err := c.cc.Invoke(ctx, DeviceAgent_GetIoAttribution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAgentClient) GetFsioReadStats(ctx context.Context, in *GetFsioReadStatsRequest, opts ...grpc.CallOption) (*GetFsioReadStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFsioReadStatsResponse)
+	err := c.cc.Invoke(ctx, DeviceAgent_GetFsioReadStats_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -488,6 +501,8 @@ type DeviceAgentServer interface {
 	GetTraceRawData(context.Context, *GetTraceRawDataRequest) (*GetTraceRawDataResponse, error)
 	// I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
 	GetIoAttribution(context.Context, *GetIoAttributionRequest) (*GetIoAttributionResponse, error)
+	// VFS buffered read page-cache 통계 (fsio_read 형제 parquet 전용)
+	GetFsioReadStats(context.Context, *GetFsioReadStatsRequest) (*GetFsioReadStatsResponse, error)
 	// Upload
 	UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error)
 	UploadBenchmarkToMinio(context.Context, *UploadBenchmarkRequest) (*UploadBenchmarkResponse, error)
@@ -569,6 +584,9 @@ func (UnimplementedDeviceAgentServer) GetTraceRawData(context.Context, *GetTrace
 }
 func (UnimplementedDeviceAgentServer) GetIoAttribution(context.Context, *GetIoAttributionRequest) (*GetIoAttributionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetIoAttribution not implemented")
+}
+func (UnimplementedDeviceAgentServer) GetFsioReadStats(context.Context, *GetFsioReadStatsRequest) (*GetFsioReadStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFsioReadStats not implemented")
 }
 func (UnimplementedDeviceAgentServer) UploadTraceToMinio(context.Context, *UploadTraceRequest) (*UploadTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadTraceToMinio not implemented")
@@ -901,6 +919,24 @@ func _DeviceAgent_GetIoAttribution_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DeviceAgentServer).GetIoAttribution(ctx, req.(*GetIoAttributionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAgent_GetFsioReadStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFsioReadStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAgentServer).GetFsioReadStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAgent_GetFsioReadStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAgentServer).GetFsioReadStats(ctx, req.(*GetFsioReadStatsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1250,6 +1286,10 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DeviceAgent_GetIoAttribution_Handler,
 		},
 		{
+			MethodName: "GetFsioReadStats",
+			Handler:    _DeviceAgent_GetFsioReadStats_Handler,
+		},
+		{
 			MethodName: "UploadTraceToMinio",
 			Handler:    _DeviceAgent_UploadTraceToMinio_Handler,
 		},
@@ -1329,5 +1369,5 @@ var DeviceAgent_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/agent.proto",
+	Metadata: "agent.proto",
 }

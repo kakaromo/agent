@@ -288,6 +288,23 @@ func (s *DeviceAgentServer) GetIoAttribution(ctx context.Context, req *pb.GetIoA
 	return resp, nil
 }
 
+// GetFsioReadStats — VFS buffered read page-cache 통계 (fsio_read 형제 parquet 전용).
+//
+// 형제 parquet 이 없으면 **에러가 아니라 빈 응답**(total_requests=0)이다 —
+// ftrace 계열이나 구버전 fsio 수집에는 애초에 없는 산출물이고, 클라이언트는
+// 이걸로 Page Cache 탭을 숨긴다. 에러로 만들면 정상 job 에 빨간 배너가 뜬다.
+func (s *DeviceAgentServer) GetFsioReadStats(ctx context.Context, req *pb.GetFsioReadStatsRequest) (*pb.GetFsioReadStatsResponse, error) {
+	infos, err := s.collectTraceJobInfos(req.JobIds)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := trace.ComputeFsioReadStats(infos, req)
+	if err != nil {
+		return nil, fmt.Errorf("compute fsio_read stats: %w", err)
+	}
+	return resp, nil
+}
+
 // collectTraceJobInfos resolves job IDs to parquet directories and trace types.
 //
 // parquet-only 단일화 후 RUNNING/COLLECTING/REPARSING 동안에는 result_*.parquet 가

@@ -313,6 +313,9 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			case "attribution":
 				handleTraceAttribution(w, r, agent)
 				return
+			case "fsio-read-stats":
+				handleTraceFsioReadStats(w, r, agent)
+				return
 			case "clocksync":
 				handleTraceClockSync(w, r, agent)
 				return
@@ -480,6 +483,42 @@ func handleTraceAttribution(w http.ResponseWriter, r *http.Request, agent *Devic
 		return
 	}
 	writeJSON(w, http.StatusOK, attributionToMap(resp))
+}
+
+// handleTraceFsioReadStats: POST /api/agent/trace/fsio-read-stats
+// body { jobIds, filter?, topN? }
+//
+// VFS buffered read 의 page-cache hit/miss 통계. fsio_read 형제 parquet 이 없으면
+// **200 + totalRequests=0** 이다 (에러 아님) — 프론트는 이걸로 Page Cache 탭을 숨긴다.
+func handleTraceFsioReadStats(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	body, err := readJSONBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "decode: "+err.Error())
+		return
+	}
+	jobIDs := stringSlice(body["jobIds"])
+	if len(jobIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "jobIds required")
+		return
+	}
+	req := &pb.GetFsioReadStatsRequest{JobIds: jobIDs}
+	if f, ok := body["filter"].(map[string]any); ok {
+		req.Filter = buildTraceFilter(f)
+	}
+	if v, ok := numberOf(body["topN"]); ok {
+		req.TopN = uint32(v)
+	}
+
+	resp, err := agent.GetFsioReadStats(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, fsioReadStatsToMap(resp))
 }
 
 // handleTraceClockSync: POST /api/agent/trace/clocksync body { jobIds }

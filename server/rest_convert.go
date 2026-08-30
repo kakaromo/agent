@@ -676,3 +676,88 @@ func numberOf(v any) (float64, bool) {
 		return 0, false
 	}
 }
+
+// fsioReadStatsToMap — page-cache 통계 → JSON.
+//
+// ⚠ optional 필드는 **없으면 아예 안 넣는다.** 0 으로 채우면:
+//   - 비율: "전부 miss" 와 "판정할 게 없음" 이 둘 다 0 으로 뭉개진다
+//   - 지연: "0ns 였다" 로 오독된다
+//
+// 프론트는 없는 값을 "—" 로 렌더한다.
+func fsioReadStatsToMap(r *pb.GetFsioReadStatsResponse) map[string]any {
+	if r == nil {
+		return nil
+	}
+	byClass := make([]map[string]any, 0, len(r.GetByClass()))
+	for _, c := range r.GetByClass() {
+		m := map[string]any{
+			"cacheClass":      c.GetCacheClass(),
+			"requests":        c.GetRequests(),
+			"requestedBytes":  c.GetRequestedBytes(),
+			"returnedBytes":   c.GetReturnedBytes(),
+			"durationSamples": c.GetDurationSamples(),
+		}
+		if c.DurationAvgNs != nil {
+			m["durationAvgNs"] = c.GetDurationAvgNs()
+		}
+		if c.DurationP50Ns != nil {
+			m["durationP50Ns"] = c.GetDurationP50Ns()
+		}
+		if c.DurationP95Ns != nil {
+			m["durationP95Ns"] = c.GetDurationP95Ns()
+		}
+		if c.DurationP99Ns != nil {
+			m["durationP99Ns"] = c.GetDurationP99Ns()
+		}
+		byClass = append(byClass, m)
+	}
+
+	topFiles := make([]map[string]any, 0, len(r.GetTopFiles()))
+	for _, f := range r.GetTopFiles() {
+		topFiles = append(topFiles, map[string]any{
+			"key":               f.GetKey(),
+			"requests":          f.GetRequests(),
+			"hitRequests":       f.GetHitRequests(),
+			"missRequests":      f.GetMissRequests(),
+			"unknownRequests":   f.GetUnknownRequests(),
+			"requestedBytes":    f.GetRequestedBytes(),
+			"returnedBytes":     f.GetReturnedBytes(),
+			"fillUnits":         f.GetFillUnits(),
+			"readaheadRequests": f.GetReadaheadRequests(),
+			"readaheadUnits":    f.GetReadaheadUnits(),
+			"totalDurationNs":   f.GetTotalDurationNs(),
+		})
+	}
+
+	out := map[string]any{
+		"totalRequests":     r.GetTotalRequests(),
+		"byClass":           byClass,
+		"fillUnits":         r.GetFillUnits(),
+		"readaheadRequests": r.GetReadaheadRequests(),
+		"readaheadUnits":    r.GetReadaheadUnits(),
+		"syncRaUnits":       r.GetSyncRaUnits(),
+		"shortReads":        r.GetShortReads(),
+		"durationUnknown":   r.GetDurationUnknown(),
+		"topFiles":          topFiles,
+		"qualityWarnings":   stringsOrEmpty(r.GetQualityWarnings()),
+		"schemaVersion":     r.GetSchemaVersion(),
+	}
+	if r.RequestHitRatio != nil {
+		out["requestHitRatio"] = r.GetRequestHitRatio()
+	}
+	if r.RequestMissRatio != nil {
+		out["requestMissRatio"] = r.GetRequestMissRatio()
+	}
+	if r.UnknownRatio != nil {
+		out["unknownRatio"] = r.GetUnknownRatio()
+	}
+	return out
+}
+
+// stringsOrEmpty — nil 슬라이스를 JSON `null` 이 아니라 `[]` 로 내보낸다.
+func stringsOrEmpty(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}

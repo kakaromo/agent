@@ -26,6 +26,8 @@ service DeviceAgent {
   rpc GetTraceRawData(GetTraceRawDataRequest) returns (GetTraceRawDataResponse);
   // I/O 귀속 집계 — "이 IO 를 누가/무엇이 만들었나" (fsio_* 전용)
   rpc GetIoAttribution(GetIoAttributionRequest) returns (GetIoAttributionResponse);
+  // VFS buffered read page-cache 통계 (fsio_read 형제 parquet 전용)
+  rpc GetFsioReadStats(GetFsioReadStatsRequest) returns (GetFsioReadStatsResponse);
 
   // Upload
   rpc UploadTraceToMinio(UploadTraceRequest) returns (UploadTraceResponse);
@@ -593,6 +595,88 @@ message GetIoAttributionResponse {
   repeated AttributionGroup groups = 2;
   // parquet 에 컬럼이 없어 건너뛴 축 — 에러 대신 "못 했다" 를 알린다.
   repeated AttributionDim unsupported_dims = 3;
+}
+
+// ============================================================================
+// GetFsioReadStats — VFS buffered read page-cache 통계 (fsio_read 전용)
+// ============================================================================
+//
+// 정본은 Rust `../trace/proto/log_processor.proto` 다. **응답 필드 번호를 그대로
+// 맞췄다** — 요청만 agent 좌표계(job_ids)로 바꾼다. 필드 번호가 어긋나면 wire 에서
+// 조용히 틀린 값이 붙는다.
+//
+// ⚠ CACHE_HIT_INFERRED 는 하드웨어 cache hit 이벤트가 아니다. "read 가 도는 동안 FS
+//   page-fill 훅이 한 번도 안 불렸다" 는 **음성 증거** 기반 추론이다. 그래서 훅이
+//   안 붙은 fs 의 행은 hit 이 아니라 UNKNOWN 으로 떨어진다(coverage).
+//
+// ⚠ **byte 단위 hit ratio 를 제공하지 않는다.** 일부 folio 만 uptodate 였던 부분 hit 도
+//   fill>0 이라 miss 로 분류된다 — request 단위 판정이다. class 별 bytes 는
+//   "그 class 로 분류된 request 가 반환한 바이트" 일 뿐 "캐시에 있던 바이트" 가 아니다.
+
+message GetFsioReadStatsRequest {
+  repeated string job_ids = 1;   // 이 잡들에 딸린 fsio_read 형제 parquet 을 본다
+  TraceFilter filter = 2;
+  uint32 top_n = 3;              // 파일별 상위 N (기본 20, 서버가 200 으로 clamp)
+}
+
+message FsioReadClassStats {
+  // CACHE_HIT_INFERRED | CACHE_MISS | DIRECT_IO | EOF | ERROR | UNKNOWN
+  string cache_class = 1;
+  uint64 requests = 2;
+  uint64 requested_bytes = 3;
+  // ⚠ "캐시에 있던 바이트" 가 아니다 — 이 class 로 분류된 request 의 반환량이다.
+  uint64 returned_bytes = 4;
+
+  // dur_ns 가 실린 행만 센다. producer 가 진입을 못 본 exit 는 빠지므로 requests 보다
+  // 작을 수 있다. 0 으로 채워 평균을 끌어내리지 않기 위해 표본 수를 따로 준다.
+  uint64 duration_samples = 5;
+  optional uint64 duration_avg_ns = 6;
+  optional uint64 duration_p50_ns = 7;
+  optional uint64 duration_p95_ns = 8;
+  optional uint64 duration_p99_ns = 9;
+}
+
+message FsioReadFileStats {
+  // 실제 경로 → "ino:N" → "(meta:<fs>)" → "(unknown)" 폴백.
+  string key = 1;
+  uint64 requests = 2;
+  uint64 hit_requests = 3;
+  uint64 miss_requests = 4;
+  uint64 unknown_requests = 5;
+  uint64 requested_bytes = 6;
+  uint64 returned_bytes = 7;
+  // ⚠ 훅 발화 횟수다. page 수도 byte 수도 아니다 (large folio·압축·merge).
+  uint64 fill_units = 8;
+  uint64 readahead_requests = 9;
+  uint64 readahead_units = 10;
+  uint64 total_duration_ns = 11;
+}
+
+message GetFsioReadStatsResponse {
+  uint64 total_requests = 1;
+  repeated FsioReadClassStats by_class = 2;
+
+  // ⚠ **optional 이 의미가 있다.** 분모(hit+miss)가 0 이면 값을 안 싣는다.
+  //   평문 double 이면 "전부 miss(0.0)" 와 "판정할 게 없음" 이 둘 다 0.0 으로 뭉개진다.
+  //   분모에서 DIRECT_IO / EOF / ERROR / UNKNOWN 은 제외한다.
+  optional double request_hit_ratio = 3;
+  optional double request_miss_ratio = 4;
+  optional double unknown_ratio = 5;
+
+  uint64 fill_units = 6;
+  uint64 readahead_requests = 7;
+  uint64 readahead_units = 8;
+  uint64 sync_ra_units = 9;
+  uint64 short_reads = 10;
+  uint64 duration_unknown = 11;
+
+  repeated FsioReadFileStats top_files = 12;
+
+  // 수집 품질 경고 (coverage 미부착 fs 등). **숨기지 말 것** — 부족한 근거를 모른 채
+  // hit ratio 를 읽으면 cache 판정에서 특히 위험하다.
+  repeated string quality_warnings = 13;
+
+  string schema_version = 14;   // "fsio_read-v1"
 }
 
 message GetTraceRawDataRequest {
