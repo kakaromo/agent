@@ -131,10 +131,11 @@
 		if (sortBy === 'bytes') return e.totalBytes;
 		return e.dtocSumMs;
 	}
+	/** 정렬 기준 이름 — "막대 길이 = {…}" 문장에 그대로 들어간다. */
 	function metricLabel(): string {
-		if (sortBy === 'count') return '건수';
-		if (sortBy === 'bytes') return '용량';
-		return '장치 시간';
+		if (sortBy === 'count') return 'I/O 횟수';
+		if (sortBy === 'bytes') return 'Read/Write 양';
+		return '걸린 시간';
 	}
 	function fmtMetric(e: AttributionEntry): string {
 		if (sortBy === 'count') return e.count.toLocaleString();
@@ -183,7 +184,7 @@
 		<div class="flex items-center gap-3 flex-wrap text-xs">
 			<div class="flex items-center gap-1">
 				<span class="text-muted-foreground">정렬</span>
-				{#each [['latency', '장치 시간'], ['count', '건수'], ['bytes', '용량']] as [v, label] (v)}
+				{#each [['latency', '걸린 시간'], ['count', 'I/O 횟수'], ['bytes', 'Read/Write 양']] as [v, label] (v)}
 					<button
 						class="px-2 py-0.5 rounded border transition-colors {sortBy === v ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'}"
 						onclick={() => (sortBy = v as SortBy)}
@@ -270,14 +271,14 @@
 								<table class="w-full text-[10px] tabular-nums">
 									<thead class="text-muted-foreground">
 										<tr class="border-b">
-											<th class="text-left font-medium py-0.5 pr-2">키</th>
-											<th class="text-right font-medium py-0.5 px-1">건수</th>
-											<th class="text-right font-medium py-0.5 px-1">비중</th>
-											<th class="text-right font-medium py-0.5 px-1">용량</th>
-											<th class="text-right font-medium py-0.5 px-1">장치시간</th>
+											<th class="text-left font-medium py-0.5 pr-2">이름</th>
+											<th class="text-right font-medium py-0.5 px-1">I/O 횟수</th>
+											<th class="text-right font-medium py-0.5 px-1">Ratio</th>
+											<th class="text-right font-medium py-0.5 px-1">Read/Write 양</th>
+											<th class="text-right font-medium py-0.5 px-1">걸린 시간</th>
 											<th class="text-right font-medium py-0.5 px-1">DtoC p99</th>
 											{#if panel.dim === 'comm'}
-												<th class="text-right font-medium py-0.5 pl-1">파일수</th>
+												<th class="text-right font-medium py-0.5 pl-1">파일 개수</th>
 											{/if}
 										</tr>
 									</thead>
