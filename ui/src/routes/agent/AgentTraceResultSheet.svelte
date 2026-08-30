@@ -9,6 +9,7 @@
 	import type { StatsResponse, StatsLatency } from './trace/types.js';
 	import AiChatPanel from './AiChatPanel.svelte';
 	import AgentAttributionView from './AgentAttributionView.svelte';
+	import AgentCacheView from './AgentCacheView.svelte';
 	import BehaviorTimeline from './BehaviorTimeline.svelte';
 	import { columnsFor, displayValue, isHexDisplay, rowMatchesFilters, type ColumnFilter } from './rawDataColumns.js';
 	import ColumnFilterHeader from './trace/ColumnFilterHeader.svelte';
@@ -19,7 +20,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -444,6 +445,32 @@
 	});
 	const isFsio = $derived(activeTraceType === 'fsio_ufs' || activeTraceType === 'fsio_block');
 
+	/**
+	 * Page Cache 탭을 띄울 수 있나 — fsio 계열이면서 **형제 fsio_read parquet 이 있을 때**.
+	 *
+	 * portal 은 job 의 parquet 목록에서 `traceType === 'fsio_read'` 형제를 찾지만,
+	 * standalone 에는 parquet 레지스트리가 없다(job = result_*.parquet 디렉토리).
+	 * 그래서 서버에 한 번 물어보고 totalRequests > 0 이면 탭을 켠다.
+	 *
+	 * 형제가 없으면 서버가 **에러가 아니라 0** 을 준다 — 구버전 수집이나 ftrace 잡에는
+	 * 애초에 없는 산출물이라 정상 상태다.
+	 */
+	let hasCacheData = $state(false);
+	$effect(() => {
+		const sid = serverId;
+		const ids = activeJobIds;
+		if (!isFsio || !sid || ids.length === 0) {
+			hasCacheData = false;
+			return;
+		}
+		let cancelled = false;
+		// topN=1 — 존재 여부만 보면 되므로 목록은 최소로 받는다.
+		getFsioReadStats(sid, { jobIds: ids, topN: 1 })
+			.then((r) => { if (!cancelled) hasCacheData = r.totalRequests > 0; })
+			.catch(() => { if (!cancelled) hasCacheData = false; });
+		return () => { cancelled = true; };
+	});
+
 	// 다른 job 의 trace 를 열면 loop/repeat 선택을 초기화한다 (이전 job 의 선택 잔존 방지).
 	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
 	let lastFirstJob = $state('');
@@ -589,6 +616,7 @@
 	$effect(() => {
 		if (mainTab === 'behavior' && !hasBehavior) mainTab = 'raw';
 		if (mainTab === 'attribution' && !isFsio) mainTab = 'raw';
+		if (mainTab === 'cache' && !hasCacheData) mainTab = 'raw';
 	});
 
 	// Filter state
@@ -1452,6 +1480,10 @@
 						<!-- 귀속 집계는 cross-layer 메타가 있는 fsio 에서만 답이 나온다. -->
 						<Tabs.Trigger value="attribution" class="text-[10px] px-3 py-1">Attribution</Tabs.Trigger>
 					{/if}
+					{#if hasCacheData}
+						<!-- VFS read 종료 요약(fsio_read)이 같이 수집됐을 때만. -->
+						<Tabs.Trigger value="cache" class="text-[10px] px-3 py-1">Page Cache</Tabs.Trigger>
+					{/if}
 					{#if hasBehavior}
 						<!-- 스텝 구간이 있을 때만. Attribution 과 같은 조건부 노출 방식. -->
 						<Tabs.Trigger value="behavior" class="text-[10px] px-3 py-1">Behavior</Tabs.Trigger>
@@ -1664,6 +1696,17 @@
 							traceType={activeTraceType}
 							filter={attributionFilter}
 							onDrillDown={handleAttrDrillDown}
+						/>
+					</Tabs.Content>
+				{/if}
+
+				<!-- Page Cache Tab (fsio_read 형제 parquet 이 있을 때만) -->
+				{#if hasCacheData}
+					<Tabs.Content value="cache" class="pt-2">
+						<AgentCacheView
+							serverId={serverId ?? 0}
+							jobIds={activeJobIds}
+							filter={attributionFilter}
 						/>
 					</Tabs.Content>
 				{/if}

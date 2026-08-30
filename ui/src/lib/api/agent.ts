@@ -526,6 +526,70 @@ export interface AttributionResult {
 	unsupportedDims: AttributionDim[];
 }
 
+/**
+ * VFS buffered read 의 page-cache 판정 통계 (fsio_read 형제 parquet).
+ *
+ * ⚠ CACHE_HIT_INFERRED 는 하드웨어 cache hit 이벤트가 아니다. "read 가 도는 동안 FS
+ *   page-fill 훅이 한 번도 안 불렸다" 는 **음성 증거** 추론이라, 훅이 안 붙은
+ *   파일시스템의 read 는 hit 이 아니라 UNKNOWN 으로 떨어진다.
+ */
+export interface FsioReadClassStats {
+	/** CACHE_HIT_INFERRED | CACHE_MISS | DIRECT_IO | EOF | ERROR | UNKNOWN */
+	cacheClass: string;
+	requests: number;
+	requestedBytes: number;
+	/** ⚠ "캐시에 있던 바이트" 가 아니다 — 이 class 로 분류된 request 의 반환량이다. */
+	returnedBytes: number;
+	/**
+	 * dur_ns 가 실린 행 수. 진입을 못 본 exit 는 빠지므로 requests 보다 작을 수 있다.
+	 * 0 이면 아래 백분위는 전부 undefined 다.
+	 */
+	durationSamples: number;
+	/** ⚠ 표본이 없으면 **undefined**. 0 으로 폴백하면 "0ns 였다" 로 오독된다 — "—" 로 렌더할 것. */
+	durationAvgNs?: number;
+	durationP50Ns?: number;
+	durationP95Ns?: number;
+	durationP99Ns?: number;
+}
+
+export interface FsioReadFileStats {
+	/** 실제 경로 → "ino:N" → "(meta:<fs>)" → "(unknown)" 폴백 */
+	key: string;
+	requests: number;
+	hitRequests: number;
+	missRequests: number;
+	unknownRequests: number;
+	requestedBytes: number;
+	returnedBytes: number;
+	/** ⚠ 훅 발화 횟수다. page 수도 byte 수도 아니다. */
+	fillUnits: number;
+	readaheadRequests: number;
+	readaheadUnits: number;
+	totalDurationNs: number;
+}
+
+export interface FsioReadStatsResult {
+	totalRequests: number;
+	byClass: FsioReadClassStats[];
+	/**
+	 * ⚠ 분모(hit+miss)가 0 이면 **undefined** 다. 0 으로 폴백하면 "전부 miss" 와
+	 * "판정할 게 없음" 이 구분되지 않는다. 분모에서 DIRECT_IO/EOF/ERROR/UNKNOWN 은 제외.
+	 */
+	requestHitRatio?: number;
+	requestMissRatio?: number;
+	unknownRatio?: number;
+	fillUnits: number;
+	readaheadRequests: number;
+	readaheadUnits: number;
+	syncRaUnits: number;
+	shortReads: number;
+	durationUnknown: number;
+	topFiles: FsioReadFileStats[];
+	/** 수집 품질 경고. **숨기지 말 것** — 근거가 부족한 걸 모르고 hit ratio 를 읽으면 위험하다. */
+	qualityWarnings: string[];
+	schemaVersion: string;
+}
+
 export interface TraceEvent {
 	time: number; lba: number; qd: number; cpu: number;
 	dtoc: number; ctod: number; ctoc: number;
@@ -641,6 +705,20 @@ export function getTraceAttribution(serverId: number, data: {
 	sortBy?: 'count' | 'bytes' | 'latency';
 }): Promise<AttributionResult> {
 	return post(`/agent/trace/attribution?serverId=${serverId}`, data);
+}
+
+/**
+ * page-cache 통계 — VFS buffered read 가 캐시를 맞췄나.
+ *
+ * fsio_read 형제 parquet 이 없으면 **에러가 아니라 totalRequests=0** 이 온다
+ * (ftrace 계열·구버전 수집엔 애초에 없는 산출물이다). 호출부는 그걸로 탭을 숨긴다.
+ */
+export function getFsioReadStats(serverId: number, data: {
+	jobIds: string[];
+	filter?: TraceFilter;
+	topN?: number;
+}): Promise<FsioReadStatsResult> {
+	return post(`/agent/trace/fsio-read-stats?serverId=${serverId}`, data);
 }
 
 export function getTraceRawData(serverId: number, data: {
