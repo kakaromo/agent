@@ -277,6 +277,57 @@ export const fsioBlockColumns: ColumnDef<AnyRow>[] = [
 	col('is_unfinished', 'unfin', boolFmt, 70)
 ];
 
+export const fsioReadColumns: ColumnDef<AnyRow>[] = [
+	// 시각 — time 은 read **종료** 시각이다(진입 아님).
+	col('time', 'time(s)', numFmt(6), 130),
+	col('duration_ns', 'duration_ns', intFmt, 110),
+	col('line_number', 'line', intFmt, 80),
+	// 주체
+	col('pid', 'pid', intFmt, 70),
+	col('tid', 'tid', intFmt, 70),
+	col('cpu', 'cpu', intFmt, 60),
+	col('comm', 'comm', strFmt, 140),
+	col('syscall', 'syscall', strFmt, 100),
+	col('action', 'action', strFmt, 120),
+	col('read_id', 'rid', intFmt, 80),
+	// 대상
+	col('fs', 'fs', strFmt, 70),
+	col('devmajor', 'major', intFmt, 70),
+	col('devminor', 'minor', intFmt, 70),
+	col('ino', 'ino', intFmt, 100),
+	col('name', 'name', strFmt, 260),
+	// 결과 — raw_result 는 부호 있음(음수 = -errno)
+	col('offset', 'offset', intFmt, 110),
+	col('requested_bytes', 'req(b)', intFmt, 100),
+	col('returned_bytes', 'ret(b)', intFmt, 100),
+	col('raw_result', 'ret', intFmt, 90),
+	// 증거 (원시값 — 판정의 정본)
+	{
+		accessorKey: 'io_flags',
+		header: 'io_flags',
+		cell: ({ row }) => ioFlagsText(row.original as AnyRow),
+		meta: { copyText: (row: AnyRow) => ioFlagsText(row) },
+		size: 360
+	},
+	col('is_buffered', 'buffered', strFmt, 80),
+	col('is_direct', 'direct', strFmt, 70),
+	col('fill_units', 'fill', intFmt, 60),
+	col('sync_ra_units', 'sync_ra', intFmt, 80),
+	col('async_ra_units', 'async_ra', intFmt, 85),
+	col('fill_pages', 'fill_pg', intFmt, 75),
+	// ⚠ evidence_fs 는 증거를 낸 fs 일 뿐 coverage 조회 키가 아니다 —
+	//   진짜 hit 은 fill 이 0 이라 항상 'none' 이다.
+	col('evidence_fs', 'evfs', strFmt, 70),
+	// 판정 (trace 가 계산)
+	col('fs_read_seen', 'fs_read', strFmt, 80),
+	col('coverage', 'coverage', strFmt, 90),
+	col('cache_class', 'cache_class', strFmt, 170),
+	col('quality', 'quality', strFmt, 80),
+	col('quality_reason', 'quality_reason', strFmt, 170),
+	// BPF 의 1차 판정 — 참고용 보존(대조 디버깅). 정본은 cache_class.
+	col('bpf_cls', 'bpf_cls', strFmt, 90)
+];
+
 export function columnsFor(traceType: string): ColumnDef<AnyRow>[] {
 	switch (traceType) {
 		case 'ufs':
@@ -289,8 +340,16 @@ export function columnsFor(traceType: string): ColumnDef<AnyRow>[] {
 			return fsioUfsColumns;
 		case 'fsio_block':
 			return fsioBlockColumns;
+		case 'fsio_read':
+			return fsioReadColumns;
 		default:
-			return ufsColumns;
+			// ⚠ 모르는 타입에 ufsColumns 를 주면 **에러 없이 전 칸이 빈 표**가 된다
+			//   (accessorKey 가 하나도 안 맞아 모든 셀이 ''). 새 trace_type 을 추가하고
+			//   여기 case 를 빠뜨리면 화면만 조용히 비는데, 원인을 찾기가 매우 어렵다.
+			//   빈 배열을 주면 컬럼 없는 표로 렌더돼 "정의가 없다" 가 드러난다.
+			//   portal `frontend/src/routes/trace/rawDataColumns.ts` 와 같은 판단.
+			console.warn(`[rawDataColumns] 알 수 없는 trace_type: ${traceType} — columnsFor 에 case 추가 필요`);
+			return [];
 	}
 }
 
