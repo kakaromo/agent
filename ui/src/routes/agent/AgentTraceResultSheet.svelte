@@ -1788,8 +1788,10 @@
 								<thead class="text-muted-foreground">
 									<tr class="border-b">
 										<th class="text-left py-1 pr-2 font-medium">구간</th>
-										<th class="text-right py-1 px-2 font-medium">길이</th>
-										<th class="text-right py-1 px-2 font-medium">이벤트</th>
+										<!-- "길이" 는 시간인데 공간처럼 읽힌다. 옆 헤더가 이미
+										     Read/Write/Discard/max 로 영어라 용어도 섞여 있었다. -->
+										<th class="text-right py-1 px-2 font-medium">Duration</th>
+										<th class="text-right py-1 px-2 font-medium">Events</th>
 										<th class="text-right py-1 px-2 font-medium">Read</th>
 										<th class="text-right py-1 px-2 font-medium">Write</th>
 										<th class="text-right py-1 px-2 font-medium">Discard</th>
