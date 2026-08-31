@@ -38,7 +38,7 @@ func CountsTowardRatio(cacheClass string) bool {
 // SQL 리터럴로도 쓰이므로(집계에서 분모 분리) 상수로 둔다.
 const FsioReadActionMmap = "mmap_fault:exit"
 
-// isFsioReadAction — 이 action 이 VFS read 종료 요약인가.
+// isFsioReadAction — 이 action 이 read 종료 요약인가.
 //
 // ⚠ mmap_fault:exit 은 hit 계산식이 다르다 — fault-around 때문에 캐시에 있는
 //
@@ -48,8 +48,14 @@ const FsioReadActionMmap = "mmap_fault:exit"
 //
 //	섞으면 캐시는 그대로인데 mmap 을 쓴다는 이유만으로 적중률이 깎인다 —
 //	실측 fio_mmap_sample.log 기준 74.22% → 59.63% (14.6%p 가 근거 없이 사라진다).
+//
+// io_uring_read:exit 은 반대로 **read(2) 와 같은 성격**이라 분모를 나누지 않는다 —
+// 요청 단위이고 반환 바이트가 실제 전송량이다. io_uring 은 f_op->read_iter 를 직접
+// 불러 vfs_read 를 안 거칠 뿐, 캐시 판정 관점에서는 동일한 buffered/direct read 다.
+// (AnTuTu 같은 벤치가 이 경로를 쓴다 — 빠뜨리면 그 워크로드가 통째로 안 잡힌다.)
 func isFsioReadAction(a string) bool {
-	return a == "vfs_read:exit" || a == "readv:exit" || a == FsioReadActionMmap
+	return a == "vfs_read:exit" || a == "readv:exit" ||
+		a == "io_uring_read:exit" || a == FsioReadActionMmap
 }
 
 // IsMmapFault — 이 행이 mmap page fault 인가. read 와 **모집단이 다르다.**

@@ -214,7 +214,8 @@ type FsioReadEvent struct {
 	CPU     uint32 `parquet:"cpu"`
 	Comm    string `parquet:"comm"`
 	Syscall string `parquet:"syscall"` // 진입 syscall — vfs_read / pread / readv / preadv
-	Action  string `parquet:"action"`  // "vfs_read:exit" | "readv:exit"
+	// "vfs_read:exit" | "readv:exit" | "mmap_fault:exit" | "io_uring_read:exit"
+	Action string `parquet:"action"`
 	// ReadID — extra `rid=`. (cpu, tid, read_id) 로 유일.
 	// ⚠ enter row 에는 없어 enter↔exit 조인에는 못 쓴다.
 	ReadID uint32 `parquet:"read_id"`

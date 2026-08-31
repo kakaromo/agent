@@ -48,15 +48,15 @@ func classify1(t *testing.T, line string, s *FsioSummary) FsioReadEvent {
 }
 
 func TestFsioReadAcceptsBothExitActions(t *testing.T) {
-	// vfs_read:exit 과 readv:exit 둘 다 종료 요약이다. 하나만 받으면 readv/preadv
-	// 경로의 read 가 통째로 사라진다.
-	for _, action := range []string{"vfs_read:exit", "readv:exit"} {
+	// 종료 요약 action 을 하나라도 빠뜨리면 그 경로의 read 가 통째로 사라진다.
+	// 실제로 io_uring_read:exit 을 안 받던 시절 실로그 540행 중 512행(95%)이 버려졌다.
+	for _, action := range []string{"vfs_read:exit", "readv:exit", "io_uring_read:exit", "mmap_fault:exit"} {
 		if _, ok := parseFsioReadLine(rdLine(action, "vfs_read", "ext4", flagsBuffered, "ret=4096 req=4096")); !ok {
 			t.Errorf("%s 를 받지 못했다", action)
 		}
 	}
 	// 진입 row(:exit 아님)는 종료 요약이 아니다 — 받으면 한 read 가 두 번 세어진다.
-	for _, action := range []string{"vfs_read", "readv", "vfs_write"} {
+	for _, action := range []string{"vfs_read", "readv", "vfs_write", "io_uring_read"} {
 		if _, ok := parseFsioReadLine(rdLine(action, "vfs_read", "ext4", flagsBuffered, "ret=4096 req=4096")); ok {
 			t.Errorf("%s 는 종료 요약이 아닌데 받았다", action)
 		}
@@ -112,6 +112,56 @@ func TestFsioReadClassifyPriority(t *testing.T) {
 				t.Errorf("quality = %q, want %q (reason=%q)", ev.Quality, wantQ, ev.QualityReason)
 			}
 		})
+	}
+}
+
+// io_uring 은 mmap 과 달리 **read 모집단에 그대로 들어간다.**
+//
+// mmap 은 fault-around 때문에 hit 이 row 를 안 남겨서 분모를 분리했지만, io_uring 은
+// 그런 특성이 없다 — 요청 단위이고 반환 바이트가 실제 전송량이다. vfs_read 를 안 거칠
+// 뿐(f_op->read_iter 직접 호출) 캐시 판정 관점에서는 동일한 read 다.
+//
+// ⚠ 이걸 mmap 처럼 분리하면 io_uring 을 쓰는 워크로드(AnTuTu 등)의 hit ratio 가
+//
+//	통째로 사라진다.
+func TestIoUringCountsTowardReadPopulation(t *testing.T) {
+	mk := func(action, extra string) FsioReadEvent {
+		ev, ok := parseFsioReadLine(rdLine(action, "read", "ext4", flagsBuffered, extra))
+		if !ok {
+			t.Fatalf("파싱 실패: %s", action)
+		}
+		return ev
+	}
+	list := ClassifyFsioRead([]FsioReadEvent{
+		mk("io_uring_read:exit", "ret=4096 req=4096 fill=0 sync_ra=0"), // hit
+		mk("io_uring_read:exit", "ret=4096 req=4096 fill=1 sync_ra=1"), // miss
+		mk("mmap_fault:exit", "ret=4096 req=4096 fill=1 sync_ra=1"),    // mmap miss
+	}, summaryOK())
+
+	var ioHit, ioMiss, mmap int
+	for _, e := range list {
+		if e.IsMmapFault() {
+			mmap++
+			continue
+		}
+		switch e.CacheClass {
+		case CacheClassHit:
+			ioHit++
+		case CacheClassMiss:
+			ioMiss++
+		}
+	}
+	if ioHit != 1 || ioMiss != 1 {
+		t.Errorf("io_uring read 모집단 hit/miss = %d/%d, want 1/1", ioHit, ioMiss)
+	}
+	if mmap != 1 {
+		t.Errorf("mmap = %d건, want 1 (별도 모집단)", mmap)
+	}
+	// io_uring 행이 mmap 으로 분류되면 안 된다 — 분모가 갈려 hit ratio 가 사라진다.
+	for _, e := range list {
+		if e.Action == "io_uring_read:exit" && e.IsMmapFault() {
+			t.Error("io_uring 이 mmap 모집단으로 갔다")
+		}
 	}
 }
 
