@@ -132,7 +132,8 @@
 		// 취소한 뒤 여기로 오면 직전 프로파일의 이름·설명·soc 와 **죽은 logcat 패턴**
 		// (marks/series)이 그대로 섞여 저장된다. marker 검증기는 counters/sections 만
 		// 보므로 그 잔재를 못 잡고 조용히 통과시킨다.
-		form = { name: `${c.name} profile`, description: '', runtime: 'qnn', soc: '',
+		// runtime/soc 은 사용자가 고른 값이라 유지한다 (위 seedProfileFromTag 와 같은 이유).
+		form = { ...form, name: `${c.name} profile`, description: '',
 			source: 'marker', patternsJson: '{}' };
 		editingId = null;
 		const cur: MarkerPatterns = {};
@@ -152,8 +153,14 @@
 	/** 후보를 프로파일 초안으로 옮긴다 — 사람이 확인한 것만 저장된다. */
 	function seedProfileFromTag(tag: string, samples: string[]) {
 		// ⚠ marker 쪽과 같은 이유 — 초안을 비우고 시작한다 (Cancel 이 form 을 안 지운다).
-		form = { name: `${tag} profile`, description: '', runtime: 'qnn', soc: '',
-			source: 'logcat', patternsJson: JSON.stringify(examplePatterns, null, 2) };
+		// ⚠ **examplePatterns 를 쓰면 안 된다.** 그럴듯하지만 **가짜인 정규식**
+		// (`TTFT ([0-9.]+) ms` 등)이 초안에 박히는데, 클라이언트·서버 검증을 모두
+		// 통과하므로 그대로 저장하면 **어디에도 안 맞는 프로파일**이 조용히 만들어진다.
+		// 토스트는 "원문을 보고 정규식을 채우세요" 라고 말하는데 이미 채워져 있는 셈이다.
+		// ⚠ runtime/soc 은 사용자가 고른 값이라 유지한다 — 초기화하면 조회 필터가
+		// 바뀌어 저장한 프로파일이 목록에서 사라진 것처럼 보인다.
+		form = { ...form, name: `${tag} profile`, description: '',
+			source: 'logcat', patternsJson: JSON.stringify(emptyPatterns, null, 2) };
 		editingId = null;
 		const cur = parsePatterns(form.patternsJson);
 		cur.tags = [tag];

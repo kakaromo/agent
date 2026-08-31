@@ -335,14 +335,19 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 		o.updateDeviceStatus(job, deviceID, pb.JobState_JOB_STATE_RUNNING, msg, progress)
 
 		prevTraceID := activeTraceJobID
-		stepStartedAt := time.Now().UnixMilli()
+		// ⚠ marker 쓰기를 **호스트 시각 창 밖에** 둔다. 안 그러면 adb 왕복 지연이
+		// 구간 양끝에 더해져 offset 경로로 표시되는 구간이 실제보다 길어진다 —
+		// 측정 도구가 자기 측정을 부풀리는 셈이다. (marker 시각 자체는 커널이 찍으므로
+		// 이 순서와 무관하게 정확하다.)
 		mk := o.markStepBegin(ctx, prevTraceID, es)
+		stepStartedAt := time.Now().UnixMilli()
 		stepOut, stepMetrics, err := o.executeStep(ctx, job, md, es, i, stepFiles, deviceID, &activeTraceJobID)
+		stepFinishedAt := time.Now().UnixMilli()
 		mk.markEnd(ctx, o, firstNonEmpty(prevTraceID, activeTraceJobID))
 		// 구간 기록 — trace_start 스텝은 실행 **후**에야 잡 ID 가 생기므로 전/후 중
 		// 있는 쪽을 쓴다. (통짜 1잡이면 두 값이 같다)
 		o.recordStepBoundaryWith(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
-			stepStartedAt, time.Now().UnixMilli(), err, mk)
+			stepStartedAt, stepFinishedAt, err, mk)
 
 		// trace 상태가 바뀌었으면 job에 등록/해제 (cancel 시 정리용)
 		if activeTraceJobID != prevTraceID {
@@ -1318,14 +1323,17 @@ func (o *Orchestrator) recordStepBoundaryWith(job *Job, deviceID string, es expa
 		if m, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, finishedAt); ok {
 			b.FinishedMono = m
 		}
-		// ⚠ offset 을 못 믿는 기기(adb RTT 가 임계 초과)에서는 위가 둘 다 0 으로 남아
-		// **구간 분할이 통째로 비활성화된다.** 그 경우에만 marker 폴백이 이미 찍어 둔
-		// 기기 축 시각을 쓴다 (markStepBoundary 가 스텝 실행 전후에 넣어 둔다).
+		// ⚠⚠ **marker 시각이 있으면 그쪽을 쓴다** (offset 값이 채워졌더라도).
 		//
-		// 정상 기기에서는 여기 안 온다 — 기기에 쓰기를 만들지 않는 offset 경로가 기본이다.
-		if b.StartedMono == 0 || b.FinishedMono == 0 {
-			applyMarkerFallback(b, mk)
-		}
+		// 한때 `mono == 0` 일 때만 폴백했는데, 그러면 **드리프트를 영영 못 덮는다**:
+		// HostToDeviceMonotonic 은 스텝 중엔 항상 성공하므로(ClockSync.Stop 이 아직
+		// nil 이라 Usable() 이 조기 true) mono 가 "그럴듯하지만 밀린" 값으로 채워지고,
+		// 그 조건이 거짓이 되어 marker 를 버린다. 정작 StopTrace 에서 drift 가 잡히면
+		// UI 는 offset 구간을 거부하고 — marker 는 이미 버려져 **구간이 전멸한다.**
+		//
+		// marker 는 커널이 자기 시계로 찍은 값이라 offset 보다 정확하다(adb 왕복이
+		// 오차에 안 들어간다). 있으면 쓰는 것이 맞고, 없을 때만 offset 이 남는다.
+		applyMarkerFallback(b, mk)
 	}
 	job.appendStepBoundary(deviceID, b)
 }
@@ -1572,14 +1580,16 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 			}
 
 			prevTraceID := activeTraceJobID
-			dagStepStartedAt := time.Now().UnixMilli()
+			// 선형 루프와 같은 이유 — marker 왕복을 호스트 시각 창 밖에 둔다.
 			dagMk := o.markStepBegin(ctx, prevTraceID, es)
+			dagStepStartedAt := time.Now().UnixMilli()
 			stepOut, stepMetrics, execErr := o.executeStep(ctx, job, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
+			dagStepFinishedAt := time.Now().UnixMilli()
 			dagMk.markEnd(ctx, o, firstNonEmpty(prevTraceID, activeTraceJobID))
 			// 선형 루프와 **같은 기록**을 남긴다. 한쪽만 넣으면 캔버스(DAG) 시나리오에서
 			// 조용히 빈 화면이 된다.
 			o.recordStepBoundaryWith(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
-				dagStepStartedAt, time.Now().UnixMilli(), execErr, dagMk)
+				dagStepStartedAt, dagStepFinishedAt, execErr, dagMk)
 
 			// trace 상태 변경 → job에 등록/해제
 			if activeTraceJobID != prevTraceID {

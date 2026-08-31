@@ -37,6 +37,10 @@ func (f *fakeTraceCtl) WriteBoundaryMarker(_ context.Context, _ string, _, _ str
 	return v, true
 }
 
+// ⚠ 실제 드리프트 잡의 모양을 표현할 수 있어야 한다:
+// **스텝 중에는 성공(usable=true)하는데** 종료 후 판정에서 못 믿게 되는 경우다
+// (ClockSync.Stop 이 StopTrace 에서야 채워지기 때문). 이 모양을 못 만들면
+// "폴백이 동작한다" 는 테스트가 실제로는 아무것도 보장하지 못한다.
 func (f *fakeTraceCtl) HostToDeviceMonotonic(_ string, hostMillis int64) (float64, bool) {
 	if !f.usable {
 		return 0, false
@@ -206,7 +210,16 @@ func TestMarkerFallback(t *testing.T) {
 		stepIndex: 1, repeatIndex: 1,
 	}
 
-	t.Run("offset 이 쓸 만하면 marker 값을 안 쓴다", func(t *testing.T) {
+	// ⚠⚠ **marker 가 있으면 offset 값이 있어도 marker 를 쓴다.**
+	//
+	// 예전엔 반대였다("offset 이 되면 marker 를 안 쓴다"). 그게 드리프트를 영영 못 덮는
+	// 원인이었다: HostToDeviceMonotonic 은 스텝 중엔 항상 성공하므로(ClockSync.Stop 이
+	// 아직 nil) mono 가 "그럴듯하지만 밀린" 값으로 채워지고 marker 가 버려진다. 그 뒤
+	// StopTrace 에서 drift 가 잡히면 UI 가 offset 구간을 거부해 **구간이 전멸한다.**
+	//
+	// marker 는 커널이 자기 시계로 찍은 값이라 adb 왕복이 오차에 안 들어간다 —
+	// offset 보다 정확하므로 있으면 쓰는 것이 맞다.
+	t.Run("marker 가 있으면 offset 보다 우선한다", func(t *testing.T) {
 		f := &fakeTraceCtl{offset: 100, usable: true, markerOK: true, markerSeq: []float64{7, 8}}
 		o := &Orchestrator{traceMgr: f}
 		j := &Job{}
@@ -214,8 +227,24 @@ func TestMarkerFallback(t *testing.T) {
 		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
 
 		b := j.takeStepBoundaries("dev1")[0]
+		if b.GetBoundarySource() != "trace_marker" {
+			t.Errorf("marker 가 있는데 안 쓰였다: source=%q — 드리프트 잡에서 구간이 전멸한다",
+				b.GetBoundarySource())
+		}
+		if b.GetStartedMono() != 7 {
+			t.Errorf("marker 값이 아니다: %v", b.GetStartedMono())
+		}
+	})
+
+	t.Run("marker 가 없으면 offset 값이 남는다", func(t *testing.T) {
+		f := &fakeTraceCtl{offset: 100, usable: true}
+		o := &Orchestrator{traceMgr: f}
+		j := &Job{}
+		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, nil)
+
+		b := j.takeStepBoundaries("dev1")[0]
 		if b.GetBoundarySource() != "" {
-			t.Errorf("offset 이 되는데 marker 로 표시됐다: %q", b.GetBoundarySource())
+			t.Errorf("marker 가 없는데 marker 로 표시됐다: %q", b.GetBoundarySource())
 		}
 		if b.GetStartedMono() != 101 { // 1000ms/1000 + 100
 			t.Errorf("offset 값이 아니다: %v", b.GetStartedMono())
@@ -256,4 +285,28 @@ func TestMarkerFallback(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ⚠⚠ 드리프트 잡: 스텝 중에는 offset 이 **성공**하지만(Stop==nil → Usable() 조기 true)
+// 종료 후 drift 판정으로 못 믿게 된다. 그때 UI 는 offset 구간을 거부하므로
+// (boundarySource 가 비어 있으면 clockSyncUsable 을 요구한다) marker 가 남아 있어야
+// 구간이 살아남는다.
+//
+// 이 케이스가 이 폴백의 **존재 이유**다 — 구간이 조용히 밀리는데 그래프는 정상으로
+// 보이는 상황이라, 여기서 못 덮으면 기능의 절반이 사라진다.
+func TestMarkerFallback_DriftJobKeepsBoundaries(t *testing.T) {
+	es := expandedStep{step: &pb.ScenarioStep{Type: "scroll"}, stepIndex: 1, repeatIndex: 1}
+	// usable=true = 스텝 중 offset 이 성공하는 상태 (드리프트는 나중에 드러난다)
+	f := &fakeTraceCtl{offset: 100, usable: true, markerOK: true, markerSeq: []float64{7, 8}}
+	o := &Orchestrator{traceMgr: f}
+	j := &Job{}
+	mk := &stepMarks{begin: 7, end: 8}
+	o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
+
+	b := j.takeStepBoundaries("dev1")[0]
+	if b.GetBoundarySource() != "trace_marker" {
+		t.Fatalf("offset 이 스텝 중 성공했다고 marker 를 버렸다 (source=%q) — "+
+			"드리프트가 드러나면 UI 가 이 구간을 거부해 Behavior 가 통째로 사라진다",
+			b.GetBoundarySource())
+	}
 }

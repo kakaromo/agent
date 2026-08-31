@@ -248,3 +248,32 @@ func TestMarkStepBeginHasNoStepTimeGate(t *testing.T) {
 			"없어(Stop==nil) 항상 usable 로 나오고, 정작 드리프트 잡에서 marker 가 안 남는다")
 	}
 }
+
+// ⚠ marker 왕복은 **호스트 시각 창 밖**에 있어야 한다.
+// stepStartedAt 을 markStepBegin 앞에서 잡으면 adb 왕복 지연이 구간 양끝에 더해져
+// offset 경로로 표시되는 구간이 실제보다 길어진다 — 측정 도구가 자기 측정을 부풀린다.
+func TestMarkerWritesOutsideTimingWindow(t *testing.T) {
+	src := readScenarioSource(t)
+	for _, c := range []struct{ fn, begin, start string }{
+		{"func (o *Orchestrator) runScenarioOnDevice(", "mk := o.markStepBegin(", "stepStartedAt := time.Now()"},
+		{"func (o *Orchestrator) runScenarioOnDeviceDAG(", "dagMk := o.markStepBegin(", "dagStepStartedAt := time.Now()"},
+	} {
+		i := strings.Index(src, c.fn)
+		if i < 0 {
+			t.Fatalf("%s 를 찾지 못했다 — 테스트가 낡았다", c.fn)
+		}
+		body := src[i:]
+		if j := strings.Index(body[1:], "\nfunc (o *Orchestrator)"); j > 0 {
+			body = body[:j]
+		}
+		bi, si := strings.Index(body, c.begin), strings.Index(body, c.start)
+		if bi < 0 || si < 0 {
+			t.Errorf("%s: marker/시각 호출을 못 찾았다", c.fn)
+			continue
+		}
+		if bi > si {
+			t.Errorf("%s: 시각을 marker 쓰기 **전에** 잡는다 — adb 왕복이 구간에 포함돼 "+
+				"offset 경로 구간이 실제보다 길어진다", c.fn)
+		}
+	}
+}
