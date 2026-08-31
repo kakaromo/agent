@@ -3,6 +3,7 @@ package trace
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // ⚠⚠ 라벨은 스텝 이름이라 **사용자 입력이 섞인다.** 그대로 셸 명령에 넣으므로
@@ -40,6 +41,24 @@ func TestSanitizeMarkerLabelKeepsReadable(t *testing.T) {
 	long := strings.Repeat("x", 500)
 	if got := sanitizeMarkerLabel(long); len(got) > 64 {
 		t.Errorf("라벨 길이 상한이 안 걸렸다: %d", len(got))
+	}
+}
+
+// ⚠ 이 프로젝트의 스텝 이름은 한국어다 ("스크롤 down ×4"). 한 글자가 3바이트라
+// 바이트로 자르면 **문자 중간이 잘려 깨진 바이트가 커널 버퍼에 들어간다.**
+// 그러면 나중에 로그를 읽을 때 그 줄이 통째로 이상해진다.
+func TestSanitizeMarkerLabelUTF8Boundary(t *testing.T) {
+	long := "스크롤 down ×4 를 아주 길게 늘여서 예순네 바이트를 확실히 넘기는 라벨"
+	got := sanitizeMarkerLabel(long)
+	if len(got) > 64 {
+		t.Errorf("상한 초과: %d 바이트", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("UTF-8 이 깨졌다: %q — 문자 중간에서 잘렸다", got)
+	}
+	// 잘려도 읽을 수 있는 내용이 남아야 한다 (앞부분은 온전해야 함).
+	if !strings.HasPrefix(got, "스크롤 down") {
+		t.Errorf("앞부분이 훼손됐다: %q", got)
 	}
 }
 

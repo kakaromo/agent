@@ -38,6 +38,16 @@ import (
 //
 // ⚠ trace_marker 는 **전역 공유 자원**이다. atrace·앱·다른 도구가 같은 파일에 쓰므로
 // 접두사 없이 `tracing_mark_write` 를 다 긁으면 남의 것을 우리 구간으로 오인한다.
+//
+// 실측 (S25, 앱 전환 시나리오 1회, 2026-09-01): 로그 44,787줄 중
+// `tracing_mark_write` 가 **1,168줄**인데 그중 우리 것은 **11줄**뿐이었다.
+// 나머지는 삼성 키보드(honeyboard)의 atrace 마커이고, ⚠ **형식이 우리와 똑같다**:
+//
+//	남의 것: tracing_mark_write: B|28925|android.os.Handler: ...
+//	우리 것: tracing_mark_write: AGENT_BOUNDARY|B|스크롤 down ×4
+//
+// `B|`/`E|` 를 파이프로 나누는 것까지 같아서, 접두사가 없었으면 키보드 마커
+// 1,157개를 구간으로 오인했을 것이다.
 const markerPrefix = "AGENT_BOUNDARY"
 
 // 경계의 종류. benchmark 패키지가 trace 를 import 하면 순환이라(TraceController 가
@@ -156,9 +166,19 @@ func sanitizeMarkerLabel(s string) string {
 		return r
 	}, s)
 	// marker 한 줄은 커널 버퍼에 들어가므로 길이를 제한한다.
+	//
+	// ⚠ **바이트로 자르되 UTF-8 경계를 지킨다.** 이 프로젝트의 스텝 이름은 한국어라
+	// ("스크롤 down ×4", "youtube 실행(warm)") 한 글자가 3바이트다. 단순히
+	// `s[:maxLabel]` 로 자르면 문자 중간이 잘려 깨진 바이트가 커널 버퍼에 들어가고,
+	// 나중에 로그를 읽을 때 그 줄이 통째로 이상해진다.
 	const maxLabel = 64
 	if len(s) > maxLabel {
-		s = s[:maxLabel]
+		cut := maxLabel
+		// 잘린 지점이 이어지는 바이트(10xxxxxx)면 문자 시작까지 되돌린다.
+		for cut > 0 && s[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		s = s[:cut]
 	}
 	if s == "" {
 		s = "step"
