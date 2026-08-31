@@ -50,10 +50,26 @@ var unitRe = regexp.MustCompile(
 // `ms/tok`), prefill/decode 라는 단계 이름, TTFT. 이것들은 다른 ML 도메인에서
 // 거의 안 쓴다. 실제로 이 로그에서 아래 표현의 히트는 **0건**이었고(정답이다 —
 // 이 앱은 타이밍을 안 찍는다), 반면 soundmodel 계열은 639건이었다.
+// ⚠⚠ `decode <숫자> ms` 와 `<숫자> tokens` 를 **단독으로 쓰면 안 된다.**
+// 실측으로 확인한 오탐 (전부 흔한 시스템 로그다):
+//   MediaCodec  `video decode 8 ms per frame`     → `decode.*[0-9]+\s*ms`
+//   AudioFlinger `decode 5 ms buffer underrun`    → 〃
+//   OAuth       `refreshed 2 tokens for account`  → `[0-9]+\s*tokens?\b`
+// 이건 위에 적은 것과 **같은 실패**다 — 어휘가 겹친다. 다만 이번엔 다른 ML 이
+// 아니라 코덱·인증처럼 아예 무관한 도메인이라 더 흔하다. 동영상 한 번만 틀어도
+// 걸리므로 실기기에선 사실상 상시 오탐이고, 그러면 WeakOnly 가 영영 안 뜬다
+// (= "LLM 신호 0건" 경고가 죽는다. 이 기능의 안전장치가 통째로 무력화된다).
+//
+// 그래서 이 둘은 **토큰 문맥을 함께 요구**하도록 좁혔다:
+//   `decode` 는 token/tok 과 같은 줄에 있을 때만 (양쪽 순서 모두 허용)
+//   숫자+tokens 는 prefill/decode/prompt/generate 같은 LLM 단계어가 있을 때만
+// 코덱의 `decode 8 ms` 에는 token 이 없고, OAuth 의 `2 tokens` 에는 단계어가 없다.
 var strongRe = regexp.MustCompile(
 	`(?i)(ttft|time.to.first|first.token|ms/tok|ms per token|tok/s|tokens?/s(?:ec)?\b|` +
 		`tokens? per second|prefill|prompt.eval|eval.time|` +
-		`decode.*[0-9]+\s*ms|[0-9]+\s*tokens?\b)`)
+		`decode[^\n]*\btokens?\b|\btokens?\b[^\n]*decode|` +
+		`(?:prefill|decode|prompt|generat\w*|infer\w*)[^\n]*?[0-9]+\s*tokens?\b|` +
+		`[0-9]+\s*tokens?\b[^\n]*?(?:prefill|decode|prompt|generat\w*|infer\w*))`)
 
 // knownFalseRe — 강한 신호처럼 보이지만 추론과 무관한 것들.
 //
@@ -72,8 +88,8 @@ var knownFalseRe = regexp.MustCompile(`(?i)time to first fix`)
 // 못 된다 (어느 온디바이스 ML 이든 같은 가속기를 쓴다).
 var keywordRe = regexp.MustCompile(
 	`(?i)\b(ttft|time.to.first|first.token|prefill|decode|prompt.eval|eval.time|` +
-		`inference|infer|generat|token|llm|llama|gguf|context.(?:init|length)|` +
-		`kv.?cache|warm.?up|quantiz)\b`)
+		`inference|infer|generat\w*|token|llm|llama|gguf|context.(?:init|length)|` +
+		`kv.?cache|warm.?up|quantiz\w*)\b`)
 
 // ExploreCandidate — 후보 한 건 (태그 단위로 묶는다).
 type ExploreCandidate struct {
