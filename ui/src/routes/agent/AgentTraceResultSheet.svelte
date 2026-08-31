@@ -88,8 +88,12 @@
 		return true;
 	});
 
+	// ⚠ 예전엔 `!clockSyncUsable ? [] :` 로 전부 버렸다. 그러면 trace_marker 폴백으로
+	// 채운 구간(clockSync 는 못 믿지만 mono 는 커널이 직접 찍어 멀쩡하다)까지 같이
+	// 사라져 **Behavior 탭이 아예 안 뜬다.** 판정은 개별 구간의 mono 유효성으로 한다 —
+	// 아래 filter 가 이미 `finishedMono > startedMono && startedMono > 0` 을 본다.
 	const allBoundaries = $derived(
-		!clockSyncUsable ? [] : boundaries.filter(b =>
+		boundaries.filter(b =>
 			b.finishedMono > b.startedMono &&
 			b.startedMono > 0 &&
 			!BOUNDARY_SKIP_TYPES.has(b.type) &&
@@ -174,10 +178,18 @@
 	// ⚠ allBoundaries 기준이다 — 토글로 전부 숨긴 것과 "시계를 못 믿어서 못 그림" 은 다르다.
 	// ⚠ 배너는 **loop 필터 이전** 기준으로 판단한다. allBoundaries 는 selectedLoop 로도
 	// 걸러지므로, 그걸 쓰면 "구간이 없는 loop 를 골랐을 때" 도 시계 문제로 오인하게 된다.
-	const boundariesUnusable = $derived(
-		boundaries.length > 0 &&
-		(!clockSyncUsable ||
-			boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0).length === 0)
+	// ⚠ **clockSync 만 보면 안 된다.** trace_marker 폴백은 offset 을 못 믿는 기기에서
+	// 커널이 직접 찍은 시각으로 구간을 채운다 — clockSyncUsable=false 인데 mono 는
+	// 멀쩡한 상태다. 그때 이 배너를 띄우면 **실제로 있는 구간을 못 쓴다고 막는 셈**이라,
+	// 폴백을 만들어 둔 의미가 사라진다(백엔드는 채웠는데 화면만 거부).
+	// 그래서 판정 기준은 "쓸 수 있는 mono 가 하나라도 있는가" 하나로 둔다.
+	const usableMonoCount = $derived(
+		boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0).length
+	);
+	const boundariesUnusable = $derived(boundaries.length > 0 && usableMonoCount === 0);
+	// 구간이 marker 폴백으로 채워졌나 — 화면이 출처를 알려줄 때 쓴다.
+	const usesMarkerFallback = $derived(
+		boundaries.some(b => b.boundarySource === 'trace_marker' && b.finishedMono > b.startedMono)
 	);
 	const hasBehavior = $derived(allBoundaries.length > 0);
 
@@ -1492,6 +1504,19 @@
 
 				<!-- Raw Data Tab -->
 				<Tabs.Content value="raw" class="pt-2">
+					{#if usesMarkerFallback}
+						<!-- offset 을 못 믿어 marker 로 채운 경우. 숨기면 사용자가 "이 구간을
+						     믿어도 되나" 를 알 수 없다 — marker 는 오히려 더 정확하므로
+						     불안이 아니라 **근거**를 준다. -->
+						<div class="mb-2 rounded border border-sky-500/40 bg-sky-500/10 p-2 text-[9px] leading-relaxed">
+							<b>구간 경계를 기기에서 직접 찍었습니다 (trace_marker).</b>
+							adb 왕복이 느려 clock offset 을 못 믿는 상황이라, 호스트 시각 대신
+							커널이 자기 시계로 찍은 값을 씁니다.
+							<div class="mt-0.5 {captionMuted}">
+								adb 왕복이 오차에 들어가지 않으므로 이 구간은 offset 방식보다 오히려 정확합니다.
+							</div>
+						</div>
+					{/if}
 					{#if boundariesUnusable}
 						<!-- 구간 데이터는 왔는데 시계 정합이 안 된 경우.
 						     조용히 숨기면 "왜 밴드가 없지?" 를 알 수 없다 — 기능이
