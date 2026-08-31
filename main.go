@@ -205,6 +205,8 @@ func main() {
 		ScreenHandler: screenHandler,
 		// logcat 탐색/파싱 — 사무실/standalone 무관 (형식 조사는 사무실에서도 한다).
 		LogcatMgr: logcatMgr,
+		// marker 기반 AI 지표는 trace 잡의 trace.log 에서 읽는다.
+		TraceMgr: traceMgr,
 		// AI 결과 해석 (로컬 ollama) — 사무실/standalone 무관. config [ai] enabled 시 활성.
 		AI: cfg.AI,
 	}

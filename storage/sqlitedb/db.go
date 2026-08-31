@@ -189,6 +189,7 @@ func (db *DB) migrate() error {
 			description TEXT,
 			runtime TEXT NOT NULL,
 			soc TEXT,
+			source TEXT NOT NULL DEFAULT 'logcat',
 			patterns_json TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -210,6 +211,10 @@ func (db *DB) migrate() error {
 		// 스텝 구간(JSON) 영속화 — trace_jobs 와 같은 이유다. 구간은 메모리 Job 에만
 		// 있어서, 잡이 만료되면 parquet 은 남는데 **Behavior 탭만 조용히 사라진다.**
 		`ALTER TABLE job_executions ADD COLUMN step_boundaries TEXT`,
+		// AI 프로파일의 소스 — "logcat"(기본) 또는 "marker".
+		// ⚠ 두 소스는 patterns_json 의 필드 이름이 달라(marks/series vs counters/sections)
+		// 섞으면 조용히 0건이 된다. 기존 행은 DEFAULT 로 logcat 이 되어 동작이 유지된다.
+		`ALTER TABLE ai_log_profiles ADD COLUMN source TEXT NOT NULL DEFAULT 'logcat'`,
 	}
 	for _, s := range addColumns {
 		if _, err := db.Exec(s); err != nil && !strings.Contains(err.Error(), "duplicate column") {
