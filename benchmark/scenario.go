@@ -130,8 +130,12 @@ func (o *Orchestrator) RunScenario(ctx context.Context, req *pb.RunScenarioReque
 	jobCtx, jobCancel := context.WithCancel(context.Background())
 	jobID := uuid.New().String()
 	job := &Job{
-		ID:             jobID,
-		Name:           req.ScenarioName,
+		ID:   jobID,
+		Name: req.ScenarioName,
+		// ⚠ 잡 단위 옵션. startJobLogcat 이 여기서 logcat=on 을 읽는다 —
+		// 안 채우면 옵션이 영영 읽히지 않아 수집이 조용히 안 켜진다
+		// (화면상으론 시나리오가 정상 동작하므로 티가 안 난다).
+		Params:         req.GetParams(),
 		State:          pb.JobState_JOB_STATE_QUEUED,
 		DeviceStatuses: make(map[string]*pb.DeviceJobStatus),
 		Results:        make(map[string]*pb.BenchmarkResult),

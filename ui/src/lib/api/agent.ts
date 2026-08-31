@@ -239,6 +239,17 @@ export function runScenario(serverId: number, data: {
 	loops?: ScenarioLoop[];
 	repeat?: number;
 	busyPolicy?: string;
+	/**
+	 * 잡 전체에 걸리는 부가 옵션 (step 이 아니라 잡 단위).
+	 *
+	 *   logcat=on            — logcat 수집 켜기 (on-device AI 측정)
+	 *   logcat_tags=A,B      — measure 모드. 없으면 explore(전체 버퍼)
+	 *   logcat_profile_id=3  — 저장된 프로파일의 태그를 쓴다 (서버가 풀어준다)
+	 *
+	 * ⚠ 실측정엔 태그를 반드시 좁힌다. 전체 수집은 그 자체가 IO/CPU 를 써서
+	 * 수백 ms 단위 TTFT 를 흔든다.
+	 */
+	params?: Record<string, string>;
 }): Promise<{ jobId: string }> {
 	return post(`/agent/scenario/run?serverId=${serverId}`, data);
 }

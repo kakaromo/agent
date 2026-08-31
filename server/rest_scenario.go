@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -80,8 +82,60 @@ func scenarioRequestFromRawBody(ctx context.Context, db *sqlitedb.DB, raw []byte
 		if err := hydrateMacroSteps(ctx, db, raw, req); err != nil {
 			return nil, fmt.Errorf("hydrate macro: %w", err)
 		}
+		if err := hydrateLogcatProfile(ctx, db, req); err != nil {
+			return nil, fmt.Errorf("hydrate logcat profile: %w", err)
+		}
 	}
 	return req, nil
+}
+
+// hydrateLogcatProfile — `logcat_profile_id` 를 저장된 프로파일의 태그로 푼다.
+//
+// ⚠ 이게 없으면 **탐색 → 프로파일 → 측정** 루프가 핸드오프에서 끊긴다.
+// UI 는 탐색에서 찾은 태그를 프로파일의 `tags` 에 넣어 저장하는데, 수집 쪽은
+// 잡 파라미터 `logcat_tags` 만 봤다. 그래서 사용자는 measure 를 설정했다고 믿지만
+// 실제로는 태그가 비어 explore(전체 버퍼)로 수집됐다 — 전체 수집은 그 자체가
+// IO/CPU 를 써서 수백 ms 단위 TTFT 를 흔들므로 **측정값이 조용히 오염된다.**
+//
+// 명시적 `logcat_tags` 가 있으면 그쪽이 이긴다 (사용자가 직접 쓴 값이 우선).
+// 프로파일을 못 찾으면 에러다 — 조용히 explore 로 떨어지면 위와 같은 오염이 난다.
+func hydrateLogcatProfile(ctx context.Context, db *sqlitedb.DB, req *pb.RunScenarioRequest) error {
+	params := req.GetParams()
+	if params == nil {
+		return nil
+	}
+	idStr := strings.TrimSpace(params["logcat_profile_id"])
+	if idStr == "" {
+		return nil
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("logcat_profile_id 가 숫자가 아니다: %q", idStr)
+	}
+	prof, err := db.FindAILogProfile(ctx, id)
+	if err != nil {
+		return fmt.Errorf("profile %d: %w", id, err)
+	}
+	if prof == nil {
+		return fmt.Errorf("logcat profile %d 을 찾을 수 없다", id)
+	}
+	// 이미 태그를 직접 지정했으면 건드리지 않는다.
+	if strings.TrimSpace(params["logcat_tags"]) != "" {
+		return nil
+	}
+	pat, err := sqlitedb.ParseAILogPatterns(prof.PatternsJSON)
+	if err != nil {
+		return fmt.Errorf("profile %d patterns: %w", id, err)
+	}
+	if len(pat.Tags) == 0 {
+		// ⚠ 조용히 넘어가지 않는다. 태그 없는 프로파일로 측정하면 explore 로 떨어져
+		// 전체 버퍼를 받는데, 사용자는 좁혀 받았다고 믿는다.
+		return fmt.Errorf("logcat profile %d(%s) 에 tags 가 없다 — "+
+			"measure 로 좁히려면 프로파일에 태그를 넣거나 logcat_tags 를 직접 지정할 것",
+			id, prof.Name)
+	}
+	params["logcat_tags"] = strings.Join(pat.Tags, ",")
+	return nil
 }
 
 // ScenarioRequestFromScheduleConfig — 스케줄 잡의 config(JSON 객체 문자열) 를 RunScenarioRequest 로 변환.

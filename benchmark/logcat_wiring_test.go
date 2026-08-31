@@ -175,3 +175,22 @@ func readScenarioSource(t *testing.T) string {
 	}
 	return string(b)
 }
+
+// ⚠⚠ startJobLogcat 은 job.Params 를 읽는데, RunScenario 가 그걸 채우는지는
+// 아무도 확인하지 않았다. 기존 테스트는 &Job{Params: ...} 를 손으로 만들어
+// 넣으므로 실제 경로의 단절을 못 잡는다 — 소스 수준에서 확인한다.
+func TestRunScenarioPopulatesJobParams(t *testing.T) {
+	src := readScenarioSource(t)
+	i := strings.Index(src, "func (o *Orchestrator) RunScenario(")
+	if i < 0 {
+		t.Fatal("RunScenario 를 찾지 못했다 — 테스트가 낡았다")
+	}
+	body := src[i:]
+	if j := strings.Index(body, "\nfunc "); j > 0 {
+		body = body[:j]
+	}
+	if !strings.Contains(body, "Params:") && !strings.Contains(body, "job.Params") {
+		t.Error("RunScenario 가 job.Params 를 채우지 않는다 — logcat 옵션(logcat=on)이 " +
+			"영영 읽히지 않아 시나리오에서 수집이 안 켜진다")
+	}
+}
