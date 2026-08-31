@@ -327,6 +327,11 @@ message RunScenarioRequest {
   int32 retry_delay_seconds = 8;    // 재시도 간격 (기본 60초)
   bool has_branching = 9;            // true면 DAG 실행 모드 (edges 사용)
   repeated StepEdge edges = 10;      // DAG 모드용 엣지 목록
+  // 잡 전체에 걸리는 부가 옵션 (step 이 아니라 잡 단위).
+  //   logcat=on            → logcat 수집 켜기 (on-device AI 측정)
+  //   logcat_tags=A,B      → measure 모드. 없으면 explore(전체 버퍼)
+  //   logcat_profile_id=3  → 저장된 AILogProfile 의 tags 를 쓴다 (REST 가 채움)
+  map<string, string> params = 11;
 }
 
 message RunScenarioResponse {

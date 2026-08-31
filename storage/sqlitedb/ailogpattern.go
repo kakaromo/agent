@@ -42,6 +42,19 @@ type AILogSeries struct {
 	Unit  string `json:"unit,omitempty"`
 }
 
+// ParseAILogPatterns — patterns_json 을 구조체로 푼다.
+//
+// 저장 시 ValidatePatternsJSON 을 통과한 값이라는 전제지만, DB 를 손으로 고친
+// 경우를 대비해 에러를 그대로 올린다 (조용히 빈 값을 주면 measure 가 explore 로
+// 떨어져 측정 대상을 흔든다).
+func ParseAILogPatterns(s string) (*AILogPatterns, error) {
+	var p AILogPatterns
+	if err := json.Unmarshal([]byte(s), &p); err != nil {
+		return nil, fmt.Errorf("patternsJson: %w", err)
+	}
+	return &p, nil
+}
+
 // ValidatePatternsJSON — patterns_json 을 저장 전에 검증한다.
 //
 // ⚠ 정규식은 사용자 입력이다. 여기서 안 막으면 잘못된 패턴이 DB 에 들어앉아

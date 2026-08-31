@@ -3,9 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	pb "agent/pb"
+	"agent/storage/sqlitedb"
 )
 
 // TestScenarioRequestFromScheduleConfig — ScheduledJob.Config(JSON) → RunScenarioRequest 변환 검증.
@@ -123,3 +128,105 @@ func TestScenarioRequestFromScheduleConfig_BadJSON(t *testing.T) {
 		t.Fatal("깨진 stepsJson 인데 에러가 안 남")
 	}
 }
+
+
+// ⚠⚠ 탐색 → 프로파일 → 측정 루프의 **핸드오프**를 지킨다.
+//
+// UI 는 탐색에서 찾은 태그를 프로파일의 tags 에 넣어 저장하는데, 수집 쪽은 잡
+// 파라미터 logcat_tags 만 본다. 이 다리가 없으면 사용자는 measure 를 설정했다고
+// 믿지만 실제로는 explore(전체 버퍼)로 수집된다 — 전체 수집은 그 자체가 IO/CPU 를
+// 써서 수백 ms 단위 TTFT 를 흔들므로 **측정값이 조용히 오염된다.**
+func TestHydrateLogcatProfile(t *testing.T) {
+	db, err := sqlitedb.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	prof, err := db.CreateAILogProfile(context.Background(), &sqlitedb.AILogProfile{
+		Name: "QNN", Runtime: "qnn",
+		PatternsJSON: `{"tags":["Genie","QnnHtp"],"series":[{"key":"ttft","regex":"TTFT ([0-9.]+)"}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("프로파일의 태그가 logcat_tags 로 풀린다", func(t *testing.T) {
+		req := &pb.RunScenarioRequest{Params: map[string]string{
+			"logcat": "on", "logcat_profile_id": itoa(prof.ID),
+		}}
+		if err := hydrateLogcatProfile(context.Background(), db, req); err != nil {
+			t.Fatalf("hydrate 실패: %v", err)
+		}
+		if got := req.GetParams()["logcat_tags"]; got != "Genie,QnnHtp" {
+			t.Errorf("태그가 안 풀렸다: %q — measure 가 explore 로 떨어져 측정이 오염된다", got)
+		}
+	})
+
+	t.Run("직접 지정한 logcat_tags 가 이긴다", func(t *testing.T) {
+		req := &pb.RunScenarioRequest{Params: map[string]string{
+			"logcat": "on", "logcat_profile_id": itoa(prof.ID), "logcat_tags": "MyTag",
+		}}
+		if err := hydrateLogcatProfile(context.Background(), db, req); err != nil {
+			t.Fatal(err)
+		}
+		if got := req.GetParams()["logcat_tags"]; got != "MyTag" {
+			t.Errorf("사용자가 직접 쓴 태그를 덮어썼다: %q", got)
+		}
+	})
+
+	t.Run("없는 프로파일은 에러 — 조용히 explore 로 떨어지면 안 된다", func(t *testing.T) {
+		req := &pb.RunScenarioRequest{Params: map[string]string{
+			"logcat": "on", "logcat_profile_id": "99999",
+		}}
+		if err := hydrateLogcatProfile(context.Background(), db, req); err == nil {
+			t.Error("없는 프로파일인데 에러가 없다")
+		}
+	})
+
+	t.Run("태그 없는 프로파일도 에러", func(t *testing.T) {
+		empty, err := db.CreateAILogProfile(context.Background(), &sqlitedb.AILogProfile{
+			Name: "no-tags", Runtime: "x",
+			PatternsJSON: `{"series":[{"key":"ttft","regex":"TTFT ([0-9.]+)"}]}`,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := &pb.RunScenarioRequest{Params: map[string]string{
+			"logcat": "on", "logcat_profile_id": itoa(empty.ID),
+		}}
+		if err := hydrateLogcatProfile(context.Background(), db, req); err == nil {
+			t.Error("태그 없는 프로파일인데 에러가 없다 — explore 로 떨어져 측정이 오염된다")
+		}
+	})
+
+	t.Run("profile_id 가 없으면 아무 일도 없다", func(t *testing.T) {
+		req := &pb.RunScenarioRequest{Params: map[string]string{"logcat": "on"}}
+		if err := hydrateLogcatProfile(context.Background(), db, req); err != nil {
+			t.Errorf("profile_id 없는데 에러가 났다: %v", err)
+		}
+	})
+}
+
+// ⚠ 함수가 있어도 **부르지 않으면** 소용없다. 단위 테스트는 함수를 직접 부르므로
+// 호출부 누락을 못 잡는다 (DAG 배선 누락과 같은 함정).
+func TestScenarioRequestCallsLogcatHydrate(t *testing.T) {
+	src, err := os.ReadFile("rest_scenario.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(src), "func scenarioRequestFromRawBody(")
+	if i < 0 {
+		t.Fatal("scenarioRequestFromRawBody 를 찾지 못했다 — 테스트가 낡았다")
+	}
+	body := string(src)[i:]
+	if j := strings.Index(body, "\nfunc "); j > 0 {
+		body = body[:j]
+	}
+	if !strings.Contains(body, "hydrateLogcatProfile(") {
+		t.Error("변환 경로가 hydrateLogcatProfile 을 부르지 않는다 — 수동/스케줄 " +
+			"양쪽 모두 프로파일 태그가 안 풀려 explore 로 떨어진다")
+	}
+}
+
+func itoa(v int64) string { return strconv.FormatInt(v, 10) }

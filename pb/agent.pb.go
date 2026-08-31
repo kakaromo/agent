@@ -2337,8 +2337,14 @@ type RunScenarioRequest struct {
 	RetryDelaySeconds int32                  `protobuf:"varint,8,opt,name=retry_delay_seconds,json=retryDelaySeconds,proto3" json:"retry_delay_seconds,omitempty"` // 재시도 간격 (기본 60초)
 	HasBranching      bool                   `protobuf:"varint,9,opt,name=has_branching,json=hasBranching,proto3" json:"has_branching,omitempty"`                  // true면 DAG 실행 모드 (edges 사용)
 	Edges             []*StepEdge            `protobuf:"bytes,10,rep,name=edges,proto3" json:"edges,omitempty"`                                                    // DAG 모드용 엣지 목록
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 잡 전체에 걸리는 부가 옵션 (step 이 아니라 잡 단위).
+	//
+	//	logcat=on            → logcat 수집 켜기 (on-device AI 측정)
+	//	logcat_tags=A,B      → measure 모드. 없으면 explore(전체 버퍼)
+	//	logcat_profile_id=3  → 저장된 AILogProfile 의 tags 를 쓴다 (REST 가 채움)
+	Params        map[string]string `protobuf:"bytes,11,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunScenarioRequest) Reset() {
@@ -2437,6 +2443,13 @@ func (x *RunScenarioRequest) GetHasBranching() bool {
 func (x *RunScenarioRequest) GetEdges() []*StepEdge {
 	if x != nil {
 		return x.Edges
+	}
+	return nil
+}
+
+func (x *RunScenarioRequest) GetParams() map[string]string {
+	if x != nil {
+		return x.Params
 	}
 	return nil
 }
@@ -8915,7 +8928,7 @@ const file_agent_proto_rawDesc = "" +
 	"\n" +
 	"start_step\x18\x01 \x01(\x05R\tstartStep\x12\x19\n" +
 	"\bend_step\x18\x02 \x01(\x05R\aendStep\x12\x14\n" +
-	"\x05count\x18\x03 \x01(\x05R\x05count\"\x84\x03\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count\"\xfe\x03\n" +
 	"\x12RunScenarioRequest\x12\x1d\n" +
 	"\n" +
 	"device_ids\x18\x01 \x03(\tR\tdeviceIds\x12#\n" +
@@ -8930,7 +8943,11 @@ const file_agent_proto_rawDesc = "" +
 	"\x13retry_delay_seconds\x18\b \x01(\x05R\x11retryDelaySeconds\x12#\n" +
 	"\rhas_branching\x18\t \x01(\bR\fhasBranching\x12%\n" +
 	"\x05edges\x18\n" +
-	" \x03(\v2\x0f.agent.StepEdgeR\x05edges\",\n" +
+	" \x03(\v2\x0f.agent.StepEdgeR\x05edges\x12=\n" +
+	"\x06params\x18\v \x03(\v2%.agent.RunScenarioRequest.ParamsEntryR\x06params\x1a9\n" +
+	"\vParamsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
 	"\x13RunScenarioResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xd1\x01\n" +
 	"\x11StartTraceRequest\x12\x1b\n" +
@@ -9630,7 +9647,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 115)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 116)
 var file_agent_proto_goTypes = []any{
 	(DeviceState)(0),                    // 0: agent.DeviceState
 	(BenchmarkTool)(0),                  // 1: agent.BenchmarkTool
@@ -9750,8 +9767,9 @@ var file_agent_proto_goTypes = []any{
 	nil,                                 // 115: agent.JobProgress.MetricsEntry
 	nil,                                 // 116: agent.BenchmarkResult.MetricsEntry
 	nil,                                 // 117: agent.ScenarioStep.ParamsEntry
-	nil,                                 // 118: agent.ReplayMacroResponse.OcrResultsEntry
-	nil,                                 // 119: agent.ReplayMacroResponse.MetricsEntry
+	nil,                                 // 118: agent.RunScenarioRequest.ParamsEntry
+	nil,                                 // 119: agent.ReplayMacroResponse.OcrResultsEntry
+	nil,                                 // 120: agent.ReplayMacroResponse.MetricsEntry
 }
 var file_agent_proto_depIdxs = []int32{
 	0,   // 0: agent.DeviceInfo.state:type_name -> agent.DeviceState
@@ -9777,129 +9795,130 @@ var file_agent_proto_depIdxs = []int32{
 	28,  // 20: agent.RunScenarioRequest.steps:type_name -> agent.ScenarioStep
 	33,  // 21: agent.RunScenarioRequest.loops:type_name -> agent.ScenarioLoop
 	32,  // 22: agent.RunScenarioRequest.edges:type_name -> agent.StepEdge
-	40,  // 23: agent.GetTraceResultRequest.filter:type_name -> agent.TraceFilter
-	43,  // 24: agent.GetTraceResultResponse.stats:type_name -> agent.TraceStats
-	45,  // 25: agent.TraceStats.dtoc:type_name -> agent.LatencyStats
-	45,  // 26: agent.TraceStats.ctod:type_name -> agent.LatencyStats
-	45,  // 27: agent.TraceStats.ctoc:type_name -> agent.LatencyStats
-	45,  // 28: agent.TraceStats.qd:type_name -> agent.LatencyStats
-	46,  // 29: agent.TraceStats.cmd_stats:type_name -> agent.CmdStats
-	47,  // 30: agent.TraceStats.latency_histograms:type_name -> agent.LatencyHistogram
-	49,  // 31: agent.TraceStats.cmd_size_counts:type_name -> agent.CmdSizeCount
-	44,  // 32: agent.TraceStats.mgmt_stats:type_name -> agent.MgmtStats
-	45,  // 33: agent.MgmtStats.dtoc:type_name -> agent.LatencyStats
-	45,  // 34: agent.CmdStats.dtoc:type_name -> agent.LatencyStats
-	45,  // 35: agent.CmdStats.ctod:type_name -> agent.LatencyStats
-	45,  // 36: agent.CmdStats.ctoc:type_name -> agent.LatencyStats
-	45,  // 37: agent.CmdStats.qd:type_name -> agent.LatencyStats
-	48,  // 38: agent.LatencyHistogram.buckets:type_name -> agent.LatencyBucket
-	40,  // 39: agent.GetIoAttributionRequest.filter:type_name -> agent.TraceFilter
-	3,   // 40: agent.GetIoAttributionRequest.dims:type_name -> agent.AttributionDim
-	4,   // 41: agent.GetIoAttributionRequest.sort_by:type_name -> agent.AttributionSort
-	3,   // 42: agent.AttributionGroup.dim:type_name -> agent.AttributionDim
-	51,  // 43: agent.AttributionGroup.entries:type_name -> agent.AttributionEntry
-	52,  // 44: agent.GetIoAttributionResponse.groups:type_name -> agent.AttributionGroup
-	3,   // 45: agent.GetIoAttributionResponse.unsupported_dims:type_name -> agent.AttributionDim
-	40,  // 46: agent.GetFsioReadStatsRequest.filter:type_name -> agent.TraceFilter
-	55,  // 47: agent.GetFsioReadStatsResponse.by_class:type_name -> agent.FsioReadClassStats
-	56,  // 48: agent.GetFsioReadStatsResponse.top_files:type_name -> agent.FsioReadFileStats
-	58,  // 49: agent.GetFsioReadStatsResponse.mmap:type_name -> agent.FsioReadMmapStats
-	40,  // 50: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
-	61,  // 51: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
-	67,  // 52: agent.UploadTraceArchiveRequest.raw:type_name -> agent.PresignedTarget
-	67,  // 53: agent.UploadTraceArchiveRequest.parquet_files:type_name -> agent.PresignedTarget
-	68,  // 54: agent.PresignedTarget.parts:type_name -> agent.PresignedPart
-	70,  // 55: agent.UploadTraceArchiveProgress.completed_part:type_name -> agent.CompletedPartReport
-	73,  // 56: agent.GetArchiveFilesInfoResponse.parquet_files:type_name -> agent.ArchiveParquetInfo
-	76,  // 57: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
-	77,  // 58: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
-	78,  // 59: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
-	79,  // 60: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
-	81,  // 61: agent.MacroEvent.ocr_region:type_name -> agent.OcrRegion
-	84,  // 62: agent.ListInstalledAppsResponse.apps:type_name -> agent.InstalledApp
-	87,  // 63: agent.ListBundledApksResponse.apks:type_name -> agent.BundledApk
-	80,  // 64: agent.StopRecordingResponse.events:type_name -> agent.MacroEvent
-	80,  // 65: agent.ReplayMacroRequest.events:type_name -> agent.MacroEvent
-	118, // 66: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
-	119, // 67: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
-	81,  // 68: agent.ScreenshotOcrRequest.region:type_name -> agent.OcrRegion
-	104, // 69: agent.ListUiElementsResponse.elements:type_name -> agent.UiElement
-	107, // 70: agent.ShellClientMsg.start:type_name -> agent.ShellStart
-	108, // 71: agent.ShellClientMsg.input:type_name -> agent.ShellInput
-	109, // 72: agent.ShellClientMsg.resize:type_name -> agent.ShellResize
-	111, // 73: agent.ShellServerMsg.output:type_name -> agent.ShellOutput
-	112, // 74: agent.ShellServerMsg.exit:type_name -> agent.ShellExit
-	6,   // 75: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
-	8,   // 76: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
-	10,  // 77: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
-	12,  // 78: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
-	14,  // 79: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
-	17,  // 80: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
-	19,  // 81: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
-	24,  // 82: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
-	26,  // 83: agent.DeviceAgent.CancelJob:input_type -> agent.CancelJobRequest
-	34,  // 84: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
-	36,  // 85: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
-	38,  // 86: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
-	41,  // 87: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
-	59,  // 88: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
-	50,  // 89: agent.DeviceAgent.GetIoAttribution:input_type -> agent.GetIoAttributionRequest
-	54,  // 90: agent.DeviceAgent.GetFsioReadStats:input_type -> agent.GetFsioReadStatsRequest
-	62,  // 91: agent.DeviceAgent.UploadTraceToMinio:input_type -> agent.UploadTraceRequest
-	64,  // 92: agent.DeviceAgent.UploadBenchmarkToMinio:input_type -> agent.UploadBenchmarkRequest
-	66,  // 93: agent.DeviceAgent.UploadTraceArchive:input_type -> agent.UploadTraceArchiveRequest
-	71,  // 94: agent.DeviceAgent.GetArchiveFilesInfo:input_type -> agent.GetArchiveFilesInfoRequest
-	74,  // 95: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
-	82,  // 96: agent.DeviceAgent.ListInstalledApps:input_type -> agent.ListInstalledAppsRequest
-	92,  // 97: agent.DeviceAgent.StartRecording:input_type -> agent.StartRecordingRequest
-	94,  // 98: agent.DeviceAgent.StopRecording:input_type -> agent.StopRecordingRequest
-	96,  // 99: agent.DeviceAgent.ReplayMacro:input_type -> agent.ReplayMacroRequest
-	98,  // 100: agent.DeviceAgent.TakeScreenshot:input_type -> agent.TakeScreenshotRequest
-	100, // 101: agent.DeviceAgent.ScreenshotOcr:input_type -> agent.ScreenshotOcrRequest
-	102, // 102: agent.DeviceAgent.ListUiElements:input_type -> agent.ListUiElementsRequest
-	85,  // 103: agent.DeviceAgent.ListBundledApks:input_type -> agent.ListBundledApksRequest
-	88,  // 104: agent.DeviceAgent.InstallApk:input_type -> agent.InstallApkRequest
-	90,  // 105: agent.DeviceAgent.UninstallApk:input_type -> agent.UninstallApkRequest
-	105, // 106: agent.DeviceAgent.ReparseTrace:input_type -> agent.ReparseTraceRequest
-	110, // 107: agent.DeviceAgent.Shell:input_type -> agent.ShellClientMsg
-	7,   // 108: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
-	9,   // 109: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
-	11,  // 110: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
-	13,  // 111: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
-	15,  // 112: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
-	18,  // 113: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
-	20,  // 114: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
-	25,  // 115: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
-	27,  // 116: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
-	35,  // 117: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
-	37,  // 118: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
-	39,  // 119: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
-	42,  // 120: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
-	60,  // 121: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
-	53,  // 122: agent.DeviceAgent.GetIoAttribution:output_type -> agent.GetIoAttributionResponse
-	57,  // 123: agent.DeviceAgent.GetFsioReadStats:output_type -> agent.GetFsioReadStatsResponse
-	63,  // 124: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
-	65,  // 125: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
-	69,  // 126: agent.DeviceAgent.UploadTraceArchive:output_type -> agent.UploadTraceArchiveProgress
-	72,  // 127: agent.DeviceAgent.GetArchiveFilesInfo:output_type -> agent.GetArchiveFilesInfoResponse
-	75,  // 128: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
-	83,  // 129: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
-	93,  // 130: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
-	95,  // 131: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
-	97,  // 132: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
-	99,  // 133: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
-	101, // 134: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
-	103, // 135: agent.DeviceAgent.ListUiElements:output_type -> agent.ListUiElementsResponse
-	86,  // 136: agent.DeviceAgent.ListBundledApks:output_type -> agent.ListBundledApksResponse
-	89,  // 137: agent.DeviceAgent.InstallApk:output_type -> agent.InstallApkResponse
-	91,  // 138: agent.DeviceAgent.UninstallApk:output_type -> agent.UninstallApkResponse
-	106, // 139: agent.DeviceAgent.ReparseTrace:output_type -> agent.ReparseTraceResponse
-	113, // 140: agent.DeviceAgent.Shell:output_type -> agent.ShellServerMsg
-	108, // [108:141] is the sub-list for method output_type
-	75,  // [75:108] is the sub-list for method input_type
-	75,  // [75:75] is the sub-list for extension type_name
-	75,  // [75:75] is the sub-list for extension extendee
-	0,   // [0:75] is the sub-list for field type_name
+	118, // 23: agent.RunScenarioRequest.params:type_name -> agent.RunScenarioRequest.ParamsEntry
+	40,  // 24: agent.GetTraceResultRequest.filter:type_name -> agent.TraceFilter
+	43,  // 25: agent.GetTraceResultResponse.stats:type_name -> agent.TraceStats
+	45,  // 26: agent.TraceStats.dtoc:type_name -> agent.LatencyStats
+	45,  // 27: agent.TraceStats.ctod:type_name -> agent.LatencyStats
+	45,  // 28: agent.TraceStats.ctoc:type_name -> agent.LatencyStats
+	45,  // 29: agent.TraceStats.qd:type_name -> agent.LatencyStats
+	46,  // 30: agent.TraceStats.cmd_stats:type_name -> agent.CmdStats
+	47,  // 31: agent.TraceStats.latency_histograms:type_name -> agent.LatencyHistogram
+	49,  // 32: agent.TraceStats.cmd_size_counts:type_name -> agent.CmdSizeCount
+	44,  // 33: agent.TraceStats.mgmt_stats:type_name -> agent.MgmtStats
+	45,  // 34: agent.MgmtStats.dtoc:type_name -> agent.LatencyStats
+	45,  // 35: agent.CmdStats.dtoc:type_name -> agent.LatencyStats
+	45,  // 36: agent.CmdStats.ctod:type_name -> agent.LatencyStats
+	45,  // 37: agent.CmdStats.ctoc:type_name -> agent.LatencyStats
+	45,  // 38: agent.CmdStats.qd:type_name -> agent.LatencyStats
+	48,  // 39: agent.LatencyHistogram.buckets:type_name -> agent.LatencyBucket
+	40,  // 40: agent.GetIoAttributionRequest.filter:type_name -> agent.TraceFilter
+	3,   // 41: agent.GetIoAttributionRequest.dims:type_name -> agent.AttributionDim
+	4,   // 42: agent.GetIoAttributionRequest.sort_by:type_name -> agent.AttributionSort
+	3,   // 43: agent.AttributionGroup.dim:type_name -> agent.AttributionDim
+	51,  // 44: agent.AttributionGroup.entries:type_name -> agent.AttributionEntry
+	52,  // 45: agent.GetIoAttributionResponse.groups:type_name -> agent.AttributionGroup
+	3,   // 46: agent.GetIoAttributionResponse.unsupported_dims:type_name -> agent.AttributionDim
+	40,  // 47: agent.GetFsioReadStatsRequest.filter:type_name -> agent.TraceFilter
+	55,  // 48: agent.GetFsioReadStatsResponse.by_class:type_name -> agent.FsioReadClassStats
+	56,  // 49: agent.GetFsioReadStatsResponse.top_files:type_name -> agent.FsioReadFileStats
+	58,  // 50: agent.GetFsioReadStatsResponse.mmap:type_name -> agent.FsioReadMmapStats
+	40,  // 51: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
+	61,  // 52: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
+	67,  // 53: agent.UploadTraceArchiveRequest.raw:type_name -> agent.PresignedTarget
+	67,  // 54: agent.UploadTraceArchiveRequest.parquet_files:type_name -> agent.PresignedTarget
+	68,  // 55: agent.PresignedTarget.parts:type_name -> agent.PresignedPart
+	70,  // 56: agent.UploadTraceArchiveProgress.completed_part:type_name -> agent.CompletedPartReport
+	73,  // 57: agent.GetArchiveFilesInfoResponse.parquet_files:type_name -> agent.ArchiveParquetInfo
+	76,  // 58: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
+	77,  // 59: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
+	78,  // 60: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
+	79,  // 61: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
+	81,  // 62: agent.MacroEvent.ocr_region:type_name -> agent.OcrRegion
+	84,  // 63: agent.ListInstalledAppsResponse.apps:type_name -> agent.InstalledApp
+	87,  // 64: agent.ListBundledApksResponse.apks:type_name -> agent.BundledApk
+	80,  // 65: agent.StopRecordingResponse.events:type_name -> agent.MacroEvent
+	80,  // 66: agent.ReplayMacroRequest.events:type_name -> agent.MacroEvent
+	119, // 67: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
+	120, // 68: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
+	81,  // 69: agent.ScreenshotOcrRequest.region:type_name -> agent.OcrRegion
+	104, // 70: agent.ListUiElementsResponse.elements:type_name -> agent.UiElement
+	107, // 71: agent.ShellClientMsg.start:type_name -> agent.ShellStart
+	108, // 72: agent.ShellClientMsg.input:type_name -> agent.ShellInput
+	109, // 73: agent.ShellClientMsg.resize:type_name -> agent.ShellResize
+	111, // 74: agent.ShellServerMsg.output:type_name -> agent.ShellOutput
+	112, // 75: agent.ShellServerMsg.exit:type_name -> agent.ShellExit
+	6,   // 76: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
+	8,   // 77: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
+	10,  // 78: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
+	12,  // 79: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
+	14,  // 80: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
+	17,  // 81: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
+	19,  // 82: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
+	24,  // 83: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
+	26,  // 84: agent.DeviceAgent.CancelJob:input_type -> agent.CancelJobRequest
+	34,  // 85: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
+	36,  // 86: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
+	38,  // 87: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
+	41,  // 88: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
+	59,  // 89: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
+	50,  // 90: agent.DeviceAgent.GetIoAttribution:input_type -> agent.GetIoAttributionRequest
+	54,  // 91: agent.DeviceAgent.GetFsioReadStats:input_type -> agent.GetFsioReadStatsRequest
+	62,  // 92: agent.DeviceAgent.UploadTraceToMinio:input_type -> agent.UploadTraceRequest
+	64,  // 93: agent.DeviceAgent.UploadBenchmarkToMinio:input_type -> agent.UploadBenchmarkRequest
+	66,  // 94: agent.DeviceAgent.UploadTraceArchive:input_type -> agent.UploadTraceArchiveRequest
+	71,  // 95: agent.DeviceAgent.GetArchiveFilesInfo:input_type -> agent.GetArchiveFilesInfoRequest
+	74,  // 96: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
+	82,  // 97: agent.DeviceAgent.ListInstalledApps:input_type -> agent.ListInstalledAppsRequest
+	92,  // 98: agent.DeviceAgent.StartRecording:input_type -> agent.StartRecordingRequest
+	94,  // 99: agent.DeviceAgent.StopRecording:input_type -> agent.StopRecordingRequest
+	96,  // 100: agent.DeviceAgent.ReplayMacro:input_type -> agent.ReplayMacroRequest
+	98,  // 101: agent.DeviceAgent.TakeScreenshot:input_type -> agent.TakeScreenshotRequest
+	100, // 102: agent.DeviceAgent.ScreenshotOcr:input_type -> agent.ScreenshotOcrRequest
+	102, // 103: agent.DeviceAgent.ListUiElements:input_type -> agent.ListUiElementsRequest
+	85,  // 104: agent.DeviceAgent.ListBundledApks:input_type -> agent.ListBundledApksRequest
+	88,  // 105: agent.DeviceAgent.InstallApk:input_type -> agent.InstallApkRequest
+	90,  // 106: agent.DeviceAgent.UninstallApk:input_type -> agent.UninstallApkRequest
+	105, // 107: agent.DeviceAgent.ReparseTrace:input_type -> agent.ReparseTraceRequest
+	110, // 108: agent.DeviceAgent.Shell:input_type -> agent.ShellClientMsg
+	7,   // 109: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
+	9,   // 110: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
+	11,  // 111: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
+	13,  // 112: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
+	15,  // 113: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
+	18,  // 114: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
+	20,  // 115: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
+	25,  // 116: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
+	27,  // 117: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
+	35,  // 118: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
+	37,  // 119: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
+	39,  // 120: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
+	42,  // 121: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
+	60,  // 122: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
+	53,  // 123: agent.DeviceAgent.GetIoAttribution:output_type -> agent.GetIoAttributionResponse
+	57,  // 124: agent.DeviceAgent.GetFsioReadStats:output_type -> agent.GetFsioReadStatsResponse
+	63,  // 125: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
+	65,  // 126: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
+	69,  // 127: agent.DeviceAgent.UploadTraceArchive:output_type -> agent.UploadTraceArchiveProgress
+	72,  // 128: agent.DeviceAgent.GetArchiveFilesInfo:output_type -> agent.GetArchiveFilesInfoResponse
+	75,  // 129: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
+	83,  // 130: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
+	93,  // 131: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
+	95,  // 132: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
+	97,  // 133: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
+	99,  // 134: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
+	101, // 135: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
+	103, // 136: agent.DeviceAgent.ListUiElements:output_type -> agent.ListUiElementsResponse
+	86,  // 137: agent.DeviceAgent.ListBundledApks:output_type -> agent.ListBundledApksResponse
+	89,  // 138: agent.DeviceAgent.InstallApk:output_type -> agent.InstallApkResponse
+	91,  // 139: agent.DeviceAgent.UninstallApk:output_type -> agent.UninstallApkResponse
+	106, // 140: agent.DeviceAgent.ReparseTrace:output_type -> agent.ReparseTraceResponse
+	113, // 141: agent.DeviceAgent.Shell:output_type -> agent.ShellServerMsg
+	109, // [109:142] is the sub-list for method output_type
+	76,  // [76:109] is the sub-list for method input_type
+	76,  // [76:76] is the sub-list for extension type_name
+	76,  // [76:76] is the sub-list for extension extendee
+	0,   // [0:76] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -9928,7 +9947,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   115,
+			NumMessages:   116,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
