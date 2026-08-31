@@ -114,6 +114,10 @@ const (
 	// parseTimeout — 전체 파싱 시간 상한. catastrophic backtracking 패턴 하나가
 	// 파싱을 멈추는 것을 막는다.
 	parseTimeout = 60 * time.Second
+	// deadlineCheckEvery — 몇 줄마다 시간 상한을 보는가.
+	// ⚠ 이 값보다 짧은 파일은 상한 검사를 **한 번도 안 탄다.** 크게 잡으면
+	// 짧은 파일에서 상한이 무력해진다 (9999줄 + 느린 정규식 = 무한정).
+	deadlineCheckEvery = 1000
 )
 
 // ParseLogcatPatternsJSON — 프로파일 JSON 을 읽고 컴파일한다.
@@ -157,8 +161,17 @@ func ParseLogcat(r io.Reader, p *LogcatPatterns) (LogcatParseResult, error) {
 		cs = append(cs, compiled{key: s.Key, kind: "series", unit: s.Unit, re: re})
 	}
 
+	// ⚠ 키 중복을 여기서 막는다. stat 이 map[key] 라 mark 와 series 가 키를 공유하면
+	// 한쪽이 다른 쪽을 덮어써 **Stats 에 같은 항목이 두 번 실리고 TotalHits 가 부풀려진다**
+	// (매칭 2줄인데 hits 4 로 보고되는 식). 저장 경로(ValidatePatternsJSON)는 이미 막지만
+	// `POST /logcat/parse` 의 inline patternsJson 은 그 검증을 안 타므로 여기서도 막아야 한다.
+	// 조용히 통과시키면 화면의 매칭 통계가 근거 없이 틀린다 — 진단의 근거로 쓰이는 값이다.
 	stat := map[string]*PatternStat{}
 	for _, c := range cs {
+		if _, dup := stat[c.key]; dup {
+			return res, fmt.Errorf("패턴 key 중복: %q — mark/series 를 통틀어 유일해야 한다 "+
+				"(중복이면 한쪽이 조용히 사라지고 매칭 통계가 틀어진다)", c.key)
+		}
 		stat[c.key] = &PatternStat{Key: c.key, Kind: c.kind}
 	}
 	points := map[string][]SeriesPoint{}
@@ -176,7 +189,13 @@ func ParseLogcat(r io.Reader, p *LogcatPatterns) (LogcatParseResult, error) {
 			break
 		}
 		// ⚠ 매 줄 시각을 재면 느리므로 주기적으로만 본다.
-		if res.TotalLines%10000 == 0 && time.Now().After(deadline) {
+		//
+		// ⚠⚠ 주기를 1000 으로 낮췄다. 10000 이면 **1만 줄 미만 파일에서 상한이 아예
+		// 안 걸린다** — 9999줄짜리 로그에 catastrophic backtracking 정규식 하나면
+		// 무한정 돈다. 정규식은 사용자 입력이고, `POST /logcat/parse` 는
+		// 사무실 모드(0.0.0.0·인증 없음)에서도 등록되므로 요청 하나로 goroutine 을
+		// 붙잡을 수 있다. 짧은 파일일수록 검사가 촘촘해야 하는 쪽이 맞다.
+		if res.TotalLines%deadlineCheckEvery == 0 && time.Now().After(deadline) {
 			res.Diagnosis = append(res.Diagnosis, fmt.Sprintf(
 				"파싱 시간 상한(%s)을 넘겨 중단했다 — 정규식이 과도하게 느릴 수 있다. "+
 					"결과가 일부만 반영됐다.", parseTimeout))

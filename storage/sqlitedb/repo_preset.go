@@ -356,6 +356,12 @@ func (db *DB) CreateAILogProfile(ctx context.Context, p *AILogProfile) (*AILogPr
 }
 
 func (db *DB) UpdateAILogProfile(ctx context.Context, id int64, p *AILogProfile) (*AILogProfile, error) {
+	// ⚠ Create 와 같은 필수 검사를 여기서도 한다. 빠뜨리면 patternsJson 만 담긴
+	// PUT 이 name/runtime 을 **빈 값으로 덮어쓴다.** runtime 은 조회 필터 컬럼이라
+	// (`GET ?runtime=`) 비면 그 프로파일이 목록에서 조용히 사라진 것처럼 보인다.
+	if p.Name == "" || p.Runtime == "" || p.PatternsJSON == "" {
+		return nil, fmt.Errorf("name, runtime, patternsJson required")
+	}
 	if err := ValidatePatternsJSON(p.PatternsJSON); err != nil {
 		return nil, err
 	}

@@ -118,3 +118,52 @@ func TestCountLines(t *testing.T) {
 		t.Error("없는 파일인데 에러가 안 났다")
 	}
 }
+
+// ⚠ countLines 가 읽기 에러를 삼키면 **적게 나온 줄 수가 성공처럼 보인다.**
+// Lines 는 "수집 실패(0줄)" 와 "패턴 실패(줄은 있는데 매칭 0)" 를 가르는 유일한
+// 근거라, 조용한 undercount 는 그 진단을 통째로 무력화한다.
+func TestCountLinesReportsReadError(t *testing.T) {
+	dir := t.TempDir()
+	// 디렉토리를 넘기면 Read 가 EOF 아닌 에러를 준다 (플랫폼 무관하게 실패).
+	if _, err := countLines(dir); err == nil {
+		t.Error("디렉토리를 읽었는데 에러가 없다 — 읽기 실패를 삼키고 있다")
+	}
+	// 정상 파일은 그대로 세야 한다.
+	f := filepath.Join(dir, "a.log")
+	if err := os.WriteFile(f, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := countLines(f)
+	if err != nil || n != 3 {
+		t.Errorf("정상 파일: n=%d err=%v (3, nil 이어야 한다)", n, err)
+	}
+}
+
+// ⚠ 수집 시작 직후 500ms 창에서 StopLogcat 이 들어와도 adb 자식이 죽어야 한다.
+// cancel 등록이 sleep 뒤에 있으면 그 사이 Stop 은 State 검사만 통과하고
+// adbCancel==nil 이라 kill 을 건너뛴다 — 잡은 completed 인데 자식은 살아남는다.
+// 소스 순서로 확인한다 (실제 adb 를 띄우지 않고 검증할 수 있는 유일한 방법).
+func TestStartLogcatRegistersCancelBeforeSleep(t *testing.T) {
+	src, err := os.ReadFile("logcat.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func (m *LogcatManager) StartLogcat(")
+	if i < 0 {
+		t.Fatal("StartLogcat 을 찾지 못했다 — 테스트가 낡았다")
+	}
+	body = body[i:]
+	if j := strings.Index(body, "\nfunc "); j > 0 {
+		body = body[:j]
+	}
+	cancelAt := strings.Index(body, "job.adbCancel = adbCancel")
+	sleepAt := strings.Index(body, "time.Sleep(500 * time.Millisecond)")
+	if cancelAt < 0 || sleepAt < 0 {
+		t.Fatal("cancel 등록 또는 sleep 을 찾지 못했다 — 테스트가 낡았다")
+	}
+	if cancelAt > sleepAt {
+		t.Error("adbCancel 등록이 sleep 뒤에 있다 — 그 사이 StopLogcat 이 오면 " +
+			"kill 을 건너뛰어 adb 자식이 살아남는다")
+	}
+}
