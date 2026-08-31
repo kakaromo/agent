@@ -103,6 +103,10 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 		registerArchiveRoutes(mux, opts.Agent, opts.ArchiveBase)
 	}
 
+	// 파일 업로드 → 자동 판별 → 파싱. trace 로그는 archiveBase 없이도 되지만
+	// 벤치마크 JSON 저장에는 필요하므로 핸들러 안에서 갈라 처리한다.
+	registerUploadRoutes(mux, opts.Agent, opts.ArchiveBase)
+
 	// 로컬 파일 탐색기로 폴더 열기 (standalone 전용). archive 또는 trace 폴더.
 	if opts.ArchiveBase != "" || opts.TraceBase != "" {
 		registerFSRoutes(mux, opts.ArchiveBase, opts.TraceBase)

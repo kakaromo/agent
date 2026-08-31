@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -989,4 +990,91 @@ func (m *Manager) doReparse(job *TraceJob) {
 	})
 
 	slog.Info("trace reparse completed", "job_id", jobID)
+}
+
+// IngestUploadedLog — 업로드된 trace 로그를 잡으로 등록하고 백그라운드로 파싱한다.
+//
+// **왜 있나.** 기기 없이도 남의 로그·과거 로그를 화면에서 볼 수 있어야 한다.
+// 파싱(`runParquetOnly`)과 조회(GetTraceResult 등)는 원래 기기를 안 쓰고 파일만
+// 보므로, 잡 레코드만 만들어 주면 기존 Trace Analysis 화면이 그대로 열린다.
+//
+// DeviceID 는 빈 값이다 — 수집 잡과 구분되는 지점이고, ClockSync 도 없어
+// 구간 분할(Behavior)은 쓸 수 없다. 나머지 탭은 동일하게 동작한다.
+//
+// logPath 는 이미 디스크에 놓인 파일이어야 한다(호출부가 저장). traceType 은
+// DetectUpload 가 판별한 값을 넘긴다.
+func (m *Manager) IngestUploadedLog(logPath, traceType, jobName string) (string, error) {
+	if traceType == "" {
+		return "", fmt.Errorf("traceType 이 비었다")
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		return "", fmt.Errorf("업로드 파일을 읽을 수 없다: %w", err)
+	}
+
+	jobID := uuid.New().String()
+	outputDir := filepath.Join(m.resolveOutputBase(""), jobID)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir output: %w", err)
+	}
+
+	// 로그를 잡 폴더 안으로 옮긴다 — 수집 잡과 같은 배치라야 재파싱·아카이브가
+	// 같은 코드로 동작한다. Rename 이 실패하면(다른 파일시스템) 복사로 폴백한다.
+	dest := filepath.Join(outputDir, "trace.log")
+	if err := os.Rename(logPath, dest); err != nil {
+		if err := copyFile(logPath, dest); err != nil {
+			return "", fmt.Errorf("업로드 파일 배치 실패: %w", err)
+		}
+		_ = os.Remove(logPath)
+	}
+
+	job := &TraceJob{
+		ID:        jobID,
+		TraceType: traceType,
+		State:     pb.JobState_JOB_STATE_COLLECTING,
+		OutputDir: outputDir,
+		LogFile:   dest,
+		StartedAt: time.Now().UnixMilli(),
+	}
+	m.mu.Lock()
+	m.jobs[jobID] = job
+	m.mu.Unlock()
+
+	slog.Info("uploaded trace ingested", "job_id", jobID, "trace_type", traceType,
+		"name", jobName, "log", dest)
+
+	// 파싱은 백그라운드 — 대용량 로그에서 HTTP 응답이 막히면 안 된다.
+	go func() {
+		if err := m.runParquetOnly(job, pb.JobState_JOB_STATE_COLLECTING); err != nil {
+			m.failJob(job, fmt.Sprintf("업로드 로그 파싱 실패: %v", err))
+			return
+		}
+		job.Mu.Lock()
+		job.State = pb.JobState_JOB_STATE_COMPLETED
+		job.FinishedAt = time.Now().UnixMilli()
+		job.Mu.Unlock()
+		job.notify(&pb.JobProgress{
+			JobId: jobID, State: pb.JobState_JOB_STATE_COMPLETED, ProgressPercent: 100,
+		})
+		job.closeSubscribers()
+	}()
+
+	return jobID, nil
+}
+
+// copyFile — Rename 이 안 될 때(교차 파일시스템) 쓰는 폴백.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

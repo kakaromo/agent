@@ -58,6 +58,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	return res.json();
 }
 
+/**
+ * multipart/form-data POST.
+ *
+ * 공용 request() 를 못 쓴다 — 그쪽은 Content-Type: application/json 을 강제하는데
+ * multipart 는 브라우저가 boundary 를 붙여 직접 정해야 한다.
+ *
+ * 에러 메시지도 서버 것을 그대로 올린다. 업로드 실패는 "포맷을 알 수 없습니다" 처럼
+ * **무엇을 고쳐야 하는지**가 본문에 있어서, 일반 문구로 덮으면 쓸모가 없어진다.
+ */
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+	const res = await fetch(`${BASE_URL}${path}`, {
+		method: 'POST',
+		headers: { 'X-XSRF-TOKEN': getCsrfToken() },
+		body: form
+	});
+	if (!res.ok) {
+		const text = await res.text().catch(() => res.statusText);
+		let msg = text;
+		try { const body = JSON.parse(text); msg = body.error || text; } catch { /* 평문 그대로 */ }
+		throw new Error(msg || '업로드에 실패했습니다');
+	}
+	if (res.status === 204) return undefined as T;
+	return res.json();
+}
+
 export function get<T>(path: string): Promise<T> {
 	return request<T>(path);
 }

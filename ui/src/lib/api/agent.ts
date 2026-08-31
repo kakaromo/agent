@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client.js';
+import { get, post, put, del, postForm } from './client.js';
 
 // ── Types ──
 
@@ -664,6 +664,31 @@ export function startTrace(serverId: number, data: {
 	includeVfs?: boolean;
 }): Promise<{ jobId: string }> {
 	return post(`/agent/trace/start?serverId=${serverId}`, data);
+}
+
+/**
+ * 파일 업로드 → 포맷 자동 판별 → 파싱/저장.
+ *
+ * 포맷은 서버가 내용으로 정한다 — 사용자가 trace_type 을 고르게 하면 잘못 골랐을 때
+ * 파서가 **에러 없이 0건**을 내서 "수집은 됐는데 비어 있다" 로 보인다.
+ * 판별 실패는 에러로 돌아온다(추측해서 진행하지 않는다).
+ */
+export function uploadFile(file: File, name?: string): Promise<{
+	kind: 'trace' | 'benchmark';
+	reason: string;
+	name: string;
+	/** kind==='trace' */
+	jobId?: string;
+	traceType?: string;
+	/** kind==='benchmark' */
+	path?: string;
+	deviceId?: string;
+	tool?: string;
+}> {
+	const fd = new FormData();
+	fd.append('file', file);
+	if (name) fd.append('name', name);
+	return postForm('/agent/upload/file', fd);
 }
 
 export function stopTrace(serverId: number, jobId: string): Promise<{ success: boolean; message: string }> {

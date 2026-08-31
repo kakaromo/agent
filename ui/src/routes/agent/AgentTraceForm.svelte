@@ -2,11 +2,12 @@
 	import { toast } from 'svelte-sonner';
 	import { TRACE_TYPES } from '$lib/config/traceTypes.js';
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
-	import { startTrace, stopTrace } from '$lib/api/agent.js';
+	import { startTrace, stopTrace, uploadFile } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
+	import UploadIcon from '@lucide/svelte/icons/upload';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 
 	interface Props {
@@ -61,6 +62,44 @@
 			toast.error('Trace 시작 실패');
 		} finally {
 			starting = false;
+		}
+	}
+
+	// ── 파일 업로드 ──
+	//
+	// 기기 없이 남의 로그·과거 로그를 보기 위한 경로. 포맷은 **서버가 내용으로 판별**한다
+	// — 사용자가 고르게 하면 잘못 골랐을 때 파서가 에러 없이 0건을 내서
+	// "수집은 됐는데 비어 있다" 로 보인다.
+	let uploading = $state(false);
+	let fileInput: HTMLInputElement | null = $state(null);
+
+	async function handleUpload(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const f = input.files?.[0];
+		if (!f) return;
+		uploading = true;
+		try {
+			const res = await uploadFile(f);
+			if (res.kind === 'trace' && res.jobId) {
+				toast.success(`${res.reason} — 파싱을 시작했습니다`);
+				onJobStarted({
+					jobId: res.jobId,
+					serverId: serverId!,
+					serverName,
+					type: 'trace',
+					jobName: res.name || f.name,
+					deviceIds: [],   // 업로드 잡은 기기가 없다
+					createdAt: Date.now()
+				});
+			} else {
+				toast.success(`${res.reason} — ${res.deviceId ?? ''} ${res.tool ?? ''}`.trim());
+			}
+		} catch (err) {
+			// 서버가 무엇을 고쳐야 하는지 알려준다 — 그대로 보여준다.
+			toast.error(err instanceof Error ? err.message : '업로드 실패');
+		} finally {
+			uploading = false;
+			input.value = '';   // 같은 파일을 다시 고를 수 있게
 		}
 	}
 
@@ -194,4 +233,29 @@
 			{/if}
 		</button>
 	{/if}
+	<!-- 파일 업로드 — 기기 없이 로그를 보는 경로 -->
+	<div class="pt-3 mt-1 border-t space-y-1.5">
+		<label class="{sectionLabel}">파일 열기</label>
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept=".log,.txt,.tsv,.json"
+			onchange={handleUpload}
+			class="hidden"
+		/>
+		<button
+			onclick={() => fileInput?.click()}
+			disabled={uploading}
+			class="w-full inline-flex items-center justify-center gap-2 rounded-md border px-4 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50 transition-colors"
+		>
+			{#if uploading}
+				<LoaderIcon class="size-4 animate-spin" /> 분석 중...
+			{:else}
+				<UploadIcon class="size-4" /> trace 로그 · 결과 JSON 열기
+			{/if}
+		</button>
+		<p class="{captionMuted}">
+			기기 없이 기존 로그를 분석합니다. 포맷(ftrace / fsio / 벤치마크 JSON)은 자동으로 판별합니다.
+		</p>
+	</div>
 </div>
