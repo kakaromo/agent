@@ -154,3 +154,109 @@ func TestFsioReadStatsTopNClamp(t *testing.T) {
 		t.Errorf("top_files %d개 — %d 로 clamp 돼야", len(resp.TopFiles), fsioReadMaxTopN)
 	}
 }
+
+// ⚠ mmap 을 read 분모에 섞으면 안 된다.
+//
+// fault-around 때문에 캐시에 있는 페이지는 fault 를 아예 안 낸다 — mmap 에서 hit 은
+// "행이 나오는 것" 이 아니라 **"행이 없는 것"** 이다. 그래서 mmap row 는 사실상 miss 만
+// 모인 모집단이고, read 와 같은 분모에 넣으면 캐시는 그대로인데 mmap 을 쓴다는 이유만으로
+// 적중률이 깎인다.
+//
+// 실측(FSIO_MMAP_FIXTURE_DIR = fio_mmap_sample.log 파싱 결과):
+//
+//	분리함  74.22%  ← 맞음
+//	섞음    59.63%  ← 14.6%p 가 근거 없이 사라진다
+//
+// ⚠ 이 테스트는 **mmap 행이 있는 parquet** 이라야 의미가 있다. mmap 0건인 fixture 로
+// 돌리면 분리를 빼도 통과한다 — Rust 쪽이 이 함정으로 버그를 오래 못 잡았다.
+func TestFsioReadMmapExcludedFromHitRatio(t *testing.T) {
+	dir := os.Getenv("FSIO_MMAP_FIXTURE_DIR")
+	if dir == "" {
+		t.Skip("FSIO_MMAP_FIXTURE_DIR 미설정 — mmap 행이 있는 parquet 필요")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "result_fsio_read.parquet")); err != nil {
+		t.Skipf("fixture parquet 없음: %v", err)
+	}
+
+	resp, err := ComputeFsioReadStats(
+		[]*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}},
+		&pb.GetFsioReadStatsRequest{TopN: 5},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Mmap == nil || resp.Mmap.Requests == 0 {
+		t.Fatal("mmap 집계가 비었다 — 파서가 mmap_fault:exit 을 안 받고 있을 수 있다")
+	}
+
+	// 1. class 별 합 = total. mmap 이 어느 쪽에도 섞이면 안 된다.
+	var sum uint64
+	for _, c := range resp.ByClass {
+		sum += c.Requests
+	}
+	if sum != resp.TotalRequests {
+		t.Errorf("class 합 %d != total %d", sum, resp.TotalRequests)
+	}
+
+	// 2. **핵심** — 분모에 mmap 이 섞였는지. 섞이면 hit ratio 가 낮아진다.
+	var hit, miss uint64
+	for _, c := range resp.ByClass {
+		switch c.CacheClass {
+		case fsioClassHit:
+			hit = c.Requests
+		case fsioClassMiss:
+			miss = c.Requests
+		}
+	}
+	if hit+miss == 0 {
+		t.Fatal("판정 대상이 0")
+	}
+	want := float64(hit) / float64(hit+miss)
+	if resp.RequestHitRatio == nil || *resp.RequestHitRatio != want {
+		t.Fatalf("hit ratio = %v, want %v", resp.RequestHitRatio, want)
+	}
+
+	// ⚠ 여기서 "mmap 을 섞은 값과 다른가" 로 검사하면 **안 된다.**
+	//
+	// 처음에 그렇게 썼다가 분리를 빼도 테스트가 통과했다: 분리가 빠지면 hit/miss 자체가
+	// 이미 오염돼 있어서, 그 오염된 값으로 다시 "섞은 값" 을 만들면 또 달라지기 때문이다
+	// (59.63% vs 50.00%). 자기 자신을 기준으로 삼으면 무엇과도 비교가 안 된다.
+	//
+	// 그래서 **fixture 의 알려진 정답**에 고정한다. 파서가 mmap 을 받고 집계가 분리하는
+	// 두 조건이 다 맞아야만 이 값이 나온다.
+	const (
+		wantHit    = 95 // fio_mmap_sample.log 실측 (Rust CLI 대조)
+		wantMiss   = 33
+		wantMmap   = 33
+		wantMmapMs = 32
+	)
+	if hit != wantHit || miss != wantMiss {
+		t.Errorf("read 모집단 hit/miss = %d/%d, want %d/%d — mmap 이 섞였을 수 있다",
+			hit, miss, wantHit, wantMiss)
+	}
+	if resp.Mmap.Requests != wantMmap || resp.Mmap.MissRequests != wantMmapMs {
+		t.Errorf("mmap = %d건/miss %d, want %d/%d",
+			resp.Mmap.Requests, resp.Mmap.MissRequests, wantMmap, wantMmapMs)
+	}
+	// 74.22% — 소수점 둘째 자리까지 고정. 섞이면 59.63% 가 된다.
+	if got := float64(int(*resp.RequestHitRatio*10000+0.5)) / 100; got != 74.22 {
+		t.Errorf("hit ratio = %.2f%%, want 74.22%% (섞이면 59.63%% 가 된다)", got)
+	}
+	t.Logf("hit ratio %.2f%% (read %d/%d) · mmap %d건 miss %d — 섞으면 59.63%%",
+		*resp.RequestHitRatio*100, hit, hit+miss, resp.Mmap.Requests, resp.Mmap.MissRequests)
+
+	// 3. mmap 은 대부분 miss 다 (fault-around). 이게 뒤집히면 판정이 이상한 것이다.
+	if resp.Mmap.MissRequests*2 < resp.Mmap.Requests {
+		t.Errorf("mmap miss 가 %d/%d — fault-around 전제와 어긋난다",
+			resp.Mmap.MissRequests, resp.Mmap.Requests)
+	}
+
+	// 4. top_files 도 read 모집단이어야 한다 — 전체와 파일별이 다른 모집단이면
+	//    같은 화면에서 합이 안 맞는다.
+	for _, f := range resp.TopFiles {
+		if f.HitRequests+f.MissRequests+f.UnknownRequests > f.Requests {
+			t.Errorf("%s: 분류 합이 요청 수를 넘었다", f.Key)
+		}
+	}
+}

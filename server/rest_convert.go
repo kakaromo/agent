@@ -751,6 +751,27 @@ func fsioReadStatsToMap(r *pb.GetFsioReadStatsResponse) map[string]any {
 	if r.UnknownRatio != nil {
 		out["unknownRatio"] = r.GetUnknownRatio()
 	}
+	// mmap page fault — **위 값들에서 제외된 별도 모집단**.
+	// ⚠ 적중률을 싣지 않는다: fault-around 때문에 캐시에 있는 페이지는 fault 를 안 내
+	// 이 모집단은 사실상 miss 만 모인다. 비율을 만들면 "mmap 이 캐시를 못 맞춘다" 로 오독된다.
+	if m := r.GetMmap(); m != nil && m.GetRequests() > 0 {
+		mm := map[string]any{
+			"requests":        m.GetRequests(),
+			"missRequests":    m.GetMissRequests(),
+			"fillUnits":       m.GetFillUnits(),
+			"durationSamples": m.GetDurationSamples(),
+		}
+		if m.DurationAvgNs != nil {
+			mm["durationAvgNs"] = m.GetDurationAvgNs()
+		}
+		if m.DurationP50Ns != nil {
+			mm["durationP50Ns"] = m.GetDurationP50Ns()
+		}
+		if m.DurationP99Ns != nil {
+			mm["durationP99Ns"] = m.GetDurationP99Ns()
+		}
+		out["mmap"] = mm
+	}
 	return out
 }
 

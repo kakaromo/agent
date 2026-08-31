@@ -33,9 +33,28 @@ func CountsTowardRatio(cacheClass string) bool {
 	return cacheClass == CacheClassHit || cacheClass == CacheClassMiss
 }
 
+// FsioReadActionMmap — mmap page fault 종료 요약 action.
+//
+// SQL 리터럴로도 쓰이므로(집계에서 분모 분리) 상수로 둔다.
+const FsioReadActionMmap = "mmap_fault:exit"
+
 // isFsioReadAction — 이 action 이 VFS read 종료 요약인가.
+//
+// ⚠ mmap_fault:exit 은 hit 계산식이 다르다 — fault-around 때문에 캐시에 있는
+//
+//	페이지는 fault 를 아예 안 낸다. 즉 mmap 에서 hit 은 "행이 나오는 것" 이 아니라
+//	**"행이 없는 것"** 이다. 그래서 파싱은 같이 하되 통계에서 read 와 분모를 섞지
+//	않는다 (ComputeFsioReadStats 의 mmap 분리 참조).
+//
+//	섞으면 캐시는 그대로인데 mmap 을 쓴다는 이유만으로 적중률이 깎인다 —
+//	실측 fio_mmap_sample.log 기준 74.22% → 59.63% (14.6%p 가 근거 없이 사라진다).
 func isFsioReadAction(a string) bool {
-	return a == "vfs_read:exit" || a == "readv:exit"
+	return a == "vfs_read:exit" || a == "readv:exit" || a == FsioReadActionMmap
+}
+
+// IsMmapFault — 이 행이 mmap page fault 인가. read 와 **모집단이 다르다.**
+func (e *FsioReadEvent) IsMmapFault() bool {
+	return e.Action == FsioReadActionMmap
 }
 
 // parseFsioReadLine — layer="VFS" 의 read 종료 요약 한 줄 → FsioReadEvent.

@@ -4478,8 +4478,10 @@ type GetFsioReadStatsResponse struct {
 	// hit ratio 를 읽으면 cache 판정에서 특히 위험하다.
 	QualityWarnings []string `protobuf:"bytes,13,rep,name=quality_warnings,json=qualityWarnings,proto3" json:"quality_warnings,omitempty"`
 	SchemaVersion   string   `protobuf:"bytes,14,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"` // "fsio_read-v1"
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// mmap page fault — **위의 모든 값에서 제외된 별도 모집단**이다.
+	Mmap          *FsioReadMmapStats `protobuf:"bytes,15,opt,name=mmap,proto3" json:"mmap,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetFsioReadStatsResponse) Reset() {
@@ -4610,6 +4612,117 @@ func (x *GetFsioReadStatsResponse) GetSchemaVersion() string {
 	return ""
 }
 
+func (x *GetFsioReadStatsResponse) GetMmap() *FsioReadMmapStats {
+	if x != nil {
+		return x.Mmap
+	}
+	return nil
+}
+
+// mmap page fault 요약.
+//
+// ⚠ **적중률 필드가 없는 것은 누락이 아니라 의도다.** fault-around 때문에 캐시에
+//
+//	있는 페이지는 fault 를 아예 안 내므로, 이 모집단은 사실상 miss 만 모여 있다.
+//	hit/(hit+miss) 를 구하면 구조적으로 0% 에 가깝게 나오고, 그걸 "mmap 이 캐시를
+//	못 맞춘다" 로 읽으면 완전히 틀린 결론이 된다. 진짜 분모(접근한 페이지 수)는
+//	이 계층에 없다 — bpftrace 가 fault 만 보고 접근 전체를 못 본다.
+//
+// 그래서 read 통계와 **분모를 절대 섞지 않는다**. 섞으면 캐시는 그대로인데 mmap 을
+// 쓴다는 이유만으로 hit ratio 가 떨어진다
+// (실측: fio_mmap_sample.log 74.22% → 59.63%, fsio_mmap_sample.log 70.52% → 67.15%).
+type FsioReadMmapStats struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Requests        uint64                 `protobuf:"varint,1,opt,name=requests,proto3" json:"requests,omitempty"`
+	MissRequests    uint64                 `protobuf:"varint,2,opt,name=miss_requests,json=missRequests,proto3" json:"miss_requests,omitempty"`
+	FillUnits       uint64                 `protobuf:"varint,3,opt,name=fill_units,json=fillUnits,proto3" json:"fill_units,omitempty"`
+	DurationSamples uint64                 `protobuf:"varint,4,opt,name=duration_samples,json=durationSamples,proto3" json:"duration_samples,omitempty"`
+	DurationAvgNs   *uint64                `protobuf:"varint,5,opt,name=duration_avg_ns,json=durationAvgNs,proto3,oneof" json:"duration_avg_ns,omitempty"`
+	DurationP50Ns   *uint64                `protobuf:"varint,6,opt,name=duration_p50_ns,json=durationP50Ns,proto3,oneof" json:"duration_p50_ns,omitempty"`
+	DurationP99Ns   *uint64                `protobuf:"varint,7,opt,name=duration_p99_ns,json=durationP99Ns,proto3,oneof" json:"duration_p99_ns,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *FsioReadMmapStats) Reset() {
+	*x = FsioReadMmapStats{}
+	mi := &file_agent_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FsioReadMmapStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FsioReadMmapStats) ProtoMessage() {}
+
+func (x *FsioReadMmapStats) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FsioReadMmapStats.ProtoReflect.Descriptor instead.
+func (*FsioReadMmapStats) Descriptor() ([]byte, []int) {
+	return file_agent_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *FsioReadMmapStats) GetRequests() uint64 {
+	if x != nil {
+		return x.Requests
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetMissRequests() uint64 {
+	if x != nil {
+		return x.MissRequests
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetFillUnits() uint64 {
+	if x != nil {
+		return x.FillUnits
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetDurationSamples() uint64 {
+	if x != nil {
+		return x.DurationSamples
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetDurationAvgNs() uint64 {
+	if x != nil && x.DurationAvgNs != nil {
+		return *x.DurationAvgNs
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetDurationP50Ns() uint64 {
+	if x != nil && x.DurationP50Ns != nil {
+		return *x.DurationP50Ns
+	}
+	return 0
+}
+
+func (x *FsioReadMmapStats) GetDurationP99Ns() uint64 {
+	if x != nil && x.DurationP99Ns != nil {
+		return *x.DurationP99Ns
+	}
+	return 0
+}
+
 type GetTraceRawDataRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobIds        []string               `protobuf:"bytes,1,rep,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"` // 여러 job의 parquet를 합쳐서 조회
@@ -4620,7 +4733,7 @@ type GetTraceRawDataRequest struct {
 
 func (x *GetTraceRawDataRequest) Reset() {
 	*x = GetTraceRawDataRequest{}
-	mi := &file_agent_proto_msgTypes[53]
+	mi := &file_agent_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4632,7 +4745,7 @@ func (x *GetTraceRawDataRequest) String() string {
 func (*GetTraceRawDataRequest) ProtoMessage() {}
 
 func (x *GetTraceRawDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[53]
+	mi := &file_agent_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4645,7 +4758,7 @@ func (x *GetTraceRawDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRawDataRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceRawDataRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{53}
+	return file_agent_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *GetTraceRawDataRequest) GetJobIds() []string {
@@ -4681,7 +4794,7 @@ type GetTraceRawDataResponse struct {
 
 func (x *GetTraceRawDataResponse) Reset() {
 	*x = GetTraceRawDataResponse{}
-	mi := &file_agent_proto_msgTypes[54]
+	mi := &file_agent_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4693,7 +4806,7 @@ func (x *GetTraceRawDataResponse) String() string {
 func (*GetTraceRawDataResponse) ProtoMessage() {}
 
 func (x *GetTraceRawDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[54]
+	mi := &file_agent_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4706,7 +4819,7 @@ func (x *GetTraceRawDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRawDataResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceRawDataResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{54}
+	return file_agent_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *GetTraceRawDataResponse) GetJobId() string {
@@ -4827,7 +4940,7 @@ type TraceEvent struct {
 
 func (x *TraceEvent) Reset() {
 	*x = TraceEvent{}
-	mi := &file_agent_proto_msgTypes[55]
+	mi := &file_agent_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4839,7 +4952,7 @@ func (x *TraceEvent) String() string {
 func (*TraceEvent) ProtoMessage() {}
 
 func (x *TraceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[55]
+	mi := &file_agent_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4852,7 +4965,7 @@ func (x *TraceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceEvent.ProtoReflect.Descriptor instead.
 func (*TraceEvent) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{55}
+	return file_agent_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *TraceEvent) GetTime() float64 {
@@ -5187,7 +5300,7 @@ type UploadTraceRequest struct {
 
 func (x *UploadTraceRequest) Reset() {
 	*x = UploadTraceRequest{}
-	mi := &file_agent_proto_msgTypes[56]
+	mi := &file_agent_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5199,7 +5312,7 @@ func (x *UploadTraceRequest) String() string {
 func (*UploadTraceRequest) ProtoMessage() {}
 
 func (x *UploadTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[56]
+	mi := &file_agent_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5212,7 +5325,7 @@ func (x *UploadTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadTraceRequest.ProtoReflect.Descriptor instead.
 func (*UploadTraceRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{56}
+	return file_agent_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *UploadTraceRequest) GetJobIds() []string {
@@ -5240,7 +5353,7 @@ type UploadTraceResponse struct {
 
 func (x *UploadTraceResponse) Reset() {
 	*x = UploadTraceResponse{}
-	mi := &file_agent_proto_msgTypes[57]
+	mi := &file_agent_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5252,7 +5365,7 @@ func (x *UploadTraceResponse) String() string {
 func (*UploadTraceResponse) ProtoMessage() {}
 
 func (x *UploadTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[57]
+	mi := &file_agent_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5265,7 +5378,7 @@ func (x *UploadTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadTraceResponse.ProtoReflect.Descriptor instead.
 func (*UploadTraceResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{57}
+	return file_agent_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *UploadTraceResponse) GetSuccess() bool {
@@ -5299,7 +5412,7 @@ type UploadBenchmarkRequest struct {
 
 func (x *UploadBenchmarkRequest) Reset() {
 	*x = UploadBenchmarkRequest{}
-	mi := &file_agent_proto_msgTypes[58]
+	mi := &file_agent_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5311,7 +5424,7 @@ func (x *UploadBenchmarkRequest) String() string {
 func (*UploadBenchmarkRequest) ProtoMessage() {}
 
 func (x *UploadBenchmarkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[58]
+	mi := &file_agent_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5324,7 +5437,7 @@ func (x *UploadBenchmarkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadBenchmarkRequest.ProtoReflect.Descriptor instead.
 func (*UploadBenchmarkRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{58}
+	return file_agent_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *UploadBenchmarkRequest) GetJobId() string {
@@ -5352,7 +5465,7 @@ type UploadBenchmarkResponse struct {
 
 func (x *UploadBenchmarkResponse) Reset() {
 	*x = UploadBenchmarkResponse{}
-	mi := &file_agent_proto_msgTypes[59]
+	mi := &file_agent_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5364,7 +5477,7 @@ func (x *UploadBenchmarkResponse) String() string {
 func (*UploadBenchmarkResponse) ProtoMessage() {}
 
 func (x *UploadBenchmarkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[59]
+	mi := &file_agent_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5377,7 +5490,7 @@ func (x *UploadBenchmarkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadBenchmarkResponse.ProtoReflect.Descriptor instead.
 func (*UploadBenchmarkResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{59}
+	return file_agent_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *UploadBenchmarkResponse) GetSuccess() bool {
@@ -5412,7 +5525,7 @@ type UploadTraceArchiveRequest struct {
 
 func (x *UploadTraceArchiveRequest) Reset() {
 	*x = UploadTraceArchiveRequest{}
-	mi := &file_agent_proto_msgTypes[60]
+	mi := &file_agent_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5424,7 +5537,7 @@ func (x *UploadTraceArchiveRequest) String() string {
 func (*UploadTraceArchiveRequest) ProtoMessage() {}
 
 func (x *UploadTraceArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[60]
+	mi := &file_agent_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5437,7 +5550,7 @@ func (x *UploadTraceArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadTraceArchiveRequest.ProtoReflect.Descriptor instead.
 func (*UploadTraceArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{60}
+	return file_agent_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *UploadTraceArchiveRequest) GetJobId() string {
@@ -5477,7 +5590,7 @@ type PresignedTarget struct {
 
 func (x *PresignedTarget) Reset() {
 	*x = PresignedTarget{}
-	mi := &file_agent_proto_msgTypes[61]
+	mi := &file_agent_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5489,7 +5602,7 @@ func (x *PresignedTarget) String() string {
 func (*PresignedTarget) ProtoMessage() {}
 
 func (x *PresignedTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[61]
+	mi := &file_agent_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5502,7 +5615,7 @@ func (x *PresignedTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresignedTarget.ProtoReflect.Descriptor instead.
 func (*PresignedTarget) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{61}
+	return file_agent_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *PresignedTarget) GetLocalPath() string {
@@ -5564,7 +5677,7 @@ type PresignedPart struct {
 
 func (x *PresignedPart) Reset() {
 	*x = PresignedPart{}
-	mi := &file_agent_proto_msgTypes[62]
+	mi := &file_agent_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5576,7 +5689,7 @@ func (x *PresignedPart) String() string {
 func (*PresignedPart) ProtoMessage() {}
 
 func (x *PresignedPart) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[62]
+	mi := &file_agent_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5589,7 +5702,7 @@ func (x *PresignedPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresignedPart.ProtoReflect.Descriptor instead.
 func (*PresignedPart) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{62}
+	return file_agent_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *PresignedPart) GetPartNumber() int32 {
@@ -5624,7 +5737,7 @@ type UploadTraceArchiveProgress struct {
 
 func (x *UploadTraceArchiveProgress) Reset() {
 	*x = UploadTraceArchiveProgress{}
-	mi := &file_agent_proto_msgTypes[63]
+	mi := &file_agent_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5636,7 +5749,7 @@ func (x *UploadTraceArchiveProgress) String() string {
 func (*UploadTraceArchiveProgress) ProtoMessage() {}
 
 func (x *UploadTraceArchiveProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[63]
+	mi := &file_agent_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5649,7 +5762,7 @@ func (x *UploadTraceArchiveProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadTraceArchiveProgress.ProtoReflect.Descriptor instead.
 func (*UploadTraceArchiveProgress) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{63}
+	return file_agent_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *UploadTraceArchiveProgress) GetJobId() string {
@@ -5726,7 +5839,7 @@ type CompletedPartReport struct {
 
 func (x *CompletedPartReport) Reset() {
 	*x = CompletedPartReport{}
-	mi := &file_agent_proto_msgTypes[64]
+	mi := &file_agent_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5738,7 +5851,7 @@ func (x *CompletedPartReport) String() string {
 func (*CompletedPartReport) ProtoMessage() {}
 
 func (x *CompletedPartReport) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[64]
+	mi := &file_agent_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5751,7 +5864,7 @@ func (x *CompletedPartReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompletedPartReport.ProtoReflect.Descriptor instead.
 func (*CompletedPartReport) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{64}
+	return file_agent_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *CompletedPartReport) GetLocalPath() string {
@@ -5784,7 +5897,7 @@ type GetArchiveFilesInfoRequest struct {
 
 func (x *GetArchiveFilesInfoRequest) Reset() {
 	*x = GetArchiveFilesInfoRequest{}
-	mi := &file_agent_proto_msgTypes[65]
+	mi := &file_agent_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5796,7 +5909,7 @@ func (x *GetArchiveFilesInfoRequest) String() string {
 func (*GetArchiveFilesInfoRequest) ProtoMessage() {}
 
 func (x *GetArchiveFilesInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[65]
+	mi := &file_agent_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5809,7 +5922,7 @@ func (x *GetArchiveFilesInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArchiveFilesInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetArchiveFilesInfoRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{65}
+	return file_agent_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *GetArchiveFilesInfoRequest) GetJobId() string {
@@ -5831,7 +5944,7 @@ type GetArchiveFilesInfoResponse struct {
 
 func (x *GetArchiveFilesInfoResponse) Reset() {
 	*x = GetArchiveFilesInfoResponse{}
-	mi := &file_agent_proto_msgTypes[66]
+	mi := &file_agent_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5843,7 +5956,7 @@ func (x *GetArchiveFilesInfoResponse) String() string {
 func (*GetArchiveFilesInfoResponse) ProtoMessage() {}
 
 func (x *GetArchiveFilesInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[66]
+	mi := &file_agent_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5856,7 +5969,7 @@ func (x *GetArchiveFilesInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetArchiveFilesInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetArchiveFilesInfoResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{66}
+	return file_agent_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *GetArchiveFilesInfoResponse) GetJobId() string {
@@ -5898,7 +6011,7 @@ type ArchiveParquetInfo struct {
 
 func (x *ArchiveParquetInfo) Reset() {
 	*x = ArchiveParquetInfo{}
-	mi := &file_agent_proto_msgTypes[67]
+	mi := &file_agent_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5910,7 +6023,7 @@ func (x *ArchiveParquetInfo) String() string {
 func (*ArchiveParquetInfo) ProtoMessage() {}
 
 func (x *ArchiveParquetInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[67]
+	mi := &file_agent_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5923,7 +6036,7 @@ func (x *ArchiveParquetInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArchiveParquetInfo.ProtoReflect.Descriptor instead.
 func (*ArchiveParquetInfo) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{67}
+	return file_agent_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ArchiveParquetInfo) GetLocalPath() string {
@@ -5957,7 +6070,7 @@ type MonitorDevicesRequest struct {
 
 func (x *MonitorDevicesRequest) Reset() {
 	*x = MonitorDevicesRequest{}
-	mi := &file_agent_proto_msgTypes[68]
+	mi := &file_agent_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5969,7 +6082,7 @@ func (x *MonitorDevicesRequest) String() string {
 func (*MonitorDevicesRequest) ProtoMessage() {}
 
 func (x *MonitorDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[68]
+	mi := &file_agent_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5982,7 +6095,7 @@ func (x *MonitorDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MonitorDevicesRequest.ProtoReflect.Descriptor instead.
 func (*MonitorDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{68}
+	return file_agent_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *MonitorDevicesRequest) GetDeviceIds() []string {
@@ -6013,7 +6126,7 @@ type DeviceMetrics struct {
 
 func (x *DeviceMetrics) Reset() {
 	*x = DeviceMetrics{}
-	mi := &file_agent_proto_msgTypes[69]
+	mi := &file_agent_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6025,7 +6138,7 @@ func (x *DeviceMetrics) String() string {
 func (*DeviceMetrics) ProtoMessage() {}
 
 func (x *DeviceMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[69]
+	mi := &file_agent_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6038,7 +6151,7 @@ func (x *DeviceMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceMetrics.ProtoReflect.Descriptor instead.
 func (*DeviceMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{69}
+	return file_agent_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *DeviceMetrics) GetDeviceId() string {
@@ -6093,7 +6206,7 @@ type CpuMetrics struct {
 
 func (x *CpuMetrics) Reset() {
 	*x = CpuMetrics{}
-	mi := &file_agent_proto_msgTypes[70]
+	mi := &file_agent_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6105,7 +6218,7 @@ func (x *CpuMetrics) String() string {
 func (*CpuMetrics) ProtoMessage() {}
 
 func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[70]
+	mi := &file_agent_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6118,7 +6231,7 @@ func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CpuMetrics.ProtoReflect.Descriptor instead.
 func (*CpuMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{70}
+	return file_agent_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *CpuMetrics) GetUsagePercent() float64 {
@@ -6147,7 +6260,7 @@ type MemoryMetrics struct {
 
 func (x *MemoryMetrics) Reset() {
 	*x = MemoryMetrics{}
-	mi := &file_agent_proto_msgTypes[71]
+	mi := &file_agent_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6159,7 +6272,7 @@ func (x *MemoryMetrics) String() string {
 func (*MemoryMetrics) ProtoMessage() {}
 
 func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[71]
+	mi := &file_agent_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6172,7 +6285,7 @@ func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryMetrics.ProtoReflect.Descriptor instead.
 func (*MemoryMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{71}
+	return file_agent_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *MemoryMetrics) GetTotalKb() uint64 {
@@ -6215,7 +6328,7 @@ type DiskMetrics struct {
 
 func (x *DiskMetrics) Reset() {
 	*x = DiskMetrics{}
-	mi := &file_agent_proto_msgTypes[72]
+	mi := &file_agent_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6227,7 +6340,7 @@ func (x *DiskMetrics) String() string {
 func (*DiskMetrics) ProtoMessage() {}
 
 func (x *DiskMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[72]
+	mi := &file_agent_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6240,7 +6353,7 @@ func (x *DiskMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskMetrics.ProtoReflect.Descriptor instead.
 func (*DiskMetrics) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{72}
+	return file_agent_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *DiskMetrics) GetReadBytes() uint64 {
@@ -6285,7 +6398,7 @@ type FilesystemInfo struct {
 
 func (x *FilesystemInfo) Reset() {
 	*x = FilesystemInfo{}
-	mi := &file_agent_proto_msgTypes[73]
+	mi := &file_agent_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6297,7 +6410,7 @@ func (x *FilesystemInfo) String() string {
 func (*FilesystemInfo) ProtoMessage() {}
 
 func (x *FilesystemInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[73]
+	mi := &file_agent_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6310,7 +6423,7 @@ func (x *FilesystemInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilesystemInfo.ProtoReflect.Descriptor instead.
 func (*FilesystemInfo) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{73}
+	return file_agent_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *FilesystemInfo) GetMountPoint() string {
@@ -6401,7 +6514,7 @@ type MacroEvent struct {
 
 func (x *MacroEvent) Reset() {
 	*x = MacroEvent{}
-	mi := &file_agent_proto_msgTypes[74]
+	mi := &file_agent_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6413,7 +6526,7 @@ func (x *MacroEvent) String() string {
 func (*MacroEvent) ProtoMessage() {}
 
 func (x *MacroEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[74]
+	mi := &file_agent_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6426,7 +6539,7 @@ func (x *MacroEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MacroEvent.ProtoReflect.Descriptor instead.
 func (*MacroEvent) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{74}
+	return file_agent_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *MacroEvent) GetT() int64 {
@@ -6623,7 +6736,7 @@ type OcrRegion struct {
 
 func (x *OcrRegion) Reset() {
 	*x = OcrRegion{}
-	mi := &file_agent_proto_msgTypes[75]
+	mi := &file_agent_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6635,7 +6748,7 @@ func (x *OcrRegion) String() string {
 func (*OcrRegion) ProtoMessage() {}
 
 func (x *OcrRegion) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[75]
+	mi := &file_agent_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6648,7 +6761,7 @@ func (x *OcrRegion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OcrRegion.ProtoReflect.Descriptor instead.
 func (*OcrRegion) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{75}
+	return file_agent_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *OcrRegion) GetX() int32 {
@@ -6688,7 +6801,7 @@ type ListInstalledAppsRequest struct {
 
 func (x *ListInstalledAppsRequest) Reset() {
 	*x = ListInstalledAppsRequest{}
-	mi := &file_agent_proto_msgTypes[76]
+	mi := &file_agent_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6700,7 +6813,7 @@ func (x *ListInstalledAppsRequest) String() string {
 func (*ListInstalledAppsRequest) ProtoMessage() {}
 
 func (x *ListInstalledAppsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[76]
+	mi := &file_agent_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6713,7 +6826,7 @@ func (x *ListInstalledAppsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstalledAppsRequest.ProtoReflect.Descriptor instead.
 func (*ListInstalledAppsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{76}
+	return file_agent_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ListInstalledAppsRequest) GetDeviceId() string {
@@ -6732,7 +6845,7 @@ type ListInstalledAppsResponse struct {
 
 func (x *ListInstalledAppsResponse) Reset() {
 	*x = ListInstalledAppsResponse{}
-	mi := &file_agent_proto_msgTypes[77]
+	mi := &file_agent_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6744,7 +6857,7 @@ func (x *ListInstalledAppsResponse) String() string {
 func (*ListInstalledAppsResponse) ProtoMessage() {}
 
 func (x *ListInstalledAppsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[77]
+	mi := &file_agent_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6757,7 +6870,7 @@ func (x *ListInstalledAppsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstalledAppsResponse.ProtoReflect.Descriptor instead.
 func (*ListInstalledAppsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{77}
+	return file_agent_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *ListInstalledAppsResponse) GetApps() []*InstalledApp {
@@ -6777,7 +6890,7 @@ type InstalledApp struct {
 
 func (x *InstalledApp) Reset() {
 	*x = InstalledApp{}
-	mi := &file_agent_proto_msgTypes[78]
+	mi := &file_agent_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6789,7 +6902,7 @@ func (x *InstalledApp) String() string {
 func (*InstalledApp) ProtoMessage() {}
 
 func (x *InstalledApp) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[78]
+	mi := &file_agent_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6802,7 +6915,7 @@ func (x *InstalledApp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstalledApp.ProtoReflect.Descriptor instead.
 func (*InstalledApp) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{78}
+	return file_agent_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *InstalledApp) GetPackageName() string {
@@ -6827,7 +6940,7 @@ type ListBundledApksRequest struct {
 
 func (x *ListBundledApksRequest) Reset() {
 	*x = ListBundledApksRequest{}
-	mi := &file_agent_proto_msgTypes[79]
+	mi := &file_agent_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6839,7 +6952,7 @@ func (x *ListBundledApksRequest) String() string {
 func (*ListBundledApksRequest) ProtoMessage() {}
 
 func (x *ListBundledApksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[79]
+	mi := &file_agent_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6852,7 +6965,7 @@ func (x *ListBundledApksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBundledApksRequest.ProtoReflect.Descriptor instead.
 func (*ListBundledApksRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{79}
+	return file_agent_proto_rawDescGZIP(), []int{80}
 }
 
 type ListBundledApksResponse struct {
@@ -6864,7 +6977,7 @@ type ListBundledApksResponse struct {
 
 func (x *ListBundledApksResponse) Reset() {
 	*x = ListBundledApksResponse{}
-	mi := &file_agent_proto_msgTypes[80]
+	mi := &file_agent_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6876,7 +6989,7 @@ func (x *ListBundledApksResponse) String() string {
 func (*ListBundledApksResponse) ProtoMessage() {}
 
 func (x *ListBundledApksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[80]
+	mi := &file_agent_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6889,7 +7002,7 @@ func (x *ListBundledApksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListBundledApksResponse.ProtoReflect.Descriptor instead.
 func (*ListBundledApksResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{80}
+	return file_agent_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ListBundledApksResponse) GetApks() []*BundledApk {
@@ -6910,7 +7023,7 @@ type BundledApk struct {
 
 func (x *BundledApk) Reset() {
 	*x = BundledApk{}
-	mi := &file_agent_proto_msgTypes[81]
+	mi := &file_agent_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6922,7 +7035,7 @@ func (x *BundledApk) String() string {
 func (*BundledApk) ProtoMessage() {}
 
 func (x *BundledApk) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[81]
+	mi := &file_agent_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6935,7 +7048,7 @@ func (x *BundledApk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BundledApk.ProtoReflect.Descriptor instead.
 func (*BundledApk) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{81}
+	return file_agent_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *BundledApk) GetFilename() string {
@@ -6971,7 +7084,7 @@ type InstallApkRequest struct {
 
 func (x *InstallApkRequest) Reset() {
 	*x = InstallApkRequest{}
-	mi := &file_agent_proto_msgTypes[82]
+	mi := &file_agent_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6983,7 +7096,7 @@ func (x *InstallApkRequest) String() string {
 func (*InstallApkRequest) ProtoMessage() {}
 
 func (x *InstallApkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[82]
+	mi := &file_agent_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6996,7 +7109,7 @@ func (x *InstallApkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApkRequest.ProtoReflect.Descriptor instead.
 func (*InstallApkRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{82}
+	return file_agent_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *InstallApkRequest) GetDeviceId() string {
@@ -7038,7 +7151,7 @@ type InstallApkResponse struct {
 
 func (x *InstallApkResponse) Reset() {
 	*x = InstallApkResponse{}
-	mi := &file_agent_proto_msgTypes[83]
+	mi := &file_agent_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7050,7 +7163,7 @@ func (x *InstallApkResponse) String() string {
 func (*InstallApkResponse) ProtoMessage() {}
 
 func (x *InstallApkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[83]
+	mi := &file_agent_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7063,7 +7176,7 @@ func (x *InstallApkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallApkResponse.ProtoReflect.Descriptor instead.
 func (*InstallApkResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{83}
+	return file_agent_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *InstallApkResponse) GetSuccess() bool {
@@ -7098,7 +7211,7 @@ type UninstallApkRequest struct {
 
 func (x *UninstallApkRequest) Reset() {
 	*x = UninstallApkRequest{}
-	mi := &file_agent_proto_msgTypes[84]
+	mi := &file_agent_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7110,7 +7223,7 @@ func (x *UninstallApkRequest) String() string {
 func (*UninstallApkRequest) ProtoMessage() {}
 
 func (x *UninstallApkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[84]
+	mi := &file_agent_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7123,7 +7236,7 @@ func (x *UninstallApkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallApkRequest.ProtoReflect.Descriptor instead.
 func (*UninstallApkRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{84}
+	return file_agent_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *UninstallApkRequest) GetDeviceId() string {
@@ -7157,7 +7270,7 @@ type UninstallApkResponse struct {
 
 func (x *UninstallApkResponse) Reset() {
 	*x = UninstallApkResponse{}
-	mi := &file_agent_proto_msgTypes[85]
+	mi := &file_agent_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7169,7 +7282,7 @@ func (x *UninstallApkResponse) String() string {
 func (*UninstallApkResponse) ProtoMessage() {}
 
 func (x *UninstallApkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[85]
+	mi := &file_agent_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7182,7 +7295,7 @@ func (x *UninstallApkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallApkResponse.ProtoReflect.Descriptor instead.
 func (*UninstallApkResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{85}
+	return file_agent_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *UninstallApkResponse) GetSuccess() bool {
@@ -7208,7 +7321,7 @@ type StartRecordingRequest struct {
 
 func (x *StartRecordingRequest) Reset() {
 	*x = StartRecordingRequest{}
-	mi := &file_agent_proto_msgTypes[86]
+	mi := &file_agent_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7220,7 +7333,7 @@ func (x *StartRecordingRequest) String() string {
 func (*StartRecordingRequest) ProtoMessage() {}
 
 func (x *StartRecordingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[86]
+	mi := &file_agent_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7233,7 +7346,7 @@ func (x *StartRecordingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRecordingRequest.ProtoReflect.Descriptor instead.
 func (*StartRecordingRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{86}
+	return file_agent_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *StartRecordingRequest) GetDeviceId() string {
@@ -7253,7 +7366,7 @@ type StartRecordingResponse struct {
 
 func (x *StartRecordingResponse) Reset() {
 	*x = StartRecordingResponse{}
-	mi := &file_agent_proto_msgTypes[87]
+	mi := &file_agent_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7265,7 +7378,7 @@ func (x *StartRecordingResponse) String() string {
 func (*StartRecordingResponse) ProtoMessage() {}
 
 func (x *StartRecordingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[87]
+	mi := &file_agent_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7278,7 +7391,7 @@ func (x *StartRecordingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRecordingResponse.ProtoReflect.Descriptor instead.
 func (*StartRecordingResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{87}
+	return file_agent_proto_rawDescGZIP(), []int{88}
 }
 
 func (x *StartRecordingResponse) GetSuccess() bool {
@@ -7305,7 +7418,7 @@ type StopRecordingRequest struct {
 
 func (x *StopRecordingRequest) Reset() {
 	*x = StopRecordingRequest{}
-	mi := &file_agent_proto_msgTypes[88]
+	mi := &file_agent_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7317,7 +7430,7 @@ func (x *StopRecordingRequest) String() string {
 func (*StopRecordingRequest) ProtoMessage() {}
 
 func (x *StopRecordingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[88]
+	mi := &file_agent_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7330,7 +7443,7 @@ func (x *StopRecordingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRecordingRequest.ProtoReflect.Descriptor instead.
 func (*StopRecordingRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{88}
+	return file_agent_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *StopRecordingRequest) GetDeviceId() string {
@@ -7359,7 +7472,7 @@ type StopRecordingResponse struct {
 
 func (x *StopRecordingResponse) Reset() {
 	*x = StopRecordingResponse{}
-	mi := &file_agent_proto_msgTypes[89]
+	mi := &file_agent_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7371,7 +7484,7 @@ func (x *StopRecordingResponse) String() string {
 func (*StopRecordingResponse) ProtoMessage() {}
 
 func (x *StopRecordingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[89]
+	mi := &file_agent_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7384,7 +7497,7 @@ func (x *StopRecordingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRecordingResponse.ProtoReflect.Descriptor instead.
 func (*StopRecordingResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{89}
+	return file_agent_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *StopRecordingResponse) GetSuccess() bool {
@@ -7428,7 +7541,7 @@ type ReplayMacroRequest struct {
 
 func (x *ReplayMacroRequest) Reset() {
 	*x = ReplayMacroRequest{}
-	mi := &file_agent_proto_msgTypes[90]
+	mi := &file_agent_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7440,7 +7553,7 @@ func (x *ReplayMacroRequest) String() string {
 func (*ReplayMacroRequest) ProtoMessage() {}
 
 func (x *ReplayMacroRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[90]
+	mi := &file_agent_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7453,7 +7566,7 @@ func (x *ReplayMacroRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayMacroRequest.ProtoReflect.Descriptor instead.
 func (*ReplayMacroRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{90}
+	return file_agent_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *ReplayMacroRequest) GetDeviceId() string {
@@ -7503,7 +7616,7 @@ type ReplayMacroResponse struct {
 
 func (x *ReplayMacroResponse) Reset() {
 	*x = ReplayMacroResponse{}
-	mi := &file_agent_proto_msgTypes[91]
+	mi := &file_agent_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7515,7 +7628,7 @@ func (x *ReplayMacroResponse) String() string {
 func (*ReplayMacroResponse) ProtoMessage() {}
 
 func (x *ReplayMacroResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[91]
+	mi := &file_agent_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7528,7 +7641,7 @@ func (x *ReplayMacroResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayMacroResponse.ProtoReflect.Descriptor instead.
 func (*ReplayMacroResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{91}
+	return file_agent_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *ReplayMacroResponse) GetSuccess() bool {
@@ -7568,7 +7681,7 @@ type TakeScreenshotRequest struct {
 
 func (x *TakeScreenshotRequest) Reset() {
 	*x = TakeScreenshotRequest{}
-	mi := &file_agent_proto_msgTypes[92]
+	mi := &file_agent_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7580,7 +7693,7 @@ func (x *TakeScreenshotRequest) String() string {
 func (*TakeScreenshotRequest) ProtoMessage() {}
 
 func (x *TakeScreenshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[92]
+	mi := &file_agent_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7593,7 +7706,7 @@ func (x *TakeScreenshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TakeScreenshotRequest.ProtoReflect.Descriptor instead.
 func (*TakeScreenshotRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{92}
+	return file_agent_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *TakeScreenshotRequest) GetDeviceId() string {
@@ -7615,7 +7728,7 @@ type TakeScreenshotResponse struct {
 
 func (x *TakeScreenshotResponse) Reset() {
 	*x = TakeScreenshotResponse{}
-	mi := &file_agent_proto_msgTypes[93]
+	mi := &file_agent_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7627,7 +7740,7 @@ func (x *TakeScreenshotResponse) String() string {
 func (*TakeScreenshotResponse) ProtoMessage() {}
 
 func (x *TakeScreenshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[93]
+	mi := &file_agent_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7640,7 +7753,7 @@ func (x *TakeScreenshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TakeScreenshotResponse.ProtoReflect.Descriptor instead.
 func (*TakeScreenshotResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{93}
+	return file_agent_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *TakeScreenshotResponse) GetSuccess() bool {
@@ -7682,7 +7795,7 @@ type ScreenshotOcrRequest struct {
 
 func (x *ScreenshotOcrRequest) Reset() {
 	*x = ScreenshotOcrRequest{}
-	mi := &file_agent_proto_msgTypes[94]
+	mi := &file_agent_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7694,7 +7807,7 @@ func (x *ScreenshotOcrRequest) String() string {
 func (*ScreenshotOcrRequest) ProtoMessage() {}
 
 func (x *ScreenshotOcrRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[94]
+	mi := &file_agent_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7707,7 +7820,7 @@ func (x *ScreenshotOcrRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScreenshotOcrRequest.ProtoReflect.Descriptor instead.
 func (*ScreenshotOcrRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{94}
+	return file_agent_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *ScreenshotOcrRequest) GetDeviceId() string {
@@ -7743,7 +7856,7 @@ type ScreenshotOcrResponse struct {
 
 func (x *ScreenshotOcrResponse) Reset() {
 	*x = ScreenshotOcrResponse{}
-	mi := &file_agent_proto_msgTypes[95]
+	mi := &file_agent_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7755,7 +7868,7 @@ func (x *ScreenshotOcrResponse) String() string {
 func (*ScreenshotOcrResponse) ProtoMessage() {}
 
 func (x *ScreenshotOcrResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[95]
+	mi := &file_agent_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7768,7 +7881,7 @@ func (x *ScreenshotOcrResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScreenshotOcrResponse.ProtoReflect.Descriptor instead.
 func (*ScreenshotOcrResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{95}
+	return file_agent_proto_rawDescGZIP(), []int{96}
 }
 
 func (x *ScreenshotOcrResponse) GetSuccess() bool {
@@ -7810,7 +7923,7 @@ type ListUiElementsRequest struct {
 
 func (x *ListUiElementsRequest) Reset() {
 	*x = ListUiElementsRequest{}
-	mi := &file_agent_proto_msgTypes[96]
+	mi := &file_agent_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7822,7 +7935,7 @@ func (x *ListUiElementsRequest) String() string {
 func (*ListUiElementsRequest) ProtoMessage() {}
 
 func (x *ListUiElementsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[96]
+	mi := &file_agent_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7835,7 +7948,7 @@ func (x *ListUiElementsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUiElementsRequest.ProtoReflect.Descriptor instead.
 func (*ListUiElementsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{96}
+	return file_agent_proto_rawDescGZIP(), []int{97}
 }
 
 func (x *ListUiElementsRequest) GetDeviceId() string {
@@ -7864,7 +7977,7 @@ type ListUiElementsResponse struct {
 
 func (x *ListUiElementsResponse) Reset() {
 	*x = ListUiElementsResponse{}
-	mi := &file_agent_proto_msgTypes[97]
+	mi := &file_agent_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7876,7 +7989,7 @@ func (x *ListUiElementsResponse) String() string {
 func (*ListUiElementsResponse) ProtoMessage() {}
 
 func (x *ListUiElementsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[97]
+	mi := &file_agent_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7889,7 +8002,7 @@ func (x *ListUiElementsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUiElementsResponse.ProtoReflect.Descriptor instead.
 func (*ListUiElementsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{97}
+	return file_agent_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *ListUiElementsResponse) GetSuccess() bool {
@@ -7940,7 +8053,7 @@ type UiElement struct {
 
 func (x *UiElement) Reset() {
 	*x = UiElement{}
-	mi := &file_agent_proto_msgTypes[98]
+	mi := &file_agent_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7952,7 +8065,7 @@ func (x *UiElement) String() string {
 func (*UiElement) ProtoMessage() {}
 
 func (x *UiElement) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[98]
+	mi := &file_agent_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7965,7 +8078,7 @@ func (x *UiElement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UiElement.ProtoReflect.Descriptor instead.
 func (*UiElement) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{98}
+	return file_agent_proto_rawDescGZIP(), []int{99}
 }
 
 func (x *UiElement) GetResourceId() string {
@@ -8061,7 +8174,7 @@ type ReparseTraceRequest struct {
 
 func (x *ReparseTraceRequest) Reset() {
 	*x = ReparseTraceRequest{}
-	mi := &file_agent_proto_msgTypes[99]
+	mi := &file_agent_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8073,7 +8186,7 @@ func (x *ReparseTraceRequest) String() string {
 func (*ReparseTraceRequest) ProtoMessage() {}
 
 func (x *ReparseTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[99]
+	mi := &file_agent_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8086,7 +8199,7 @@ func (x *ReparseTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReparseTraceRequest.ProtoReflect.Descriptor instead.
 func (*ReparseTraceRequest) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{99}
+	return file_agent_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *ReparseTraceRequest) GetJobId() string {
@@ -8106,7 +8219,7 @@ type ReparseTraceResponse struct {
 
 func (x *ReparseTraceResponse) Reset() {
 	*x = ReparseTraceResponse{}
-	mi := &file_agent_proto_msgTypes[100]
+	mi := &file_agent_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8118,7 +8231,7 @@ func (x *ReparseTraceResponse) String() string {
 func (*ReparseTraceResponse) ProtoMessage() {}
 
 func (x *ReparseTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[100]
+	mi := &file_agent_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8131,7 +8244,7 @@ func (x *ReparseTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReparseTraceResponse.ProtoReflect.Descriptor instead.
 func (*ReparseTraceResponse) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{100}
+	return file_agent_proto_rawDescGZIP(), []int{101}
 }
 
 func (x *ReparseTraceResponse) GetSuccess() bool {
@@ -8161,7 +8274,7 @@ type ShellStart struct {
 
 func (x *ShellStart) Reset() {
 	*x = ShellStart{}
-	mi := &file_agent_proto_msgTypes[101]
+	mi := &file_agent_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8173,7 +8286,7 @@ func (x *ShellStart) String() string {
 func (*ShellStart) ProtoMessage() {}
 
 func (x *ShellStart) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[101]
+	mi := &file_agent_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8186,7 +8299,7 @@ func (x *ShellStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellStart.ProtoReflect.Descriptor instead.
 func (*ShellStart) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{101}
+	return file_agent_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *ShellStart) GetDeviceId() string {
@@ -8227,7 +8340,7 @@ type ShellInput struct {
 
 func (x *ShellInput) Reset() {
 	*x = ShellInput{}
-	mi := &file_agent_proto_msgTypes[102]
+	mi := &file_agent_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8239,7 +8352,7 @@ func (x *ShellInput) String() string {
 func (*ShellInput) ProtoMessage() {}
 
 func (x *ShellInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[102]
+	mi := &file_agent_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8252,7 +8365,7 @@ func (x *ShellInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellInput.ProtoReflect.Descriptor instead.
 func (*ShellInput) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{102}
+	return file_agent_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *ShellInput) GetData() []byte {
@@ -8273,7 +8386,7 @@ type ShellResize struct {
 
 func (x *ShellResize) Reset() {
 	*x = ShellResize{}
-	mi := &file_agent_proto_msgTypes[103]
+	mi := &file_agent_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8285,7 +8398,7 @@ func (x *ShellResize) String() string {
 func (*ShellResize) ProtoMessage() {}
 
 func (x *ShellResize) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[103]
+	mi := &file_agent_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8298,7 +8411,7 @@ func (x *ShellResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellResize.ProtoReflect.Descriptor instead.
 func (*ShellResize) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{103}
+	return file_agent_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *ShellResize) GetCols() uint32 {
@@ -8330,7 +8443,7 @@ type ShellClientMsg struct {
 
 func (x *ShellClientMsg) Reset() {
 	*x = ShellClientMsg{}
-	mi := &file_agent_proto_msgTypes[104]
+	mi := &file_agent_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8342,7 +8455,7 @@ func (x *ShellClientMsg) String() string {
 func (*ShellClientMsg) ProtoMessage() {}
 
 func (x *ShellClientMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[104]
+	mi := &file_agent_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8355,7 +8468,7 @@ func (x *ShellClientMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellClientMsg.ProtoReflect.Descriptor instead.
 func (*ShellClientMsg) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{104}
+	return file_agent_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *ShellClientMsg) GetPayload() isShellClientMsg_Payload {
@@ -8424,7 +8537,7 @@ type ShellOutput struct {
 
 func (x *ShellOutput) Reset() {
 	*x = ShellOutput{}
-	mi := &file_agent_proto_msgTypes[105]
+	mi := &file_agent_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8436,7 +8549,7 @@ func (x *ShellOutput) String() string {
 func (*ShellOutput) ProtoMessage() {}
 
 func (x *ShellOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[105]
+	mi := &file_agent_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8449,7 +8562,7 @@ func (x *ShellOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellOutput.ProtoReflect.Descriptor instead.
 func (*ShellOutput) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{105}
+	return file_agent_proto_rawDescGZIP(), []int{106}
 }
 
 func (x *ShellOutput) GetData() []byte {
@@ -8470,7 +8583,7 @@ type ShellExit struct {
 
 func (x *ShellExit) Reset() {
 	*x = ShellExit{}
-	mi := &file_agent_proto_msgTypes[106]
+	mi := &file_agent_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8482,7 +8595,7 @@ func (x *ShellExit) String() string {
 func (*ShellExit) ProtoMessage() {}
 
 func (x *ShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[106]
+	mi := &file_agent_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8495,7 +8608,7 @@ func (x *ShellExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellExit.ProtoReflect.Descriptor instead.
 func (*ShellExit) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{106}
+	return file_agent_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *ShellExit) GetCode() int32 {
@@ -8526,7 +8639,7 @@ type ShellServerMsg struct {
 
 func (x *ShellServerMsg) Reset() {
 	*x = ShellServerMsg{}
-	mi := &file_agent_proto_msgTypes[107]
+	mi := &file_agent_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8538,7 +8651,7 @@ func (x *ShellServerMsg) String() string {
 func (*ShellServerMsg) ProtoMessage() {}
 
 func (x *ShellServerMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_proto_msgTypes[107]
+	mi := &file_agent_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8551,7 +8664,7 @@ func (x *ShellServerMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellServerMsg.ProtoReflect.Descriptor instead.
 func (*ShellServerMsg) Descriptor() ([]byte, []int) {
-	return file_agent_proto_rawDescGZIP(), []int{107}
+	return file_agent_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *ShellServerMsg) GetPayload() isShellServerMsg_Payload {
@@ -8999,7 +9112,7 @@ const file_agent_proto_rawDesc = "" +
 	"\x12readahead_requests\x18\t \x01(\x04R\x11readaheadRequests\x12'\n" +
 	"\x0freadahead_units\x18\n" +
 	" \x01(\x04R\x0ereadaheadUnits\x12*\n" +
-	"\x11total_duration_ns\x18\v \x01(\x04R\x0ftotalDurationNs\"\xb4\x05\n" +
+	"\x11total_duration_ns\x18\v \x01(\x04R\x0ftotalDurationNs\"\xe2\x05\n" +
 	"\x18GetFsioReadStatsResponse\x12%\n" +
 	"\x0etotal_requests\x18\x01 \x01(\x04R\rtotalRequests\x124\n" +
 	"\bby_class\x18\x02 \x03(\v2\x19.agent.FsioReadClassStatsR\abyClass\x12/\n" +
@@ -9017,10 +9130,23 @@ const file_agent_proto_rawDesc = "" +
 	"\x10duration_unknown\x18\v \x01(\x04R\x0fdurationUnknown\x125\n" +
 	"\ttop_files\x18\f \x03(\v2\x18.agent.FsioReadFileStatsR\btopFiles\x12)\n" +
 	"\x10quality_warnings\x18\r \x03(\tR\x0fqualityWarnings\x12%\n" +
-	"\x0eschema_version\x18\x0e \x01(\tR\rschemaVersionB\x14\n" +
+	"\x0eschema_version\x18\x0e \x01(\tR\rschemaVersion\x12,\n" +
+	"\x04mmap\x18\x0f \x01(\v2\x18.agent.FsioReadMmapStatsR\x04mmapB\x14\n" +
 	"\x12_request_hit_ratioB\x15\n" +
 	"\x13_request_miss_ratioB\x10\n" +
-	"\x0e_unknown_ratio\"]\n" +
+	"\x0e_unknown_ratio\"\xe1\x02\n" +
+	"\x11FsioReadMmapStats\x12\x1a\n" +
+	"\brequests\x18\x01 \x01(\x04R\brequests\x12#\n" +
+	"\rmiss_requests\x18\x02 \x01(\x04R\fmissRequests\x12\x1d\n" +
+	"\n" +
+	"fill_units\x18\x03 \x01(\x04R\tfillUnits\x12)\n" +
+	"\x10duration_samples\x18\x04 \x01(\x04R\x0fdurationSamples\x12+\n" +
+	"\x0fduration_avg_ns\x18\x05 \x01(\x04H\x00R\rdurationAvgNs\x88\x01\x01\x12+\n" +
+	"\x0fduration_p50_ns\x18\x06 \x01(\x04H\x01R\rdurationP50Ns\x88\x01\x01\x12+\n" +
+	"\x0fduration_p99_ns\x18\a \x01(\x04H\x02R\rdurationP99Ns\x88\x01\x01B\x12\n" +
+	"\x10_duration_avg_nsB\x12\n" +
+	"\x10_duration_p50_nsB\x12\n" +
+	"\x10_duration_p99_ns\"]\n" +
 	"\x16GetTraceRawDataRequest\x12\x17\n" +
 	"\ajob_ids\x18\x01 \x03(\tR\x06jobIds\x12*\n" +
 	"\x06filter\x18\x02 \x01(\v2\x12.agent.TraceFilterR\x06filter\"\xe3\x01\n" +
@@ -9485,7 +9611,7 @@ func file_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 114)
+var file_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 115)
 var file_agent_proto_goTypes = []any{
 	(DeviceState)(0),                    // 0: agent.DeviceState
 	(BenchmarkTool)(0),                  // 1: agent.BenchmarkTool
@@ -9545,88 +9671,89 @@ var file_agent_proto_goTypes = []any{
 	(*FsioReadClassStats)(nil),          // 55: agent.FsioReadClassStats
 	(*FsioReadFileStats)(nil),           // 56: agent.FsioReadFileStats
 	(*GetFsioReadStatsResponse)(nil),    // 57: agent.GetFsioReadStatsResponse
-	(*GetTraceRawDataRequest)(nil),      // 58: agent.GetTraceRawDataRequest
-	(*GetTraceRawDataResponse)(nil),     // 59: agent.GetTraceRawDataResponse
-	(*TraceEvent)(nil),                  // 60: agent.TraceEvent
-	(*UploadTraceRequest)(nil),          // 61: agent.UploadTraceRequest
-	(*UploadTraceResponse)(nil),         // 62: agent.UploadTraceResponse
-	(*UploadBenchmarkRequest)(nil),      // 63: agent.UploadBenchmarkRequest
-	(*UploadBenchmarkResponse)(nil),     // 64: agent.UploadBenchmarkResponse
-	(*UploadTraceArchiveRequest)(nil),   // 65: agent.UploadTraceArchiveRequest
-	(*PresignedTarget)(nil),             // 66: agent.PresignedTarget
-	(*PresignedPart)(nil),               // 67: agent.PresignedPart
-	(*UploadTraceArchiveProgress)(nil),  // 68: agent.UploadTraceArchiveProgress
-	(*CompletedPartReport)(nil),         // 69: agent.CompletedPartReport
-	(*GetArchiveFilesInfoRequest)(nil),  // 70: agent.GetArchiveFilesInfoRequest
-	(*GetArchiveFilesInfoResponse)(nil), // 71: agent.GetArchiveFilesInfoResponse
-	(*ArchiveParquetInfo)(nil),          // 72: agent.ArchiveParquetInfo
-	(*MonitorDevicesRequest)(nil),       // 73: agent.MonitorDevicesRequest
-	(*DeviceMetrics)(nil),               // 74: agent.DeviceMetrics
-	(*CpuMetrics)(nil),                  // 75: agent.CpuMetrics
-	(*MemoryMetrics)(nil),               // 76: agent.MemoryMetrics
-	(*DiskMetrics)(nil),                 // 77: agent.DiskMetrics
-	(*FilesystemInfo)(nil),              // 78: agent.FilesystemInfo
-	(*MacroEvent)(nil),                  // 79: agent.MacroEvent
-	(*OcrRegion)(nil),                   // 80: agent.OcrRegion
-	(*ListInstalledAppsRequest)(nil),    // 81: agent.ListInstalledAppsRequest
-	(*ListInstalledAppsResponse)(nil),   // 82: agent.ListInstalledAppsResponse
-	(*InstalledApp)(nil),                // 83: agent.InstalledApp
-	(*ListBundledApksRequest)(nil),      // 84: agent.ListBundledApksRequest
-	(*ListBundledApksResponse)(nil),     // 85: agent.ListBundledApksResponse
-	(*BundledApk)(nil),                  // 86: agent.BundledApk
-	(*InstallApkRequest)(nil),           // 87: agent.InstallApkRequest
-	(*InstallApkResponse)(nil),          // 88: agent.InstallApkResponse
-	(*UninstallApkRequest)(nil),         // 89: agent.UninstallApkRequest
-	(*UninstallApkResponse)(nil),        // 90: agent.UninstallApkResponse
-	(*StartRecordingRequest)(nil),       // 91: agent.StartRecordingRequest
-	(*StartRecordingResponse)(nil),      // 92: agent.StartRecordingResponse
-	(*StopRecordingRequest)(nil),        // 93: agent.StopRecordingRequest
-	(*StopRecordingResponse)(nil),       // 94: agent.StopRecordingResponse
-	(*ReplayMacroRequest)(nil),          // 95: agent.ReplayMacroRequest
-	(*ReplayMacroResponse)(nil),         // 96: agent.ReplayMacroResponse
-	(*TakeScreenshotRequest)(nil),       // 97: agent.TakeScreenshotRequest
-	(*TakeScreenshotResponse)(nil),      // 98: agent.TakeScreenshotResponse
-	(*ScreenshotOcrRequest)(nil),        // 99: agent.ScreenshotOcrRequest
-	(*ScreenshotOcrResponse)(nil),       // 100: agent.ScreenshotOcrResponse
-	(*ListUiElementsRequest)(nil),       // 101: agent.ListUiElementsRequest
-	(*ListUiElementsResponse)(nil),      // 102: agent.ListUiElementsResponse
-	(*UiElement)(nil),                   // 103: agent.UiElement
-	(*ReparseTraceRequest)(nil),         // 104: agent.ReparseTraceRequest
-	(*ReparseTraceResponse)(nil),        // 105: agent.ReparseTraceResponse
-	(*ShellStart)(nil),                  // 106: agent.ShellStart
-	(*ShellInput)(nil),                  // 107: agent.ShellInput
-	(*ShellResize)(nil),                 // 108: agent.ShellResize
-	(*ShellClientMsg)(nil),              // 109: agent.ShellClientMsg
-	(*ShellOutput)(nil),                 // 110: agent.ShellOutput
-	(*ShellExit)(nil),                   // 111: agent.ShellExit
-	(*ShellServerMsg)(nil),              // 112: agent.ShellServerMsg
-	nil,                                 // 113: agent.RunBenchmarkRequest.ParamsEntry
-	nil,                                 // 114: agent.JobProgress.MetricsEntry
-	nil,                                 // 115: agent.BenchmarkResult.MetricsEntry
-	nil,                                 // 116: agent.ScenarioStep.ParamsEntry
-	nil,                                 // 117: agent.ReplayMacroResponse.OcrResultsEntry
-	nil,                                 // 118: agent.ReplayMacroResponse.MetricsEntry
+	(*FsioReadMmapStats)(nil),           // 58: agent.FsioReadMmapStats
+	(*GetTraceRawDataRequest)(nil),      // 59: agent.GetTraceRawDataRequest
+	(*GetTraceRawDataResponse)(nil),     // 60: agent.GetTraceRawDataResponse
+	(*TraceEvent)(nil),                  // 61: agent.TraceEvent
+	(*UploadTraceRequest)(nil),          // 62: agent.UploadTraceRequest
+	(*UploadTraceResponse)(nil),         // 63: agent.UploadTraceResponse
+	(*UploadBenchmarkRequest)(nil),      // 64: agent.UploadBenchmarkRequest
+	(*UploadBenchmarkResponse)(nil),     // 65: agent.UploadBenchmarkResponse
+	(*UploadTraceArchiveRequest)(nil),   // 66: agent.UploadTraceArchiveRequest
+	(*PresignedTarget)(nil),             // 67: agent.PresignedTarget
+	(*PresignedPart)(nil),               // 68: agent.PresignedPart
+	(*UploadTraceArchiveProgress)(nil),  // 69: agent.UploadTraceArchiveProgress
+	(*CompletedPartReport)(nil),         // 70: agent.CompletedPartReport
+	(*GetArchiveFilesInfoRequest)(nil),  // 71: agent.GetArchiveFilesInfoRequest
+	(*GetArchiveFilesInfoResponse)(nil), // 72: agent.GetArchiveFilesInfoResponse
+	(*ArchiveParquetInfo)(nil),          // 73: agent.ArchiveParquetInfo
+	(*MonitorDevicesRequest)(nil),       // 74: agent.MonitorDevicesRequest
+	(*DeviceMetrics)(nil),               // 75: agent.DeviceMetrics
+	(*CpuMetrics)(nil),                  // 76: agent.CpuMetrics
+	(*MemoryMetrics)(nil),               // 77: agent.MemoryMetrics
+	(*DiskMetrics)(nil),                 // 78: agent.DiskMetrics
+	(*FilesystemInfo)(nil),              // 79: agent.FilesystemInfo
+	(*MacroEvent)(nil),                  // 80: agent.MacroEvent
+	(*OcrRegion)(nil),                   // 81: agent.OcrRegion
+	(*ListInstalledAppsRequest)(nil),    // 82: agent.ListInstalledAppsRequest
+	(*ListInstalledAppsResponse)(nil),   // 83: agent.ListInstalledAppsResponse
+	(*InstalledApp)(nil),                // 84: agent.InstalledApp
+	(*ListBundledApksRequest)(nil),      // 85: agent.ListBundledApksRequest
+	(*ListBundledApksResponse)(nil),     // 86: agent.ListBundledApksResponse
+	(*BundledApk)(nil),                  // 87: agent.BundledApk
+	(*InstallApkRequest)(nil),           // 88: agent.InstallApkRequest
+	(*InstallApkResponse)(nil),          // 89: agent.InstallApkResponse
+	(*UninstallApkRequest)(nil),         // 90: agent.UninstallApkRequest
+	(*UninstallApkResponse)(nil),        // 91: agent.UninstallApkResponse
+	(*StartRecordingRequest)(nil),       // 92: agent.StartRecordingRequest
+	(*StartRecordingResponse)(nil),      // 93: agent.StartRecordingResponse
+	(*StopRecordingRequest)(nil),        // 94: agent.StopRecordingRequest
+	(*StopRecordingResponse)(nil),       // 95: agent.StopRecordingResponse
+	(*ReplayMacroRequest)(nil),          // 96: agent.ReplayMacroRequest
+	(*ReplayMacroResponse)(nil),         // 97: agent.ReplayMacroResponse
+	(*TakeScreenshotRequest)(nil),       // 98: agent.TakeScreenshotRequest
+	(*TakeScreenshotResponse)(nil),      // 99: agent.TakeScreenshotResponse
+	(*ScreenshotOcrRequest)(nil),        // 100: agent.ScreenshotOcrRequest
+	(*ScreenshotOcrResponse)(nil),       // 101: agent.ScreenshotOcrResponse
+	(*ListUiElementsRequest)(nil),       // 102: agent.ListUiElementsRequest
+	(*ListUiElementsResponse)(nil),      // 103: agent.ListUiElementsResponse
+	(*UiElement)(nil),                   // 104: agent.UiElement
+	(*ReparseTraceRequest)(nil),         // 105: agent.ReparseTraceRequest
+	(*ReparseTraceResponse)(nil),        // 106: agent.ReparseTraceResponse
+	(*ShellStart)(nil),                  // 107: agent.ShellStart
+	(*ShellInput)(nil),                  // 108: agent.ShellInput
+	(*ShellResize)(nil),                 // 109: agent.ShellResize
+	(*ShellClientMsg)(nil),              // 110: agent.ShellClientMsg
+	(*ShellOutput)(nil),                 // 111: agent.ShellOutput
+	(*ShellExit)(nil),                   // 112: agent.ShellExit
+	(*ShellServerMsg)(nil),              // 113: agent.ShellServerMsg
+	nil,                                 // 114: agent.RunBenchmarkRequest.ParamsEntry
+	nil,                                 // 115: agent.JobProgress.MetricsEntry
+	nil,                                 // 116: agent.BenchmarkResult.MetricsEntry
+	nil,                                 // 117: agent.ScenarioStep.ParamsEntry
+	nil,                                 // 118: agent.ReplayMacroResponse.OcrResultsEntry
+	nil,                                 // 119: agent.ReplayMacroResponse.MetricsEntry
 }
 var file_agent_proto_depIdxs = []int32{
 	0,   // 0: agent.DeviceInfo.state:type_name -> agent.DeviceState
 	5,   // 1: agent.ListDevicesResponse.devices:type_name -> agent.DeviceInfo
 	1,   // 2: agent.RunBenchmarkRequest.tool:type_name -> agent.BenchmarkTool
-	113, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
+	114, // 3: agent.RunBenchmarkRequest.params:type_name -> agent.RunBenchmarkRequest.ParamsEntry
 	2,   // 4: agent.GetJobStatusResponse.state:type_name -> agent.JobState
 	16,  // 5: agent.GetJobStatusResponse.device_statuses:type_name -> agent.DeviceJobStatus
 	2,   // 6: agent.DeviceJobStatus.state:type_name -> agent.JobState
 	2,   // 7: agent.JobProgress.state:type_name -> agent.JobState
-	114, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
+	115, // 8: agent.JobProgress.metrics:type_name -> agent.JobProgress.MetricsEntry
 	21,  // 9: agent.GetBenchmarkResultResponse.results:type_name -> agent.BenchmarkResult
 	1,   // 10: agent.BenchmarkResult.tool:type_name -> agent.BenchmarkTool
-	115, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
+	116, // 11: agent.BenchmarkResult.metrics:type_name -> agent.BenchmarkResult.MetricsEntry
 	22,  // 12: agent.BenchmarkResult.trace_jobs:type_name -> agent.TraceJobMapping
 	23,  // 13: agent.BenchmarkResult.step_boundaries:type_name -> agent.StepBoundary
 	1,   // 14: agent.ScenarioStep.tool:type_name -> agent.BenchmarkTool
-	116, // 15: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
+	117, // 15: agent.ScenarioStep.params:type_name -> agent.ScenarioStep.ParamsEntry
 	30,  // 16: agent.ScenarioStep.condition:type_name -> agent.ConditionalBranch
 	29,  // 17: agent.ScenarioStep.macro:type_name -> agent.AppMacroConfig
-	79,  // 18: agent.AppMacroConfig.events:type_name -> agent.MacroEvent
+	80,  // 18: agent.AppMacroConfig.events:type_name -> agent.MacroEvent
 	31,  // 19: agent.ConditionalBranch.rules:type_name -> agent.ConditionRule
 	28,  // 20: agent.RunScenarioRequest.steps:type_name -> agent.ScenarioStep
 	33,  // 21: agent.RunScenarioRequest.loops:type_name -> agent.ScenarioLoop
@@ -9657,102 +9784,103 @@ var file_agent_proto_depIdxs = []int32{
 	40,  // 46: agent.GetFsioReadStatsRequest.filter:type_name -> agent.TraceFilter
 	55,  // 47: agent.GetFsioReadStatsResponse.by_class:type_name -> agent.FsioReadClassStats
 	56,  // 48: agent.GetFsioReadStatsResponse.top_files:type_name -> agent.FsioReadFileStats
-	40,  // 49: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
-	60,  // 50: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
-	66,  // 51: agent.UploadTraceArchiveRequest.raw:type_name -> agent.PresignedTarget
-	66,  // 52: agent.UploadTraceArchiveRequest.parquet_files:type_name -> agent.PresignedTarget
-	67,  // 53: agent.PresignedTarget.parts:type_name -> agent.PresignedPart
-	69,  // 54: agent.UploadTraceArchiveProgress.completed_part:type_name -> agent.CompletedPartReport
-	72,  // 55: agent.GetArchiveFilesInfoResponse.parquet_files:type_name -> agent.ArchiveParquetInfo
-	75,  // 56: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
-	76,  // 57: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
-	77,  // 58: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
-	78,  // 59: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
-	80,  // 60: agent.MacroEvent.ocr_region:type_name -> agent.OcrRegion
-	83,  // 61: agent.ListInstalledAppsResponse.apps:type_name -> agent.InstalledApp
-	86,  // 62: agent.ListBundledApksResponse.apks:type_name -> agent.BundledApk
-	79,  // 63: agent.StopRecordingResponse.events:type_name -> agent.MacroEvent
-	79,  // 64: agent.ReplayMacroRequest.events:type_name -> agent.MacroEvent
-	117, // 65: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
-	118, // 66: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
-	80,  // 67: agent.ScreenshotOcrRequest.region:type_name -> agent.OcrRegion
-	103, // 68: agent.ListUiElementsResponse.elements:type_name -> agent.UiElement
-	106, // 69: agent.ShellClientMsg.start:type_name -> agent.ShellStart
-	107, // 70: agent.ShellClientMsg.input:type_name -> agent.ShellInput
-	108, // 71: agent.ShellClientMsg.resize:type_name -> agent.ShellResize
-	110, // 72: agent.ShellServerMsg.output:type_name -> agent.ShellOutput
-	111, // 73: agent.ShellServerMsg.exit:type_name -> agent.ShellExit
-	6,   // 74: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
-	8,   // 75: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
-	10,  // 76: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
-	12,  // 77: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
-	14,  // 78: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
-	17,  // 79: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
-	19,  // 80: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
-	24,  // 81: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
-	26,  // 82: agent.DeviceAgent.CancelJob:input_type -> agent.CancelJobRequest
-	34,  // 83: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
-	36,  // 84: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
-	38,  // 85: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
-	41,  // 86: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
-	58,  // 87: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
-	50,  // 88: agent.DeviceAgent.GetIoAttribution:input_type -> agent.GetIoAttributionRequest
-	54,  // 89: agent.DeviceAgent.GetFsioReadStats:input_type -> agent.GetFsioReadStatsRequest
-	61,  // 90: agent.DeviceAgent.UploadTraceToMinio:input_type -> agent.UploadTraceRequest
-	63,  // 91: agent.DeviceAgent.UploadBenchmarkToMinio:input_type -> agent.UploadBenchmarkRequest
-	65,  // 92: agent.DeviceAgent.UploadTraceArchive:input_type -> agent.UploadTraceArchiveRequest
-	70,  // 93: agent.DeviceAgent.GetArchiveFilesInfo:input_type -> agent.GetArchiveFilesInfoRequest
-	73,  // 94: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
-	81,  // 95: agent.DeviceAgent.ListInstalledApps:input_type -> agent.ListInstalledAppsRequest
-	91,  // 96: agent.DeviceAgent.StartRecording:input_type -> agent.StartRecordingRequest
-	93,  // 97: agent.DeviceAgent.StopRecording:input_type -> agent.StopRecordingRequest
-	95,  // 98: agent.DeviceAgent.ReplayMacro:input_type -> agent.ReplayMacroRequest
-	97,  // 99: agent.DeviceAgent.TakeScreenshot:input_type -> agent.TakeScreenshotRequest
-	99,  // 100: agent.DeviceAgent.ScreenshotOcr:input_type -> agent.ScreenshotOcrRequest
-	101, // 101: agent.DeviceAgent.ListUiElements:input_type -> agent.ListUiElementsRequest
-	84,  // 102: agent.DeviceAgent.ListBundledApks:input_type -> agent.ListBundledApksRequest
-	87,  // 103: agent.DeviceAgent.InstallApk:input_type -> agent.InstallApkRequest
-	89,  // 104: agent.DeviceAgent.UninstallApk:input_type -> agent.UninstallApkRequest
-	104, // 105: agent.DeviceAgent.ReparseTrace:input_type -> agent.ReparseTraceRequest
-	109, // 106: agent.DeviceAgent.Shell:input_type -> agent.ShellClientMsg
-	7,   // 107: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
-	9,   // 108: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
-	11,  // 109: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
-	13,  // 110: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
-	15,  // 111: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
-	18,  // 112: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
-	20,  // 113: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
-	25,  // 114: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
-	27,  // 115: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
-	35,  // 116: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
-	37,  // 117: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
-	39,  // 118: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
-	42,  // 119: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
-	59,  // 120: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
-	53,  // 121: agent.DeviceAgent.GetIoAttribution:output_type -> agent.GetIoAttributionResponse
-	57,  // 122: agent.DeviceAgent.GetFsioReadStats:output_type -> agent.GetFsioReadStatsResponse
-	62,  // 123: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
-	64,  // 124: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
-	68,  // 125: agent.DeviceAgent.UploadTraceArchive:output_type -> agent.UploadTraceArchiveProgress
-	71,  // 126: agent.DeviceAgent.GetArchiveFilesInfo:output_type -> agent.GetArchiveFilesInfoResponse
-	74,  // 127: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
-	82,  // 128: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
-	92,  // 129: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
-	94,  // 130: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
-	96,  // 131: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
-	98,  // 132: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
-	100, // 133: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
-	102, // 134: agent.DeviceAgent.ListUiElements:output_type -> agent.ListUiElementsResponse
-	85,  // 135: agent.DeviceAgent.ListBundledApks:output_type -> agent.ListBundledApksResponse
-	88,  // 136: agent.DeviceAgent.InstallApk:output_type -> agent.InstallApkResponse
-	90,  // 137: agent.DeviceAgent.UninstallApk:output_type -> agent.UninstallApkResponse
-	105, // 138: agent.DeviceAgent.ReparseTrace:output_type -> agent.ReparseTraceResponse
-	112, // 139: agent.DeviceAgent.Shell:output_type -> agent.ShellServerMsg
-	107, // [107:140] is the sub-list for method output_type
-	74,  // [74:107] is the sub-list for method input_type
-	74,  // [74:74] is the sub-list for extension type_name
-	74,  // [74:74] is the sub-list for extension extendee
-	0,   // [0:74] is the sub-list for field type_name
+	58,  // 49: agent.GetFsioReadStatsResponse.mmap:type_name -> agent.FsioReadMmapStats
+	40,  // 50: agent.GetTraceRawDataRequest.filter:type_name -> agent.TraceFilter
+	61,  // 51: agent.GetTraceRawDataResponse.events:type_name -> agent.TraceEvent
+	67,  // 52: agent.UploadTraceArchiveRequest.raw:type_name -> agent.PresignedTarget
+	67,  // 53: agent.UploadTraceArchiveRequest.parquet_files:type_name -> agent.PresignedTarget
+	68,  // 54: agent.PresignedTarget.parts:type_name -> agent.PresignedPart
+	70,  // 55: agent.UploadTraceArchiveProgress.completed_part:type_name -> agent.CompletedPartReport
+	73,  // 56: agent.GetArchiveFilesInfoResponse.parquet_files:type_name -> agent.ArchiveParquetInfo
+	76,  // 57: agent.DeviceMetrics.cpu:type_name -> agent.CpuMetrics
+	77,  // 58: agent.DeviceMetrics.memory:type_name -> agent.MemoryMetrics
+	78,  // 59: agent.DeviceMetrics.disk:type_name -> agent.DiskMetrics
+	79,  // 60: agent.DeviceMetrics.data_partition:type_name -> agent.FilesystemInfo
+	81,  // 61: agent.MacroEvent.ocr_region:type_name -> agent.OcrRegion
+	84,  // 62: agent.ListInstalledAppsResponse.apps:type_name -> agent.InstalledApp
+	87,  // 63: agent.ListBundledApksResponse.apks:type_name -> agent.BundledApk
+	80,  // 64: agent.StopRecordingResponse.events:type_name -> agent.MacroEvent
+	80,  // 65: agent.ReplayMacroRequest.events:type_name -> agent.MacroEvent
+	118, // 66: agent.ReplayMacroResponse.ocr_results:type_name -> agent.ReplayMacroResponse.OcrResultsEntry
+	119, // 67: agent.ReplayMacroResponse.metrics:type_name -> agent.ReplayMacroResponse.MetricsEntry
+	81,  // 68: agent.ScreenshotOcrRequest.region:type_name -> agent.OcrRegion
+	104, // 69: agent.ListUiElementsResponse.elements:type_name -> agent.UiElement
+	107, // 70: agent.ShellClientMsg.start:type_name -> agent.ShellStart
+	108, // 71: agent.ShellClientMsg.input:type_name -> agent.ShellInput
+	109, // 72: agent.ShellClientMsg.resize:type_name -> agent.ShellResize
+	111, // 73: agent.ShellServerMsg.output:type_name -> agent.ShellOutput
+	112, // 74: agent.ShellServerMsg.exit:type_name -> agent.ShellExit
+	6,   // 75: agent.DeviceAgent.ListDevices:input_type -> agent.ListDevicesRequest
+	8,   // 76: agent.DeviceAgent.ConnectDevice:input_type -> agent.ConnectDeviceRequest
+	10,  // 77: agent.DeviceAgent.DisconnectDevice:input_type -> agent.DisconnectDeviceRequest
+	12,  // 78: agent.DeviceAgent.RunBenchmark:input_type -> agent.RunBenchmarkRequest
+	14,  // 79: agent.DeviceAgent.GetJobStatus:input_type -> agent.GetJobStatusRequest
+	17,  // 80: agent.DeviceAgent.SubscribeJobProgress:input_type -> agent.SubscribeJobProgressRequest
+	19,  // 81: agent.DeviceAgent.GetBenchmarkResult:input_type -> agent.GetBenchmarkResultRequest
+	24,  // 82: agent.DeviceAgent.DeleteJob:input_type -> agent.DeleteJobRequest
+	26,  // 83: agent.DeviceAgent.CancelJob:input_type -> agent.CancelJobRequest
+	34,  // 84: agent.DeviceAgent.RunScenario:input_type -> agent.RunScenarioRequest
+	36,  // 85: agent.DeviceAgent.StartTrace:input_type -> agent.StartTraceRequest
+	38,  // 86: agent.DeviceAgent.StopTrace:input_type -> agent.StopTraceRequest
+	41,  // 87: agent.DeviceAgent.GetTraceResult:input_type -> agent.GetTraceResultRequest
+	59,  // 88: agent.DeviceAgent.GetTraceRawData:input_type -> agent.GetTraceRawDataRequest
+	50,  // 89: agent.DeviceAgent.GetIoAttribution:input_type -> agent.GetIoAttributionRequest
+	54,  // 90: agent.DeviceAgent.GetFsioReadStats:input_type -> agent.GetFsioReadStatsRequest
+	62,  // 91: agent.DeviceAgent.UploadTraceToMinio:input_type -> agent.UploadTraceRequest
+	64,  // 92: agent.DeviceAgent.UploadBenchmarkToMinio:input_type -> agent.UploadBenchmarkRequest
+	66,  // 93: agent.DeviceAgent.UploadTraceArchive:input_type -> agent.UploadTraceArchiveRequest
+	71,  // 94: agent.DeviceAgent.GetArchiveFilesInfo:input_type -> agent.GetArchiveFilesInfoRequest
+	74,  // 95: agent.DeviceAgent.MonitorDevices:input_type -> agent.MonitorDevicesRequest
+	82,  // 96: agent.DeviceAgent.ListInstalledApps:input_type -> agent.ListInstalledAppsRequest
+	92,  // 97: agent.DeviceAgent.StartRecording:input_type -> agent.StartRecordingRequest
+	94,  // 98: agent.DeviceAgent.StopRecording:input_type -> agent.StopRecordingRequest
+	96,  // 99: agent.DeviceAgent.ReplayMacro:input_type -> agent.ReplayMacroRequest
+	98,  // 100: agent.DeviceAgent.TakeScreenshot:input_type -> agent.TakeScreenshotRequest
+	100, // 101: agent.DeviceAgent.ScreenshotOcr:input_type -> agent.ScreenshotOcrRequest
+	102, // 102: agent.DeviceAgent.ListUiElements:input_type -> agent.ListUiElementsRequest
+	85,  // 103: agent.DeviceAgent.ListBundledApks:input_type -> agent.ListBundledApksRequest
+	88,  // 104: agent.DeviceAgent.InstallApk:input_type -> agent.InstallApkRequest
+	90,  // 105: agent.DeviceAgent.UninstallApk:input_type -> agent.UninstallApkRequest
+	105, // 106: agent.DeviceAgent.ReparseTrace:input_type -> agent.ReparseTraceRequest
+	110, // 107: agent.DeviceAgent.Shell:input_type -> agent.ShellClientMsg
+	7,   // 108: agent.DeviceAgent.ListDevices:output_type -> agent.ListDevicesResponse
+	9,   // 109: agent.DeviceAgent.ConnectDevice:output_type -> agent.ConnectDeviceResponse
+	11,  // 110: agent.DeviceAgent.DisconnectDevice:output_type -> agent.DisconnectDeviceResponse
+	13,  // 111: agent.DeviceAgent.RunBenchmark:output_type -> agent.RunBenchmarkResponse
+	15,  // 112: agent.DeviceAgent.GetJobStatus:output_type -> agent.GetJobStatusResponse
+	18,  // 113: agent.DeviceAgent.SubscribeJobProgress:output_type -> agent.JobProgress
+	20,  // 114: agent.DeviceAgent.GetBenchmarkResult:output_type -> agent.GetBenchmarkResultResponse
+	25,  // 115: agent.DeviceAgent.DeleteJob:output_type -> agent.DeleteJobResponse
+	27,  // 116: agent.DeviceAgent.CancelJob:output_type -> agent.CancelJobResponse
+	35,  // 117: agent.DeviceAgent.RunScenario:output_type -> agent.RunScenarioResponse
+	37,  // 118: agent.DeviceAgent.StartTrace:output_type -> agent.StartTraceResponse
+	39,  // 119: agent.DeviceAgent.StopTrace:output_type -> agent.StopTraceResponse
+	42,  // 120: agent.DeviceAgent.GetTraceResult:output_type -> agent.GetTraceResultResponse
+	60,  // 121: agent.DeviceAgent.GetTraceRawData:output_type -> agent.GetTraceRawDataResponse
+	53,  // 122: agent.DeviceAgent.GetIoAttribution:output_type -> agent.GetIoAttributionResponse
+	57,  // 123: agent.DeviceAgent.GetFsioReadStats:output_type -> agent.GetFsioReadStatsResponse
+	63,  // 124: agent.DeviceAgent.UploadTraceToMinio:output_type -> agent.UploadTraceResponse
+	65,  // 125: agent.DeviceAgent.UploadBenchmarkToMinio:output_type -> agent.UploadBenchmarkResponse
+	69,  // 126: agent.DeviceAgent.UploadTraceArchive:output_type -> agent.UploadTraceArchiveProgress
+	72,  // 127: agent.DeviceAgent.GetArchiveFilesInfo:output_type -> agent.GetArchiveFilesInfoResponse
+	75,  // 128: agent.DeviceAgent.MonitorDevices:output_type -> agent.DeviceMetrics
+	83,  // 129: agent.DeviceAgent.ListInstalledApps:output_type -> agent.ListInstalledAppsResponse
+	93,  // 130: agent.DeviceAgent.StartRecording:output_type -> agent.StartRecordingResponse
+	95,  // 131: agent.DeviceAgent.StopRecording:output_type -> agent.StopRecordingResponse
+	97,  // 132: agent.DeviceAgent.ReplayMacro:output_type -> agent.ReplayMacroResponse
+	99,  // 133: agent.DeviceAgent.TakeScreenshot:output_type -> agent.TakeScreenshotResponse
+	101, // 134: agent.DeviceAgent.ScreenshotOcr:output_type -> agent.ScreenshotOcrResponse
+	103, // 135: agent.DeviceAgent.ListUiElements:output_type -> agent.ListUiElementsResponse
+	86,  // 136: agent.DeviceAgent.ListBundledApks:output_type -> agent.ListBundledApksResponse
+	89,  // 137: agent.DeviceAgent.InstallApk:output_type -> agent.InstallApkResponse
+	91,  // 138: agent.DeviceAgent.UninstallApk:output_type -> agent.UninstallApkResponse
+	106, // 139: agent.DeviceAgent.ReparseTrace:output_type -> agent.ReparseTraceResponse
+	113, // 140: agent.DeviceAgent.Shell:output_type -> agent.ShellServerMsg
+	108, // [108:141] is the sub-list for method output_type
+	75,  // [75:108] is the sub-list for method input_type
+	75,  // [75:75] is the sub-list for extension type_name
+	75,  // [75:75] is the sub-list for extension extendee
+	0,   // [0:75] is the sub-list for field type_name
 }
 
 func init() { file_agent_proto_init() }
@@ -9763,14 +9891,15 @@ func file_agent_proto_init() {
 	file_agent_proto_msgTypes[46].OneofWrappers = []any{}
 	file_agent_proto_msgTypes[50].OneofWrappers = []any{}
 	file_agent_proto_msgTypes[52].OneofWrappers = []any{}
-	file_agent_proto_msgTypes[55].OneofWrappers = []any{}
-	file_agent_proto_msgTypes[63].OneofWrappers = []any{}
-	file_agent_proto_msgTypes[104].OneofWrappers = []any{
+	file_agent_proto_msgTypes[53].OneofWrappers = []any{}
+	file_agent_proto_msgTypes[56].OneofWrappers = []any{}
+	file_agent_proto_msgTypes[64].OneofWrappers = []any{}
+	file_agent_proto_msgTypes[105].OneofWrappers = []any{
 		(*ShellClientMsg_Start)(nil),
 		(*ShellClientMsg_Input)(nil),
 		(*ShellClientMsg_Resize)(nil),
 	}
-	file_agent_proto_msgTypes[107].OneofWrappers = []any{
+	file_agent_proto_msgTypes[108].OneofWrappers = []any{
 		(*ShellServerMsg_Output)(nil),
 		(*ShellServerMsg_Exit)(nil),
 	}
@@ -9780,7 +9909,7 @@ func file_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_proto_rawDesc), len(file_agent_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   114,
+			NumMessages:   115,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -268,6 +268,36 @@
 			⚠ 훅 발화 횟수지 page 수나 byte 수가 아닙니다.
 		</div>
 
+		<!-- mmap page fault — 별도 모집단 -->
+		{#if data.mmap && data.mmap.requests > 0}
+			<div class="border rounded-md p-2 border-l-2 border-l-violet-500">
+				<div class="flex items-baseline gap-2 mb-1">
+					<h3 class="text-xs font-semibold">mmap Page Faults</h3>
+					<span class="text-[10px] text-muted-foreground">위 read 통계와 <b>별개 모집단</b></span>
+				</div>
+				<div class="text-[11px] tabular-nums flex flex-wrap gap-x-4 gap-y-0.5">
+					<span>{data.mmap.requests.toLocaleString()}건</span>
+					<span class="text-muted-foreground">
+						miss {data.mmap.missRequests.toLocaleString()}
+					</span>
+					<span class="text-muted-foreground">Avg {fmtMs(data.mmap.durationAvgNs)} ms</span>
+					<span class="text-muted-foreground">Median {fmtMs(data.mmap.durationP50Ns)} ms</span>
+					<span class="text-muted-foreground">P99 {fmtMs(data.mmap.durationP99Ns)} ms</span>
+					<span class="text-muted-foreground">fill {data.mmap.fillUnits.toLocaleString()}</span>
+				</div>
+				<!--
+					⚠ 여기에 적중률을 만들면 안 된다. fault-around 때문에 캐시에 있는 페이지는
+					fault 를 아예 안 내므로 이 모집단은 사실상 miss 만 모인다.
+				-->
+				<div class="text-[10px] text-muted-foreground mt-1 leading-relaxed">
+					<b>적중률을 내지 않습니다.</b> 캐시에 있는 페이지는 fault 를 아예 안 내기 때문에(fault-around),
+					여기 보이는 건 대부분 miss 입니다 — <b>“mmap 이 캐시를 못 맞춘다”로 읽으면 안 됩니다.</b>
+					진짜 분모(접근한 페이지 수)는 이 계층에서 볼 수 없습니다.
+					위 Hit Ratio 에는 이 {data.mmap.requests.toLocaleString()}건이 <b>들어가지 않습니다</b>.
+				</div>
+			</div>
+		{/if}
+
 		<!-- 파일별 -->
 		<div>
 			<div class="flex items-baseline gap-2 mb-1">

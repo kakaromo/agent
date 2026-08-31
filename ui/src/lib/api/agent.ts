@@ -568,6 +568,24 @@ export interface FsioReadFileStats {
 	totalDurationNs: number;
 }
 
+/**
+ * mmap page fault 요약 — read 통계와 **모집단이 다르다**.
+ *
+ * ⚠ 적중률 필드가 없는 것은 누락이 아니라 의도다. fault-around 때문에 캐시에 있는
+ *   페이지는 fault 를 아예 안 내므로 이 모집단은 사실상 miss 만 모인다. 비율을 만들면
+ *   구조적으로 0% 에 가깝게 나오고, 그걸 "mmap 이 캐시를 못 맞춘다" 로 읽으면 완전히
+ *   틀린 결론이 된다. 진짜 분모(접근한 페이지 수)는 이 계층에 없다.
+ */
+export interface FsioReadMmapStats {
+	requests: number;
+	missRequests: number;
+	fillUnits: number;
+	durationSamples: number;
+	durationAvgNs?: number;
+	durationP50Ns?: number;
+	durationP99Ns?: number;
+}
+
 export interface FsioReadStatsResult {
 	totalRequests: number;
 	byClass: FsioReadClassStats[];
@@ -588,6 +606,8 @@ export interface FsioReadStatsResult {
 	/** 수집 품질 경고. **숨기지 말 것** — 근거가 부족한 걸 모르고 hit ratio 를 읽으면 위험하다. */
 	qualityWarnings: string[];
 	schemaVersion: string;
+	/** mmap page fault — 위 값들에서 **제외된** 별도 모집단. 없으면 undefined. */
+	mmap?: FsioReadMmapStats;
 }
 
 export interface TraceEvent {

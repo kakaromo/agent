@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	pb "agent/pb"
+	"agent/trace/parser"
 )
 
 // fsio_read page-cache 통계 집계.
@@ -35,6 +36,25 @@ const (
 	fsioReadDefaultTopN = 20
 	fsioReadMaxTopN     = 200
 )
+
+// fsioMmapPred — mmap page fault 행을 가리키는 SQL 조건.
+//
+// ⚠ 캐시에 있는 페이지는 fault 를 안 내므로(fault-around) mmap row 는 사실상 miss 만
+// 모인 모집단이다. read 와 같은 분모에 섞으면 캐시는 그대로인데 mmap 을 쓴다는 이유만으로
+// 적중률이 깎인다 — 실측 fio_mmap_sample.log 74.22% → 59.63% (14.6%p).
+// 그래서 본 집계에서 빼고 아래에서 따로 센다.
+const fsioMmapPred = "action = '" + parser.FsioReadActionMmap + "'"
+
+// addWhere — 기존 where 절에 조건 하나를 AND 로 붙인다.
+func addWhere(where, cond string) string {
+	if cond == "" {
+		return where
+	}
+	if where == "" {
+		return "WHERE " + cond
+	}
+	return where + " AND " + cond
+}
 
 // fsioReadFileKeyExpr — 파일 식별 키 SQL.
 // 폴백 순서는 Rust `FILE_KEY_EXPR` 와 **같아야** 한다: 경로 → ino:N → (meta:fs) → (unknown).
@@ -84,10 +104,21 @@ func ComputeFsioReadStats(infos []*TraceJobInfo, req *pb.GetFsioReadStatsRequest
 		durExpr = "duration_ns"
 	}
 
-	if err := fsioReadClassStats(db, glob, where, durExpr, resp); err != nil {
+	// ⚠ 본 집계에서 mmap 을 뺀다. 이 한 줄이 빠지면 화면 hit ratio 가 조용히 낮아진다
+	// (fsioMmapPred 주석 참조). mmap 은 아래에서 따로 집계한다.
+	//
+	// action 컬럼이 없는 구버전 parquet 은 mmap 행 자체가 존재할 수 없으므로
+	// (mmap_fault:exit 은 action 이 생긴 뒤 도입) 조건을 걸지 않는다.
+	hasAction := hasColumns(db, glob, "action")["action"]
+	readWhere := where
+	if hasAction {
+		readWhere = addWhere(where, "NOT ("+fsioMmapPred+")")
+	}
+
+	if err := fsioReadClassStats(db, glob, readWhere, durExpr, resp); err != nil {
 		return nil, err
 	}
-	if err := fsioReadScalars(db, glob, where, durExpr, resp); err != nil {
+	if err := fsioReadScalars(db, glob, readWhere, durExpr, resp); err != nil {
 		return nil, err
 	}
 
@@ -98,13 +129,53 @@ func ComputeFsioReadStats(infos []*TraceJobInfo, req *pb.GetFsioReadStatsRequest
 	if topN > fsioReadMaxTopN {
 		topN = fsioReadMaxTopN
 	}
-	if err := fsioReadTopFiles(db, glob, where, durExpr, topN, resp); err != nil {
+	// 파일별도 read 모집단 기준이다 — 전체(74.22%)와 파일별이 다른 모집단이면
+	// 같은 화면에서 합이 안 맞는다.
+	if err := fsioReadTopFiles(db, glob, readWhere, durExpr, topN, resp); err != nil {
 		return nil, err
 	}
 
+	// mmap page fault — 별도 모집단. **적중률은 만들지 않는다**(분모 부재).
+	if hasAction {
+		if err := fsioReadMmapStats(db, glob, addWhere(where, fsioMmapPred), durExpr, resp); err != nil {
+			return nil, err
+		}
+	}
+
 	fsioReadRatios(resp)
-	resp.QualityWarnings = fsioReadQualityWarnings(db, glob, where)
+	resp.QualityWarnings = fsioReadQualityWarnings(db, glob, readWhere)
 	return resp, nil
+}
+
+// fsioReadMmapStats — mmap page fault 집계.
+//
+// ⚠ **적중률을 만들지 않는다.** fault-around 때문에 캐시에 있는 페이지는 fault 를 안
+// 내므로 이 모집단은 사실상 miss 만 모인다. hit/(hit+miss) 를 구하면 구조적으로 0% 에
+// 가깝게 나오고, 그걸 "mmap 이 캐시를 못 맞춘다" 로 읽으면 완전히 틀린 결론이 된다.
+// 진짜 분모(접근한 페이지 수)는 이 계층에 없다 — bpftrace 가 fault 만 보고 접근 전체를
+// 못 본다. 건수와 지연만 보여주고 해석은 화면 문구가 맡는다.
+func fsioReadMmapStats(db *sql.DB, glob, mmapWhere, durExpr string, resp *pb.GetFsioReadStatsResponse) error {
+	q := fmt.Sprintf(`SELECT COUNT(*) AS reqs,
+		COUNT(*) FILTER (WHERE cache_class = '%[4]s') AS misses,
+		COALESCE(SUM(fill_units), 0) AS fill,
+		COUNT(%[1]s) AS dur_n,
+		CAST(FLOOR(AVG(%[1]s)) AS UBIGINT) AS dur_avg,
+		quantile_disc(%[1]s, 0.50) AS p50,
+		quantile_disc(%[1]s, 0.99) AS p99
+	FROM read_parquet(%[2]s) %[3]s`, durExpr, glob, mmapWhere, fsioClassMiss)
+
+	var m pb.FsioReadMmapStats
+	var avg, p50, p99 sql.NullInt64
+	err := db.QueryRow(q).Scan(&m.Requests, &m.MissRequests, &m.FillUnits,
+		&m.DurationSamples, &avg, &p50, &p99)
+	if err != nil {
+		return fmt.Errorf("fsio_read mmap query: %w", err)
+	}
+	m.DurationAvgNs = nullU64(avg)
+	m.DurationP50Ns = nullU64(p50)
+	m.DurationP99Ns = nullU64(p99)
+	resp.Mmap = &m
+	return nil
 }
 
 // fsioReadClassStats — class 별 집계 + 지연 백분위.

@@ -677,6 +677,30 @@ message GetFsioReadStatsResponse {
   repeated string quality_warnings = 13;
 
   string schema_version = 14;   // "fsio_read-v1"
+
+  // mmap page fault — **위의 모든 값에서 제외된 별도 모집단**이다.
+  FsioReadMmapStats mmap = 15;
+}
+
+// mmap page fault 요약.
+//
+// ⚠ **적중률 필드가 없는 것은 누락이 아니라 의도다.** fault-around 때문에 캐시에
+//   있는 페이지는 fault 를 아예 안 내므로, 이 모집단은 사실상 miss 만 모여 있다.
+//   hit/(hit+miss) 를 구하면 구조적으로 0% 에 가깝게 나오고, 그걸 "mmap 이 캐시를
+//   못 맞춘다" 로 읽으면 완전히 틀린 결론이 된다. 진짜 분모(접근한 페이지 수)는
+//   이 계층에 없다 — bpftrace 가 fault 만 보고 접근 전체를 못 본다.
+//
+// 그래서 read 통계와 **분모를 절대 섞지 않는다**. 섞으면 캐시는 그대로인데 mmap 을
+// 쓴다는 이유만으로 hit ratio 가 떨어진다
+// (실측: fio_mmap_sample.log 74.22% → 59.63%, fsio_mmap_sample.log 70.52% → 67.15%).
+message FsioReadMmapStats {
+  uint64 requests = 1;
+  uint64 miss_requests = 2;
+  uint64 fill_units = 3;
+  uint64 duration_samples = 4;
+  optional uint64 duration_avg_ns = 5;
+  optional uint64 duration_p50_ns = 6;
+  optional uint64 duration_p99_ns = 7;
 }
 
 message GetTraceRawDataRequest {
