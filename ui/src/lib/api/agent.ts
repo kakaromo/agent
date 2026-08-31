@@ -1390,6 +1390,13 @@ export interface AILogProfile {
 	id: number;
 	name: string;
 	description?: string;
+	/**
+	 * 어디서 읽는 패턴인가 — "logcat"(기본) 또는 "marker".
+	 *
+	 * ⚠ 두 소스는 patternsJson 의 **필드 이름이 다르다**(marks/series vs
+	 * counters/sections). 섞으면 조용히 0건이 되므로 서버가 파싱 전에 막는다.
+	 */
+	source?: string;
 	runtime: string;
 	soc?: string;
 	patternsJson: string;
@@ -1537,4 +1544,88 @@ export interface LogcatParseRequest {
 
 export function parseLogcat(req: LogcatParseRequest): Promise<{ path: string; result: LogcatParseResult }> {
 	return post('/agent/logcat/parse', req);
+}
+
+
+// ── trace_marker 기반 AI 지표 (logcat 의 자매 경로) ──
+//
+// ⚠ logcat 과 **소스만 다르고 계약은 같다.** 결과 타입(LogcatParseResult)도 공유하므로
+// 측정 화면은 두 소스를 같은 코드로 그린다.
+//
+// 왜 두 경로가 필요한가: 런타임이 **stderr 로 뱉으면 logcat 에 안 남는다**
+// (llama.cpp `llama_print_timings()`). trace_marker 는 파일 write 라 그 제약이 없고,
+// IO 트레이스와 같은 clock 이라 축 변환도 필요 없다.
+
+/** marker 패턴 — logcat 과 달리 **캡처 그룹이 필요 없다** (`C|이름|값` 이라 값이 이미 분리). */
+export interface MarkerPatterns {
+	/** `C|pid|<name>|<value>` 에서 값을 뽑을 카운터. */
+	counters?: MarkerCounter[];
+	/** `B|pid|<name>` 구간. 시작 시각을 mark 로 쓴다. */
+	sections?: MarkerSection[];
+}
+
+export interface MarkerCounter {
+	key: string;
+	/** 기기가 찍는 이름. 정확히 일치하면 이것만으로 충분하다. */
+	name?: string;
+	/** 이름이 버전마다 다를 때. name 이 비면 이쪽을 쓴다. 캡처 그룹 불필요. */
+	regex?: string;
+	unit?: string;
+}
+
+export interface MarkerSection {
+	key: string;
+	name?: string;
+	regex?: string;
+}
+
+export interface MarkerCandidate {
+	name: string;
+	/** "counter"(C|, 값 있음) 또는 "section"(B|, 구간). */
+	kind: string;
+	count: number;
+	pids: number[];
+	/** 숫자값이 실렸는가. 지표라면 여기가 true 다. */
+	hasValue: boolean;
+	min: number;
+	max: number;
+	/** 이름에 LLM 고유 어휘(토큰·prefill/decode·TTFT)가 있는가. */
+	llmSignal: boolean;
+	onlyDuringRun: boolean;
+	samples: string[];
+	score: number;
+}
+
+export interface MarkerExploreResult {
+	totalLines: number;
+	markerLines: number;
+	distinctNames: number;
+	candidates: MarkerCandidate[];
+	/** LLM 고유 신호가 **하나도 없다** — logcat 의 weakOnly 와 같은 경고다. */
+	weakOnly: boolean;
+	diagnosis: string[];
+}
+
+export interface MarkerExploreRequest {
+	/** trace 잡 ID. ⚠ path 는 받지 않는다 (임의 경로 노출 방지). */
+	traceJobId: string;
+	idleFrom?: number;
+	idleTo?: number;
+	runFrom?: number;
+	runTo?: number;
+}
+
+export function exploreMarkers(req: MarkerExploreRequest): Promise<{ path: string; result: MarkerExploreResult }> {
+	return post('/agent/marker/explore', req);
+}
+
+export interface MarkerParseRequest {
+	traceJobId: string;
+	profileId?: number;
+	patternsJson?: string | MarkerPatterns;
+}
+
+/** 결과 타입은 logcat 과 같다 — 측정 화면을 공유하기 위해서다. */
+export function parseMarkers(req: MarkerParseRequest): Promise<{ path: string; result: LogcatParseResult }> {
+	return post('/agent/marker/parse', req);
 }
