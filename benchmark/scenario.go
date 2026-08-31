@@ -480,6 +480,7 @@ func (o *Orchestrator) executeStep(ctx context.Context, job *Job, md *adb.Manage
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
 			OutputDir:     outDir,
+			IncludeVfs:    step.Params["include_vfs"] == "true",
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("auto trace start: %w", err)
@@ -604,6 +605,7 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
 			OutputDir:     outDir,
+			IncludeVfs:    step.Params["include_vfs"] == "true",
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("start trace: %w", err)

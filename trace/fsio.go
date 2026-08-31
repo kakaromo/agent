@@ -41,11 +41,21 @@ func IsFsioTraceType(traceType string) bool {
 // VFS/FS/BLK 훅이 흡수한 cross-layer 정보(풀패스 파일명, comm, syscall)가 UFS row 에
 // 그대로 채워진다. 훅 자체를 끄는 `--no-blk`/`--no-fs` 를 쓰면 그 소스가 사라져
 // 파일명이 빈다 — bpftrace 를 쓰는 이유가 없어지므로 쓰지 않는다.
-func fsioOnlyLayer(traceType string) string {
+//
+// ⚠ **다만 fsio_read 는 얘기가 다르다.** page-cache hit/miss 판정 row
+// (`vfs_read:exit` / `readv:exit` / `mmap_fault:exit`)는 cross-layer 흡수 대상이
+// 아니라 **VFS 레이어 행 그 자체**다(OUTPUT_FORMAT.md §4.7, 파서도 layer=="VFS"
+// 로 거른다). 그래서 vfs 를 안 넣으면 Page Cache 통계와 mmap 집계가 통째로 빈다.
+// includeVFS 는 그때 vfs 를 함께 켠다.
+func fsioOnlyLayer(traceType string, includeVFS bool) string {
+	base := "ufs"
 	if traceType == "fsio_block" {
-		return "blk"
+		base = "blk"
 	}
-	return "ufs"
+	if includeVFS {
+		return base + ",vfs"
+	}
+	return base
 }
 
 // prepareFsioDevice — fsiotrace 실행 전 사전 점검 + 바이너리 배포.
@@ -93,8 +103,8 @@ func pushIfNeeded(ctx context.Context, dev *adb.Device, localPath, remotePath st
 //
 // `-o` 를 주지 않으면 stdout 으로 TSV 를 흘리므로, 기존 ftrace 경로와 똑같이
 // adb stdout 을 로그 파일로 리다이렉트하는 구조를 그대로 쓸 수 있다.
-func buildFsioCommand(traceType string) string {
-	return fmt.Sprintf("%s --only %s", fsiotraceRemotePath, fsioOnlyLayer(traceType))
+func buildFsioCommand(traceType string, includeVFS bool) string {
+	return fmt.Sprintf("%s --only %s", fsiotraceRemotePath, fsioOnlyLayer(traceType, includeVFS))
 }
 
 // stopFsioOnDevice — 기기 측 fsiotrace 를 정상 종료시킨다.
@@ -127,8 +137,8 @@ const fsioReadyTimeout = 30 * time.Second
 // **메모리 상태에 따라 즉시~수십 초로 요동친다.** 그래서 고정 대기로는 못 맞추고
 // 완료 신호를 봐야 한다 — stdout 모드에서는 poll 루프 직전의 "warn: stdout ..." 줄이
 // 마지막 출력이라 그게 준비 완료 신호가 된다.
-func startFsioCollector(ctx context.Context, serial, traceType string, logFd *os.File) (*exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, "adb", "-s", serial, "shell", buildFsioCommand(traceType))
+func startFsioCollector(ctx context.Context, serial, traceType string, includeVFS bool, logFd *os.File) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, "adb", "-s", serial, "shell", buildFsioCommand(traceType, includeVFS))
 	cmd.Stdout = logFd
 
 	stderrPipe, err := cmd.StderrPipe()

@@ -196,7 +196,7 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 
 	var adbCmd *exec.Cmd
 	if isFsio {
-		adbCmd, err = startFsioCollector(adbCtx, md.Serial, traceType, logFd)
+		adbCmd, err = startFsioCollector(adbCtx, md.Serial, traceType, req.GetIncludeVfs(), logFd)
 	} else {
 		adbCmd = exec.CommandContext(adbCtx, "adb", "-s", md.Serial, "shell",
 			fmt.Sprintf("cat %s/trace_pipe", tracingDir))

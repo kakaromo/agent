@@ -108,6 +108,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 		params: [
 			{ name: "trace_type", required: false, enum: ["ufs", "block", "both", "fsio_ufs", "fsio_block"], default: "ufs", desc: "트레이스 종류 (fsio_* 는 eBPF 기반 — root 필요, 파일명/프로세스 귀속 제공)" },
 			{ name: "window_seconds", required: false, default: "1", desc: "수집 윈도우 (초)" },
+			{ name: "include_vfs", required: false, enum: ["true", "false"], default: "false", desc: "fsio_* 에서 VFS 레이어도 수집 (page cache hit/miss·mmap 통계에 필요). 로그가 커진다" },
 			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},

@@ -660,6 +660,8 @@ export interface TraceRawDataResult {
 
 export function startTrace(serverId: number, data: {
 	deviceId: string; traceType: string; windowSeconds?: number; jobName?: string;
+	/** fsio_* 에서 VFS 레이어도 수집 — page cache hit/miss·mmap 통계에 필요. */
+	includeVfs?: boolean;
 }): Promise<{ jobId: string }> {
 	return post(`/agent/trace/start?serverId=${serverId}`, data);
 }

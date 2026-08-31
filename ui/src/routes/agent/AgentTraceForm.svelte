@@ -26,6 +26,8 @@
 	// 해당하는 조합은 두지 않는다.
 
 	let windowSeconds = $state(0);
+	// fsio_* 에서 VFS 레이어도 받을지 — Page Cache 통계의 전제.
+	let includeVfs = $state(false);
 	let jobName = $state('');
 	let starting = $state(false);
 	let stopping = $state(false);
@@ -41,6 +43,7 @@
 				deviceId: singleDeviceId,
 				traceType,
 				windowSeconds: windowSeconds > 0 ? windowSeconds : undefined,
+				includeVfs: traceType.startsWith('fsio_') ? includeVfs : undefined,
 				jobName: jobName || undefined
 			});
 			activeTraceJobId = res.jobId;
@@ -111,6 +114,25 @@
 				eBPF 기반 — <b>root(userdebug)</b> 필요. 파일명·프로세스·syscall 귀속과
 				io_flags(journal/GC/writeback 등), UFS management 이벤트를 함께 수집합니다.
 			</div>
+			<!-- VFS 레이어는 별도로 켜야 한다.
+			     fsiotrace 의 `--only` 는 출력 레이어 필터라, ufs/blk 만 받으면
+			     page cache 판정 row(vfs_read:exit / mmap_fault:exit)가 로그에
+			     아예 안 남는다 → Page Cache 탭이 통째로 빈다. -->
+			<label class="flex items-start gap-1.5 text-[10px] cursor-pointer mt-1.5">
+				<input
+					type="checkbox"
+					bind:checked={includeVfs}
+					disabled={!!activeTraceJobId}
+					class="size-3 mt-0.5 shrink-0"
+				/>
+				<span>
+					VFS 레이어 함께 수집
+					<span class="block text-[9px] text-muted-foreground leading-relaxed">
+						Page Cache 적중률과 mmap 통계를 보려면 필요합니다. 켜지 않으면 해당 화면이 빕니다.
+						대신 로그가 커집니다.
+					</span>
+				</span>
+			</label>
 		{/if}
 	</div>
 

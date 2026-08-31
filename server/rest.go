@@ -280,11 +280,15 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 		if v, ok := numberOf(body["windowSeconds"]); ok {
 			windowSec = int32(v)
 		}
+		// includeVfs — fsio 계열에서 VFS 레이어(page-cache 판정 row)도 받을지.
+		// 없으면 false = 기존 동작 그대로.
+		includeVfs, _ := body["includeVfs"].(bool)
 		resp, err := agent.StartTrace(r.Context(), &pb.StartTraceRequest{
 			DeviceId:      deviceID,
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
 			JobName:       jobName,
+			IncludeVfs:    includeVfs,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

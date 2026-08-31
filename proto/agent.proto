@@ -341,6 +341,17 @@ message StartTraceRequest {
   int32 window_seconds = 3;     // parquet 윈도우 (기본 1초)
   string job_name = 4;
 
+  // fsio 계열에서 VFS 레이어도 함께 수집할지 (기본 false).
+  //
+  // fsiotrace 는 `--only ufs|blk` 로 **출력 레이어**를 거른다(BPF 훅은 다 돈다).
+  // 그런데 page-cache hit/miss 판정에 쓰는 fsio_read row —
+  // `vfs_read:exit` / `readv:exit` / `mmap_fault:exit` — 는 전부 **VFS 레이어**라,
+  // 기본 수집으로는 로그에 아예 안 찍혀 Page Cache 통계가 통째로 빈다.
+  //
+  // 켜면 `--only ufs,vfs` 가 되어 fsio_read 를 볼 수 있다. 대신 VFS row 만큼
+  // 로그가 커지므로 기본값은 끔이다. ftrace 계열(ufs/block/both)에는 영향이 없다.
+  bool include_vfs = 6;
+
   // 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
   // 비면 기본 위치(trace_dir)를 쓴다.
   //

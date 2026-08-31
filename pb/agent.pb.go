@@ -2491,6 +2491,16 @@ type StartTraceRequest struct {
 	TraceType     string                 `protobuf:"bytes,2,opt,name=trace_type,json=traceType,proto3" json:"trace_type,omitempty"`              // "ufs", "block", "both", "fsio_ufs", "fsio_block"
 	WindowSeconds int32                  `protobuf:"varint,3,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"` // parquet 윈도우 (기본 1초)
 	JobName       string                 `protobuf:"bytes,4,opt,name=job_name,json=jobName,proto3" json:"job_name,omitempty"`
+	// fsio 계열에서 VFS 레이어도 함께 수집할지 (기본 false).
+	//
+	// fsiotrace 는 `--only ufs|blk` 로 **출력 레이어**를 거른다(BPF 훅은 다 돈다).
+	// 그런데 page-cache hit/miss 판정에 쓰는 fsio_read row —
+	// `vfs_read:exit` / `readv:exit` / `mmap_fault:exit` — 는 전부 **VFS 레이어**라,
+	// 기본 수집으로는 로그에 아예 안 찍혀 Page Cache 통계가 통째로 빈다.
+	//
+	// 켜면 `--only ufs,vfs` 가 되어 fsio_read 를 볼 수 있다. 대신 VFS row 만큼
+	// 로그가 커지므로 기본값은 끔이다. ftrace 계열(ufs/block/both)에는 영향이 없다.
+	IncludeVfs bool `protobuf:"varint,6,opt,name=include_vfs,json=includeVfs,proto3" json:"include_vfs,omitempty"`
 	// 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
 	// 비면 기본 위치(trace_dir)를 쓴다.
 	//
@@ -2558,6 +2568,13 @@ func (x *StartTraceRequest) GetJobName() string {
 		return x.JobName
 	}
 	return ""
+}
+
+func (x *StartTraceRequest) GetIncludeVfs() bool {
+	if x != nil {
+		return x.IncludeVfs
+	}
+	return false
 }
 
 func (x *StartTraceRequest) GetOutputDir() string {
@@ -8915,13 +8932,15 @@ const file_agent_proto_rawDesc = "" +
 	"\x05edges\x18\n" +
 	" \x03(\v2\x0f.agent.StepEdgeR\x05edges\",\n" +
 	"\x13RunScenarioResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xb0\x01\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xd1\x01\n" +
 	"\x11StartTraceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
 	"trace_type\x18\x02 \x01(\tR\ttraceType\x12%\n" +
 	"\x0ewindow_seconds\x18\x03 \x01(\x05R\rwindowSeconds\x12\x19\n" +
-	"\bjob_name\x18\x04 \x01(\tR\ajobName\x12\x1d\n" +
+	"\bjob_name\x18\x04 \x01(\tR\ajobName\x12\x1f\n" +
+	"\vinclude_vfs\x18\x06 \x01(\bR\n" +
+	"includeVfs\x12\x1d\n" +
 	"\n" +
 	"output_dir\x18\x05 \x01(\tR\toutputDir\"+\n" +
 	"\x12StartTraceResponse\x12\x15\n" +
