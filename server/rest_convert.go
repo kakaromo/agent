@@ -134,30 +134,41 @@ func benchmarkResultToMap(r *pb.BenchmarkResult) map[string]any {
 	if len(r.GetStepBoundaries()) > 0 {
 		bs := make([]map[string]any, 0, len(r.GetStepBoundaries()))
 		for _, b := range r.GetStepBoundaries() {
-			bs = append(bs, map[string]any{
-				"stepIndex":    b.GetStepIndex(),
-				"loopIndex":    b.GetLoopIndex(),
-				"repeatIndex":  b.GetRepeatIndex(),
-				"type":         b.GetType(),
-				"label":        b.GetLabel(),
-				"startedAt":    b.GetStartedAt(),
-				"finishedAt":   b.GetFinishedAt(),
-				"startedMono":  b.GetStartedMono(),
-				"finishedMono": b.GetFinishedMono(),
-				"success":      b.GetSuccess(),
-				"error":        b.GetError(),
-				// 구간을 무엇으로 얻었나 — ""=ClockOffset(기본), "trace_marker"=폴백.
-				// ⚠ 여기서 빠뜨리면 proto 에 넣어도 화면까지 안 간다 (조용히 사라지는 필드).
-				"boundarySource": b.GetBoundarySource(),
-				// ⚠ 이 둘도 반드시 싣는다 — 빠뜨리면 화면이 드리프트 잡에서 쓸 대체
-				// 시각을 못 받아 구간이 통째로 사라진다.
-				"markerStartedMono":  b.GetMarkerStartedMono(),
-				"markerFinishedMono": b.GetMarkerFinishedMono(),
-			})
+			bs = append(bs, stepBoundaryToMap(b))
 		}
 		m["stepBoundaries"] = bs
 	}
 	return m
+}
+
+// stepBoundaryToMap — StepBoundary → FE shape.
+//
+// ⚠ **변환은 여기 한 곳에서만 한다.** 예전엔 rest_convert 와 rest_hook 이 같은 필드
+// 목록을 각자 갖고 있었는데, 새 필드(markerStartedMono)를 한쪽에만 넣는 바람에
+// **만료된 잡에서만 구간이 사라지는** 버그가 났다. 라이브 경로로 확인하면 정상이라
+// 발견도 늦는다.
+func stepBoundaryToMap(b *pb.StepBoundary) map[string]any {
+	return map[string]any{
+		"stepIndex":    b.GetStepIndex(),
+		"loopIndex":    b.GetLoopIndex(),
+		"repeatIndex":  b.GetRepeatIndex(),
+		"type":         b.GetType(),
+		"label":        b.GetLabel(),
+		"startedAt":    b.GetStartedAt(),
+		"finishedAt":   b.GetFinishedAt(),
+		"startedMono":  b.GetStartedMono(),
+		"finishedMono": b.GetFinishedMono(),
+		"success":      b.GetSuccess(),
+		"error":        b.GetError(),
+		// ⚠ boundary_source 는 **더 이상 백엔드가 채우지 않는다** (marker 로 덮어쓰던
+		// 시절의 잔재다). 지금은 offset/marker 를 나란히 싣고 화면이 고르므로, 어느
+		// 쪽을 썼는지도 화면이 안다. 구버전 잡 호환을 위해 전달만 한다.
+		"boundarySource": b.GetBoundarySource(),
+		// ⚠ 이 둘도 반드시 싣는다 — 빠뜨리면 화면이 드리프트 잡에서 쓸 대체
+		// 시각을 못 받아 구간이 통째로 사라진다.
+		"markerStartedMono":  b.GetMarkerStartedMono(),
+		"markerFinishedMono": b.GetMarkerFinishedMono(),
+	}
 }
 
 func metricsToMap(m *pb.DeviceMetrics) map[string]any {

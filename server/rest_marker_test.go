@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	pb "agent/pb"
 	"agent/storage/sqlitedb"
 )
 
@@ -152,5 +154,47 @@ func TestStatusForProfileErr_MarkerMessages(t *testing.T) {
 		if got := statusForProfileErr(errText(msg)); got != 500 {
 			t.Errorf("서버 에러 %q 가 HTTP %d 로 분류됐다 — 사용자가 자기 패턴 탓으로 오해한다", msg, got)
 		}
+	}
+}
+
+// ⚠⚠ 라이브 응답(rest_convert)과 영속화(rest_hook)가 **같은 변환**을 써야 한다.
+//
+// 예전엔 필드 목록을 각자 들고 있었는데, 새 필드를 한쪽에만 넣는 바람에 잡이 만료된
+// 뒤에만 구간이 사라지는 버그가 났다 — 라이브로 확인하면 정상이라 발견이 늦다.
+func TestStepBoundaryConversionIsShared(t *testing.T) {
+	src, err := os.ReadFile("rest_hook.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(src), "func collectStepBoundariesFrom(")
+	if i < 0 {
+		t.Fatal("collectStepBoundariesFrom 을 찾지 못했다 — 테스트가 낡았다")
+	}
+	body := string(src)[i:]
+	if j := strings.Index(body[1:], "\nfunc "); j > 0 {
+		body = body[:j+1]
+	}
+	if !strings.Contains(body, "stepBoundaryToMap(") {
+		t.Error("영속화가 공용 변환을 안 쓴다 — 필드가 갈라지면 만료된 잡에서만 구간이 사라진다")
+	}
+	// 필드 목록을 자체적으로 들고 있으면 안 된다.
+	if strings.Contains(body, `"startedMono"`) {
+		t.Error("영속화가 필드 목록을 따로 갖고 있다 — 공용 변환을 쓸 것")
+	}
+}
+
+// 새 marker 필드가 변환에 실제로 실리는지 (proto 에만 넣고 빠뜨리는 사고 방지).
+func TestStepBoundaryToMapCarriesMarkerTimes(t *testing.T) {
+	m := stepBoundaryToMap(&pb.StepBoundary{
+		StartedMono: 100, FinishedMono: 101,
+		MarkerStartedMono: 200, MarkerFinishedMono: 201,
+	})
+	for _, k := range []string{"startedMono", "finishedMono", "markerStartedMono", "markerFinishedMono"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("%q 가 변환에서 빠졌다 — 화면이 드리프트 시 쓸 값을 못 받는다", k)
+		}
+	}
+	if m["markerStartedMono"] != float64(200) {
+		t.Errorf("markerStartedMono=%v", m["markerStartedMono"])
 	}
 }

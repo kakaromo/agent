@@ -114,23 +114,43 @@
 	// 한때 marker 를 무조건 우선했다가 정상 기기의 구간이 왕복 지연만큼 부풀었다.
 	// 반대로 offset 만 쓰면 드리프트 잡의 구간이 통째로 사라진다. 둘 다 틀린 선택이라
 	// **상황에 따라 고르는 것**이 유일한 답이다.
-	const useMarker = (b: StepBoundary): boolean => hasMarker(b) && !clockSyncUsable;
+	// ⚠ clockSync 응답 **전에는 판단을 미룬다.** clockSyncUsable 은 조회 전 true 라
+	// (데이터 없다고 막지는 않는 기본값), 그대로 두면 드리프트 잡이 처음엔 offset
+	// 시각으로 그려졌다가 응답이 오면 marker 로 **점프한다.** 그 사이 화면은 밀린
+	// 자리를 경고 없이 보여준다 — 짧아도 "그럴듯하게 틀린" 상태다.
+	const clockSyncLoaded = $derived(clockSync !== null);
+	const useMarker = (b: StepBoundary): boolean =>
+		hasMarker(b) && clockSyncLoaded && !clockSyncUsable;
+	/** marker 가 실린 구간이 있는데 아직 clockSync 를 모르면 그릴 수 없다. */
+	const boundaryPending = $derived(
+		!clockSyncLoaded && boundaries.some(hasMarker)
+	);
 	const boundaryTrusted = (b: StepBoundary): boolean =>
-		useMarker(b) || (hasOffset(b) && clockSyncUsable);
+		!boundaryPending && (useMarker(b) || (hasOffset(b) && clockSyncUsable));
 
-	/** 화면에 그릴 시각 — 위 판정에 따라 고른 쪽. */
-	const boundaryStart = (b: StepBoundary): number =>
-		useMarker(b) ? (b.markerStartedMono ?? 0) : b.startedMono;
-	const boundaryFinish = (b: StepBoundary): number =>
-		useMarker(b) ? (b.markerFinishedMono ?? 0) : b.finishedMono;
 
+	// ⚠⚠ **고른 시각을 startedMono/finishedMono 에 확정해서 내보낸다.**
+	//
+	// 소비자가 여럿이다(Charts 밴드·Behavior 레인·구간 표·요약). 각자 useMarker 를
+	// 다시 판단하게 두면 한 곳만 빠져도 **탭마다 같은 스텝이 다른 자리에 그려진다** —
+	// 어느 쪽이 맞는지 화면상으로는 구분이 안 된다. 실제로 그 사고가 났었다:
+	// 백엔드가 startedMono 를 덮어쓰던 시절엔 모든 소비자가 "우연히" 맞았는데,
+	// 덮어쓰기를 없애자 시트 밖 소비자들이 조용히 옛 값을 그렸다.
+	//
+	// 그래서 선택은 **여기 한 곳에서만** 하고, 아래로는 결과만 흘린다.
 	const allBoundaries = $derived(
-		boundaries.filter(b =>
-			boundaryTrusted(b) &&
-			!BOUNDARY_SKIP_TYPES.has(b.type) &&
-			(selectedLoop <= 0 || b.loopIndex === selectedLoop) &&
-			(selectedRepeat <= 0 || b.repeatIndex === selectedRepeat)
-		)
+		boundaries
+			.filter(b =>
+				boundaryTrusted(b) &&
+				!BOUNDARY_SKIP_TYPES.has(b.type) &&
+				(selectedLoop <= 0 || b.loopIndex === selectedLoop) &&
+				(selectedRepeat <= 0 || b.repeatIndex === selectedRepeat)
+			)
+			.map(b =>
+				useMarker(b)
+					? { ...b, startedMono: b.markerStartedMono ?? 0, finishedMono: b.markerFinishedMono ?? 0 }
+					: b
+			)
 	);
 
 	// 구간 토글 — 끈 구간은 차트 밴드·표·레인에서 모두 빠진다.
@@ -196,9 +216,8 @@
 		if (usableBoundaries.length === 0) return null;
 		let lo = Infinity, hi = -Infinity;
 		for (const b of usableBoundaries) {
-			const bs = boundaryStart(b), bf = boundaryFinish(b);
-			if (bs < lo) lo = bs;
-			if (bf > hi) hi = bf;
+			if (b.startedMono < lo) lo = b.startedMono;
+			if (b.finishedMono > hi) hi = b.finishedMono;
 		}
 		if (!isFinite(lo) || !(hi > lo)) return null;
 		// 경계에 딱 붙으면 끝점 IO 가 잘려 보인다. 5% 여유.
@@ -1056,6 +1075,17 @@
 	// 이 값이 곧 "이 구간 경계를 어디까지 믿을 수 있나" 다. 없으면 화면이 ±10ms 짜리
 	// 측정과 ±250ms 짜리를 **똑같이** 그리게 된다.
 	const edgeUncertaintySec = $derived.by<number>(() => {
+		// ⚠ **marker 를 쓰는 구간은 오차 모델이 다르다.** offset 의 ±RTT/2 를 그대로
+		// 쓰면 실제보다 작은 값을 보여줘 "정밀한데 틀린 숫자" 가 된다 (실측: marker 창이
+		// 스텝보다 40~60ms 넓었다). marker 창의 초과분은 **직접 잴 수 있으므로**
+		// (marker 폭 − offset 폭) 추정하지 않고 실측값을 쓴다.
+		const markerExcess = boundaries.reduce((worst, b) => {
+			if (!useMarker(b) || !hasOffset(b)) return worst;
+			const d = (b.markerFinishedMono! - b.markerStartedMono!) - (b.finishedMono - b.startedMono);
+			return d > worst ? d : worst;
+		}, 0);
+		if (markerExcess > 0) return markerExcess;
+
 		if (!clockSync) return 0;
 		let worst = 0;
 		for (const id of activeJobIds) {
@@ -1242,9 +1272,9 @@
 			return lo;
 		};
 		return usableBoundaries.map((b, i) => {
-			const from = lowerBound(boundaryStart(b));
+			const from = lowerBound(b.startedMono);
 			let to = from;
-			while (to < sorted.length && sorted[to].time <= boundaryFinish(b)) to++;
+			while (to < sorted.length && sorted[to].time <= b.finishedMono) to++;
 			const inRange = sorted.slice(from, to);
 			// latency 는 완료 이벤트에만 실린다 (send 행의 dtoc 는 0).
 			const lat = inRange.map(e => e.dtoc).filter(v => v > 0).sort((a, c) => a - c);
@@ -1272,7 +1302,7 @@
 				colorIndex: colorIndexOf(b),
 				label: behaviorLabel(b),
 				type: b.type,
-				durationSec: boundaryFinish(b) - boundaryStart(b),
+				durationSec: b.finishedMono - b.startedMono,
 				events: inRange.length,
 				readBytes,
 				writeBytes,
@@ -1304,9 +1334,8 @@
 		if (usableBoundaries.length === 0) return { t0: 0, t1: 1 };
 		let t0 = Infinity, t1 = -Infinity;
 		for (const b of usableBoundaries) {
-			const s0 = boundaryStart(b), f0 = boundaryFinish(b);
-			if (s0 < t0) t0 = s0;
-			if (f0 > t1) t1 = f0;
+			if (b.startedMono < t0) t0 = b.startedMono;
+			if (b.finishedMono > t1) t1 = b.finishedMono;
 		}
 		// 폭이 0 이면 나눗셈이 깨진다 (스텝 하나가 순간에 끝난 경우).
 		if (!(t1 > t0)) t1 = t0 + 1;
@@ -1325,7 +1354,7 @@
 		if (edgeUncertaintySec <= 0 || allBoundaries.length === 0) return false;
 		let shortest = Infinity;
 		for (const b of allBoundaries) {
-			const d = boundaryFinish(b) - boundaryStart(b);
+			const d = b.finishedMono - b.startedMono;
 			if (d > 0 && d < shortest) shortest = d;
 		}
 		if (!isFinite(shortest)) return false;
