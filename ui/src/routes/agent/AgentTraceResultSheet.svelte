@@ -197,8 +197,11 @@
 	const usableMonoCount = $derived(boundaries.filter(boundaryTrusted).length);
 	const boundariesUnusable = $derived(boundaries.length > 0 && usableMonoCount === 0);
 	// 구간이 marker 폴백으로 채워졌나 — 화면이 출처를 알려줄 때 쓴다.
+	// ⚠ **화면에 실제로 그려지는 구간** 기준이어야 한다. 배너의 목적이 "지금 보이는
+	// 구간을 믿어도 되는 근거" 라서, loop 필터로 marker 구간이 빠졌는데도 배너가 뜨면
+	// 근거가 아니라 오해가 된다.
 	const usesMarkerFallback = $derived(
-		boundaries.some(b => b.boundarySource === 'trace_marker' && b.finishedMono > b.startedMono)
+		allBoundaries.some(b => b.boundarySource === 'trace_marker')
 	);
 	const hasBehavior = $derived(allBoundaries.length > 0);
 

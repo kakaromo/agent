@@ -128,11 +128,14 @@
 
 	/** marker 후보를 프로파일 초안으로 — counters/sections 구조로 넣는다. */
 	function seedProfileFromMarker(c: MarkerCandidateLike) {
-		form.name = form.name || `${c.name} profile`;
-		form.source = 'marker';
-		const cur: MarkerPatterns = (() => {
-			try { return JSON.parse(form.patternsJson) as MarkerPatterns; } catch { return {}; }
-		})();
+		// ⚠ **초안을 깨끗이 비우고 시작한다.** Cancel 은 form 을 안 지우므로, 편집하다
+		// 취소한 뒤 여기로 오면 직전 프로파일의 이름·설명·soc 와 **죽은 logcat 패턴**
+		// (marks/series)이 그대로 섞여 저장된다. marker 검증기는 counters/sections 만
+		// 보므로 그 잔재를 못 잡고 조용히 통과시킨다.
+		form = { name: `${c.name} profile`, description: '', runtime: 'qnn', soc: '',
+			source: 'marker', patternsJson: '{}' };
+		editingId = null;
+		const cur: MarkerPatterns = {};
 		const key = c.name.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'metric';
 		if (c.kind === 'counter') {
 			cur.counters = [...(cur.counters ?? []), { key, name: c.name }];
@@ -140,9 +143,6 @@
 			cur.sections = [...(cur.sections ?? []), { key, name: c.name }];
 		}
 		form.patternsJson = JSON.stringify(cur, null, 2);
-		// ⚠ 새로 만드는 흐름이므로 editingId 를 반드시 끊는다. 안 그러면 직전에
-		// 편집하던 프로파일을 **덮어쓴다** (버튼은 "만들기" 인데 수정이 된다).
-		editingId = null;
 		stage = 'profiles';
 		editOpen = true;
 		toast.info(`"${c.name}" 을 초안에 넣었습니다.`, { description: c.samples[0]?.slice(0, 120) });
@@ -151,14 +151,13 @@
 
 	/** 후보를 프로파일 초안으로 옮긴다 — 사람이 확인한 것만 저장된다. */
 	function seedProfileFromTag(tag: string, samples: string[]) {
-		form.name = form.name || `${tag} profile`;
-		const tags = new Set((parsePatterns(form.patternsJson).tags ?? []).filter(Boolean));
-		tags.add(tag);
+		// ⚠ marker 쪽과 같은 이유 — 초안을 비우고 시작한다 (Cancel 이 form 을 안 지운다).
+		form = { name: `${tag} profile`, description: '', runtime: 'qnn', soc: '',
+			source: 'logcat', patternsJson: JSON.stringify(examplePatterns, null, 2) };
+		editingId = null;
 		const cur = parsePatterns(form.patternsJson);
-		cur.tags = [...tags];
+		cur.tags = [tag];
 		form.patternsJson = JSON.stringify(cur, null, 2);
-		editingId = null; // 위와 같은 이유 — 편집 중이던 프로파일을 덮어쓰지 않게.
-		form.source = 'logcat';
 		stage = 'profiles';
 		editOpen = true;
 		toast.info(`태그 "${tag}" 를 초안에 넣었습니다. 원문을 보고 정규식을 채우세요.`, {

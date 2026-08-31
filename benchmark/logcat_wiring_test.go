@@ -224,11 +224,15 @@ func TestBothScenarioLoopsMarkStepBoundary(t *testing.T) {
 	}
 }
 
-// ⚠⚠ marker 쓰기는 **offset 이 못 쓸 때만** 해야 한다.
-// 스텝마다 adb 왕복 2회를 더하는데, 이 도구는 측정 도구라 그 왕복 자체가 측정
-// 대상을 흔든다. 정상 기기에서는 offset 값이 쓰이고 marker 는 버려지므로
-// 부하만 늘고 얻는 게 없다.
-func TestMarkStepBeginSkipsWhenOffsetUsable(t *testing.T) {
+// ⚠⚠ marker 쓰기에 **스텝 시점 게이트를 두면 안 된다.**
+//
+// 한때 `HostToDeviceMonotonic` 의 ok 로 걸렀는데 드리프트 케이스를 정확히 빗나갔다:
+// ClockSync.Stop 은 StopTrace 에서야 채워져서 스텝 중에는 Usable() 이 항상 true 다.
+// 그래서 marker 를 안 쓰는데, 종료 후 drift 로 usable=false 가 되면 UI 가 offset
+// 구간을 거부한다 → **둘 다 없어 Behavior 가 통째로 사라진다.**
+//
+// 드리프트야말로 폴백이 가장 필요한 경우다(구간이 조용히 밀리는데 그래프는 정상).
+func TestMarkStepBeginHasNoStepTimeGate(t *testing.T) {
 	src := readScenarioSource(t)
 	i := strings.Index(src, "func (o *Orchestrator) markStepBegin(")
 	if i < 0 {
@@ -238,8 +242,9 @@ func TestMarkStepBeginSkipsWhenOffsetUsable(t *testing.T) {
 	if j := strings.Index(body, "\nfunc "); j > 0 {
 		body = body[:j]
 	}
-	if !strings.Contains(body, "HostToDeviceMonotonic(") {
-		t.Error("offset 가용성을 안 보고 무조건 marker 를 쓴다 — 정상 기기에도 " +
-			"스텝마다 adb 왕복 2회가 추가되어 측정 대상을 흔든다")
+	// 조기 반환 게이트가 다시 들어오면 드리프트 커버가 사라진다.
+	if strings.Contains(body, "HostToDeviceMonotonic(") {
+		t.Error("스텝 시점에 offset 가용성으로 게이트하고 있다 — 그 시점엔 drift 를 알 수 " +
+			"없어(Stop==nil) 항상 usable 로 나오고, 정작 드리프트 잡에서 marker 가 안 남는다")
 	}
 }

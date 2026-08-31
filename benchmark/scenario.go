@@ -1226,18 +1226,24 @@ func (o *Orchestrator) markStepBegin(ctx context.Context, traceJobID string, es 
 	if o.traceMgr == nil || traceJobID == "" {
 		return mk
 	}
-	// ⚠⚠ **offset 이 멀쩡하면 기기에 쓰지 않는다.**
+	// ⚠⚠ **게이트를 두지 않는다** — 스텝 시점에는 이 잡을 나중에 믿을 수 있을지 알 수 없다.
 	//
-	// marker 쓰기는 스텝마다 adb 왕복 2회(begin/end)를 더한다. 이 도구는 측정 도구라
-	// 그 왕복 자체가 **측정 대상을 흔든다** — 정상 기기에서는 offset 경로가 쓰이고
-	// marker 값은 applyMarkerFallback 에서 버려지므로, 부하만 늘고 얻는 게 없다.
+	// 한때 `HostToDeviceMonotonic` 의 ok 로 걸렀는데(정상 기기의 adb 왕복을 아끼려고),
+	// 그게 **드리프트 케이스를 정확히 빗나갔다.** ClockSync.Stop 은 StopTrace 에서야
+	// 채워지므로(tracer.go:412) 스텝 실행 중에는 `Stop == nil` 이라 Usable() 이 항상
+	// true 로 조기 반환한다(clockoffset.go:168). 즉:
 	//
-	// 판정은 HostToDeviceMonotonic 의 ok 로 한다 (잡 조회 + ClockSync.Usable() 을
-	// 그대로 태우는 유일한 경로다). false 면 그 잡은 구간 분할이 비활성화될 상황이라
-	// marker 폴백이 실제로 쓰인다.
-	if _, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, time.Now().UnixMilli()); ok {
-		return mk
-	}
+	//   스텝 중  : usable=true  → marker 안 씀
+	//   종료 후  : drift 판정 → usable=false → offset 구간은 UI 가 거부
+	//   결과     : **marker 도 없고 offset 도 못 써서 Behavior 가 통째로 사라진다**
+	//
+	// 드리프트(수집 중 NTP·슬립으로 시계가 움직임)야말로 폴백이 가장 필요한 경우다 —
+	// 구간이 조용히 밀리는데 그래프는 정상으로 보이기 때문이다. 그걸 못 덮으면 이
+	// 폴백의 존재 이유가 절반 사라진다.
+	//
+	// 비용(스텝당 adb 왕복 2회)은 받아들인다. 대신 markerTimeout 을 짧게 두고
+	// 실패가 시나리오를 막지 않게 한다. 스텝 경계는 어차피 스텝 사이의 유휴 지점이라
+	// IO 가 도는 구간 한복판에 끼어들지 않는다.
 	if t, ok := o.traceMgr.WriteBoundaryMarker(ctx, traceJobID, markerKindBegin, describeStep(es.step)); ok {
 		mk.begin = t
 	}

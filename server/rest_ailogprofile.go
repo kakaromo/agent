@@ -128,9 +128,13 @@ func statusForProfileErr(err error) int {
 	// ⚠ marker 검증 메시지도 포함해야 한다. 빠뜨리면 사용자 패턴 문제인데 500 이 나가고,
 	// 그러면 사용자는 서버 탓으로 읽어 **자기 패턴을 고칠 생각을 못 한다**
 	// (이 함수가 존재하는 이유가 정확히 그것이다).
+	// ⚠ 문구는 **검증기 고유의 것**만 넣는다. "있어야 한다"/"비어 있다" 같은 일반
+	// 한국어를 넣으면 나중에 DB·드라이버 에러가 우연히 그 낱말을 담았을 때 400 이 나가,
+	// 사용자가 서버 문제를 자기 정규식 탓으로 오해하며 헤맨다 — 이 함수가 막으려는 것의
+	// 정확히 반대다.
 	for _, s := range []string{
 		"required", "regex", "캡처 그룹", "중복", "patternsJson",
-		"있어야 한다", "비어 있다",
+		"counters 또는 sections", "key 가 비어 있다", "name 또는 regex",
 	} {
 		if strings.Contains(msg, s) {
 			return http.StatusBadRequest
