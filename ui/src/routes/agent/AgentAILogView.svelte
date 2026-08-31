@@ -15,8 +15,10 @@
 	import {
 		fetchAILogProfiles, createAILogProfile, updateAILogProfile, deleteAILogProfile,
 		exploreLogcat, parseLogcat,
+		exploreMarkers, parseMarkers,
 		type AILogProfile, type AILogPatterns,
-		type LogcatExploreResult, type LogcatParseResult
+		type LogcatExploreResult, type LogcatParseResult,
+		type MarkerExploreResult, type MarkerPatterns
 	} from '$lib/api/agent.js';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -39,6 +41,21 @@
 
 	type Stage = 'explore' | 'profiles' | 'measure';
 	let stage = $state<Stage>('explore');
+
+	// ── 지표 소스 ──
+	//
+	// ⚠ 두 경로가 다 필요한 이유: 런타임이 **stderr 로 뱉으면 logcat 에 안 남는다**
+	// (llama.cpp `llama_print_timings()`). trace_marker 는 파일 write 라 그 제약이 없고,
+	// IO 트레이스와 같은 clock 이라 축 변환도 필요 없다.
+	//
+	// ⚠ 두 소스는 패턴 구조가 다르다(marks/series vs counters/sections). 프로파일에
+	// source 가 박혀 있고 서버가 파싱 전에 막지만, 화면도 소스에 맞는 것만 보여준다.
+	type Source = 'logcat' | 'marker';
+	let source = $state<Source>('logcat');
+	/** marker 는 trace 잡의 trace.log 를 읽는다 (logcat job 이 아니다). */
+	let traceJobId = $state('');
+	let markerRes = $state<MarkerExploreResult | null>(null);
+	let expandedName = $state<string | null>(null);
 
 	// ── 공통 입력 (로그 출처) ──
 	let sourceJobId = $state(logcatJobId ?? '');
@@ -63,13 +80,16 @@
 	let runTo = $state('');
 	let expandedTag = $state<string | null>(null);
 
+	const numOf = (s: string) => { const v = parseFloat(s); return isNaN(v) ? undefined : v; };
+
 	async function runExplore() {
+		if (source === 'marker') { await runExploreMarker(); return; }
 		const src = sourcePayload();
 		if (!src) { toast.error('logcat job id 또는 파일 경로가 필요합니다'); return; }
 		exploring = true;
 		exploreRes = null;
 		try {
-			const num = (s: string) => { const v = parseFloat(s); return isNaN(v) ? undefined : v; };
+			const num = numOf;
 			const { path, result } = await exploreLogcat({
 				...src,
 				idleFrom: num(idleFrom), idleTo: num(idleTo),
@@ -84,6 +104,47 @@
 			exploring = false;
 		}
 	}
+
+	async function runExploreMarker() {
+		const tid = traceJobId.trim();
+		if (!tid) { toast.error('trace job id 가 필요합니다'); return; }
+		exploring = true;
+		markerRes = null;
+		try {
+			const { path, result } = await exploreMarkers({
+				traceJobId: tid,
+				idleFrom: numOf(idleFrom), idleTo: numOf(idleTo),
+				runFrom: numOf(runFrom), runTo: numOf(runTo)
+			});
+			explorePath = path;
+			markerRes = result;
+			if (result.candidates.length === 0) toast.warning('후보를 찾지 못했습니다');
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '탐색 실패');
+		} finally {
+			exploring = false;
+		}
+	}
+
+	/** marker 후보를 프로파일 초안으로 — counters/sections 구조로 넣는다. */
+	function seedProfileFromMarker(c: MarkerCandidateLike) {
+		form.name = form.name || `${c.name} profile`;
+		form.source = 'marker';
+		const cur: MarkerPatterns = (() => {
+			try { return JSON.parse(form.patternsJson) as MarkerPatterns; } catch { return {}; }
+		})();
+		const key = c.name.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'metric';
+		if (c.kind === 'counter') {
+			cur.counters = [...(cur.counters ?? []), { key, name: c.name }];
+		} else {
+			cur.sections = [...(cur.sections ?? []), { key, name: c.name }];
+		}
+		form.patternsJson = JSON.stringify(cur, null, 2);
+		stage = 'profiles';
+		editOpen = true;
+		toast.info(`"${c.name}" 을 초안에 넣었습니다.`, { description: c.samples[0]?.slice(0, 120) });
+	}
+	type MarkerCandidateLike = { name: string; kind: string; samples: string[] };
 
 	/** 후보를 프로파일 초안으로 옮긴다 — 사람이 확인한 것만 저장된다. */
 	function seedProfileFromTag(tag: string, samples: string[]) {
@@ -113,8 +174,35 @@
 	const emptyPatterns: AILogPatterns = { tags: [], marks: [], series: [] };
 	let form = $state({
 		name: '', description: '', runtime: 'qnn', soc: '',
+		// source — 저장 시 서버가 이 값으로 검증기를 고른다 (marks/series vs counters/sections).
+		source: 'logcat' as Source,
 		patternsJson: JSON.stringify(emptyPatterns, null, 2)
 	});
+
+	function markerPatternIssues(): string[] {
+		const out: string[] = [];
+		let p: MarkerPatterns;
+		try { p = JSON.parse(form.patternsJson) as MarkerPatterns; }
+		catch (e) { return [`JSON 형식이 아닙니다: ${e instanceof Error ? e.message : ''}`]; }
+		const counters = p.counters ?? [], sections = p.sections ?? [];
+		if (counters.length === 0 && sections.length === 0)
+			out.push('counters 또는 sections 중 최소 하나는 있어야 합니다 (없으면 매칭이 항상 0건입니다)');
+		const seen = new Set<string>();
+		for (const m of [...counters, ...sections]) {
+			if (!m.key) out.push('key 가 빈 항목이 있습니다');
+			else if (seen.has(m.key)) out.push(`key 중복: ${m.key} — 나중 것이 앞의 것을 덮어씁니다`);
+			else seen.add(m.key);
+			if (!m.name && !m.regex) {
+				out.push(`${m.key || '(이름없음)'}: name 또는 regex 중 하나는 있어야 합니다`);
+				continue;
+			}
+			if (m.regex) {
+				try { new RegExp(m.regex); }
+				catch { out.push(`${m.key}: 정규식이 잘못됐습니다`); }
+			}
+		}
+		return out;
+	}
 
 	function parsePatterns(s: string): AILogPatterns {
 		try { return JSON.parse(s) as AILogPatterns; } catch { return { ...emptyPatterns }; }
@@ -123,6 +211,9 @@
 	/** 저장 전에 화면에서 먼저 잡아준다 — 서버도 막지만 왕복 전에 알려주는 편이 낫다. */
 	const patternIssues = $derived.by(() => {
 		const out: string[] = [];
+		// ⚠ marker 는 검증 항목이 다르다 — `C|이름|값` 이라 **캡처 그룹이 필요 없고**,
+		// 대신 "무엇을 찾을지"(name 또는 regex)가 있어야 한다.
+		if (form.source === 'marker') return markerPatternIssues();
 		let p: AILogPatterns;
 		try { p = JSON.parse(form.patternsJson) as AILogPatterns; }
 		catch (e) { return [`JSON 형식이 아닙니다: ${e instanceof Error ? e.message : ''}`]; }
@@ -164,7 +255,8 @@
 		let pretty = p.patternsJson;
 		try { pretty = JSON.stringify(JSON.parse(p.patternsJson), null, 2); } catch { /* 원문 유지 */ }
 		form = { name: p.name, description: p.description ?? '', runtime: p.runtime,
-			soc: p.soc ?? '', patternsJson: pretty };
+			soc: p.soc ?? '', source: (p.source === 'marker' ? 'marker' : 'logcat') as Source,
+			patternsJson: pretty };
 		editOpen = true;
 	}
 
@@ -173,7 +265,9 @@
 		saving = true;
 		try {
 			const data = { name: form.name.trim(), description: form.description.trim(),
-				runtime: form.runtime.trim(), soc: form.soc.trim(), patternsJson: form.patternsJson };
+				runtime: form.runtime.trim(), soc: form.soc.trim(),
+				// ⚠ 반드시 보낸다 — 빠뜨리면 marker 패턴이 logcat 으로 저장돼 측정 시 0건이 된다.
+				source: form.source, patternsJson: form.patternsJson };
 			if (editingId == null) await createAILogProfile(data);
 			else await updateAILogProfile(editingId, data);
 			toast.success('저장했습니다');
@@ -209,13 +303,22 @@
 	let selectedProfileId = $state<number | null>(null);
 
 	async function runMeasure() {
-		const src = sourcePayload();
-		if (!src) { toast.error('logcat job id 또는 파일 경로가 필요합니다'); return; }
 		if (selectedProfileId == null) { toast.error('프로파일을 고르세요'); return; }
+		// marker 는 trace 잡을, logcat 은 logcat 잡/경로를 쓴다.
+		let call: () => Promise<{ result: LogcatParseResult }>;
+		if (source === 'marker') {
+			const tid = traceJobId.trim();
+			if (!tid) { toast.error('trace job id 가 필요합니다'); return; }
+			call = () => parseMarkers({ traceJobId: tid, profileId: selectedProfileId! });
+		} else {
+			const src = sourcePayload();
+			if (!src) { toast.error('logcat job id 또는 파일 경로가 필요합니다'); return; }
+			call = () => parseLogcat({ ...src, profileId: selectedProfileId! });
+		}
 		measuring = true;
 		parseRes = null;
 		try {
-			const { result } = await parseLogcat({ ...src, profileId: selectedProfileId });
+			const { result } = await call();
 			parseRes = result;
 			if (result.totalHits === 0) toast.error('매칭 0건 — 아래 진단을 확인하세요');
 			else if (result.partial) toast.warning('일부 패턴만 맞았습니다');
@@ -250,28 +353,54 @@
 		</div>
 	</div>
 
-	<!-- 로그 출처 (모든 단계 공통) -->
+	<!-- 지표 출처 (모든 단계 공통) -->
 	<div class="shrink-0 rounded border bg-muted/30 p-2">
 		<div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-			<InfoIcon class="size-3" /> 로그 출처
+			<InfoIcon class="size-3" /> 지표 출처
 		</div>
-		<div class="flex flex-wrap items-center gap-2">
-			<input
-				class="h-7 w-64 rounded border bg-background px-2 text-xs"
-				placeholder="logcat job id"
-				bind:value={sourceJobId}
-			/>
-			<span class="text-[11px] text-muted-foreground">또는</span>
-			<input
-				class="h-7 flex-1 min-w-48 rounded border bg-background px-2 text-xs font-mono"
-				placeholder="logcat.log 파일 경로 (수집 폴더 안)"
-				bind:value={sourcePath}
-			/>
+		<div class="mb-1.5 flex items-center gap-1">
+			{#each [['logcat', 'logcat'], ['marker', 'trace_marker']] as [key, label] (key)}
+				<button
+					class="rounded px-2 py-0.5 text-[11px] {source === key
+						? 'bg-primary text-primary-foreground'
+						: 'bg-muted text-muted-foreground hover:bg-muted/70'}"
+					onclick={() => (source = key as Source)}
+				>{label}</button>
+			{/each}
 		</div>
-		<p class="mt-1 text-[10px] text-muted-foreground">
-			시나리오 잡 파라미터에 <code class="rounded bg-muted px-1">logcat=on</code> 을 넣으면 수집됩니다.
-			태그를 아직 모르면 <code class="rounded bg-muted px-1">logcat_tags</code> 를 비워 넓게 받으세요.
-		</p>
+		{#if source === 'marker'}
+			<div class="flex flex-wrap items-center gap-2">
+				<input
+					class="h-7 w-72 rounded border bg-background px-2 text-xs font-mono"
+					placeholder="trace job id"
+					bind:value={traceJobId}
+				/>
+			</div>
+			<p class="mt-1 text-[10px] text-muted-foreground">
+				trace 수집의 <code class="rounded bg-muted px-1">trace.log</code> 에서 읽습니다 —
+				런타임이 <code class="rounded bg-muted px-1">ATrace_setCounter()</code> 로 찍은 값입니다.
+				<strong>logcat 에 안 남는 경우</strong>(런타임이 stderr 로 출력)에도 여기엔 남을 수 있고,
+				IO 트레이스와 시각 축이 같아 구간과 바로 겹쳐 볼 수 있습니다.
+			</p>
+		{:else}
+			<div class="flex flex-wrap items-center gap-2">
+				<input
+					class="h-7 w-64 rounded border bg-background px-2 text-xs"
+					placeholder="logcat job id"
+					bind:value={sourceJobId}
+				/>
+				<span class="text-[11px] text-muted-foreground">또는</span>
+				<input
+					class="h-7 flex-1 min-w-48 rounded border bg-background px-2 text-xs font-mono"
+					placeholder="logcat.log 파일 경로 (수집 폴더 안)"
+					bind:value={sourcePath}
+				/>
+			</div>
+			<p class="mt-1 text-[10px] text-muted-foreground">
+				시나리오 잡 파라미터에 <code class="rounded bg-muted px-1">logcat=on</code> 을 넣으면 수집됩니다.
+				태그를 아직 모르면 <code class="rounded bg-muted px-1">logcat_tags</code> 를 비워 넓게 받으세요.
+			</p>
+		{/if}
 	</div>
 
 	<!-- ① 탐색 -->
@@ -311,7 +440,73 @@
 				</div>
 			</div>
 
-			{#if exploreRes}
+			{#if source === 'marker' && markerRes}
+				<div class="min-h-0 flex-1 overflow-auto rounded border">
+					<div class="sticky top-0 z-10 border-b bg-background p-2 text-[11px]">
+						<span class="text-muted-foreground">
+							marker {markerRes.markerLines.toLocaleString()}줄 · 이름 {markerRes.distinctNames.toLocaleString()}종
+						</span>
+						{#if explorePath}
+							<span class="ml-2 font-mono text-[10px] text-muted-foreground">{explorePath}</span>
+						{/if}
+					</div>
+
+					{#if markerRes.weakOnly}
+						<!-- ⚠ logcat 과 같은 경고. 목록이 있다는 것만으로 답이 있다고 읽히면 안 된다. -->
+						<div class="m-2 rounded border border-amber-500/50 bg-amber-500/10 p-2 text-[11px]">
+							<div class="flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+								<AlertTriangleIcon class="size-3" /> LLM 고유 신호가 하나도 없습니다
+							</div>
+							<div class="mt-0.5 text-[10px] text-muted-foreground">
+								아래 후보는 전부 무관한 시스템 카운터일 수 있습니다. 값 범위와 원문을 보고
+								판단하세요 — <strong>토큰 단위(tok/s, ms/tok)가 안 보이면 LLM 이 아닐 가능성이 높습니다.</strong>
+							</div>
+						</div>
+					{/if}
+					{#each markerRes.diagnosis as d, i (i)}
+						<div class="mx-2 mt-1 text-[10px] text-muted-foreground">· {d}</div>
+					{/each}
+
+					{#each markerRes.candidates as c, i (i)}
+						<div class="border-b px-2 py-1.5 last:border-b-0">
+							<div class="flex items-center gap-2">
+								<button
+									class="flex items-center gap-1 text-left text-xs font-medium hover:underline"
+									onclick={() => (expandedName = expandedName === c.name ? null : c.name)}
+								>
+									<ChevronDownIcon class="size-3 {expandedName === c.name ? '' : '-rotate-90'}" />
+									<span class="font-mono">{c.name}</span>
+								</button>
+								<span class="rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.kind}</span>
+								{#if c.llmSignal}
+									<span class="rounded bg-emerald-500/15 px-1 text-[10px] text-emerald-700 dark:text-emerald-400">LLM 신호</span>
+								{/if}
+								{#if c.onlyDuringRun}
+									<span class="rounded bg-sky-500/15 px-1 text-[10px] text-sky-700 dark:text-sky-400">추론 구간에만</span>
+								{/if}
+								<span class="ml-auto text-[10px] text-muted-foreground">
+									{c.count.toLocaleString()}회
+									{#if c.hasValue} · {c.min}~{c.max}{/if}
+								</span>
+							</div>
+							{#if expandedName === c.name}
+								<div class="mt-1 space-y-1 rounded bg-muted/40 p-1.5">
+									<div class="text-[10px] text-muted-foreground">원문 샘플 — 이 줄을 보고 판단하세요</div>
+									{#each c.samples as sm, si (si)}
+										<pre class="overflow-x-auto whitespace-pre-wrap break-all rounded bg-background/70 p-1.5 text-[10px] font-mono leading-relaxed">{sm}</pre>
+									{/each}
+									<button
+										class="flex h-6 items-center gap-1 rounded border px-2 text-[10px] hover:bg-muted"
+										onclick={() => seedProfileFromMarker(c)}
+									>
+										<PlusIcon class="size-3" /> 이 이름으로 프로파일 만들기
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else if source !== 'marker' && exploreRes}
 				<div class="min-h-0 flex-1 overflow-auto rounded border">
 					<!-- 요약 -->
 					<div class="sticky top-0 z-10 border-b bg-background p-2 text-[11px]">
