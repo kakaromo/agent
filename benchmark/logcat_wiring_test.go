@@ -223,3 +223,23 @@ func TestBothScenarioLoopsMarkStepBoundary(t *testing.T) {
 		t.Error("markEnd 호출이 2곳 미만 — begin 만 찍힌 구간은 폴백에 쓰이지 않는다")
 	}
 }
+
+// ⚠⚠ marker 쓰기는 **offset 이 못 쓸 때만** 해야 한다.
+// 스텝마다 adb 왕복 2회를 더하는데, 이 도구는 측정 도구라 그 왕복 자체가 측정
+// 대상을 흔든다. 정상 기기에서는 offset 값이 쓰이고 marker 는 버려지므로
+// 부하만 늘고 얻는 게 없다.
+func TestMarkStepBeginSkipsWhenOffsetUsable(t *testing.T) {
+	src := readScenarioSource(t)
+	i := strings.Index(src, "func (o *Orchestrator) markStepBegin(")
+	if i < 0 {
+		t.Fatal("markStepBegin 을 찾지 못했다 — 테스트가 낡았다")
+	}
+	body := src[i:]
+	if j := strings.Index(body, "\nfunc "); j > 0 {
+		body = body[:j]
+	}
+	if !strings.Contains(body, "HostToDeviceMonotonic(") {
+		t.Error("offset 가용성을 안 보고 무조건 marker 를 쓴다 — 정상 기기에도 " +
+			"스텝마다 adb 왕복 2회가 추가되어 측정 대상을 흔든다")
+	}
+}

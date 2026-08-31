@@ -140,6 +140,9 @@
 			cur.sections = [...(cur.sections ?? []), { key, name: c.name }];
 		}
 		form.patternsJson = JSON.stringify(cur, null, 2);
+		// ⚠ 새로 만드는 흐름이므로 editingId 를 반드시 끊는다. 안 그러면 직전에
+		// 편집하던 프로파일을 **덮어쓴다** (버튼은 "만들기" 인데 수정이 된다).
+		editingId = null;
 		stage = 'profiles';
 		editOpen = true;
 		toast.info(`"${c.name}" 을 초안에 넣었습니다.`, { description: c.samples[0]?.slice(0, 120) });
@@ -154,6 +157,8 @@
 		const cur = parsePatterns(form.patternsJson);
 		cur.tags = [...tags];
 		form.patternsJson = JSON.stringify(cur, null, 2);
+		editingId = null; // 위와 같은 이유 — 편집 중이던 프로파일을 덮어쓰지 않게.
+		form.source = 'logcat';
 		stage = 'profiles';
 		editOpen = true;
 		toast.info(`태그 "${tag}" 를 초안에 넣었습니다. 원문을 보고 정규식을 채우세요.`, {
@@ -245,8 +250,12 @@
 
 	function openCreate() {
 		editingId = null;
-		form = { name: '', description: '', runtime: 'qnn', soc: '',
-			patternsJson: JSON.stringify(examplePatterns, null, 2) };
+		// ⚠ source 를 빠뜨리면 undefined 가 되어 marker 패턴이 logcat 규칙으로 검증되고
+		// (거부됨), 저장 시엔 서버가 logcat 으로 정규화해 **측정 시 0건**이 된다.
+		// 현재 고른 출처를 그대로 물려주고 예시도 그쪽 형식으로 넣는다.
+		form = { name: '', description: '', runtime: 'qnn', soc: '', source,
+			patternsJson: JSON.stringify(
+				source === 'marker' ? exampleMarkerPatterns : examplePatterns, null, 2) };
 		editOpen = true;
 	}
 
@@ -295,6 +304,15 @@
 			{ key: 'ttft_ms', regex: 'TTFT ([0-9.]+) ms', unit: 'ms' },
 			{ key: 'tpot_ms', regex: 'decode ([0-9.]+) ms/tok', unit: 'ms' }
 		]
+	};
+
+	/** marker 예시 — `C|이름|값` 이라 캡처 그룹이 없다. 이름만 적으면 된다. */
+	const exampleMarkerPatterns = {
+		counters: [
+			{ key: 'ttft_ms', name: 'llm.ttft_ms', unit: 'ms' },
+			{ key: 'tpot_ms', name: 'decode_ms_per_token', unit: 'ms' }
+		],
+		sections: [{ key: 'prefill', name: 'prefill' }]
 	};
 
 	// ── ③ 측정 ──

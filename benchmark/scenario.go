@@ -1226,6 +1226,18 @@ func (o *Orchestrator) markStepBegin(ctx context.Context, traceJobID string, es 
 	if o.traceMgr == nil || traceJobID == "" {
 		return mk
 	}
+	// ⚠⚠ **offset 이 멀쩡하면 기기에 쓰지 않는다.**
+	//
+	// marker 쓰기는 스텝마다 adb 왕복 2회(begin/end)를 더한다. 이 도구는 측정 도구라
+	// 그 왕복 자체가 **측정 대상을 흔든다** — 정상 기기에서는 offset 경로가 쓰이고
+	// marker 값은 applyMarkerFallback 에서 버려지므로, 부하만 늘고 얻는 게 없다.
+	//
+	// 판정은 HostToDeviceMonotonic 의 ok 로 한다 (잡 조회 + ClockSync.Usable() 을
+	// 그대로 태우는 유일한 경로다). false 면 그 잡은 구간 분할이 비활성화될 상황이라
+	// marker 폴백이 실제로 쓰인다.
+	if _, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, time.Now().UnixMilli()); ok {
+		return mk
+	}
 	if t, ok := o.traceMgr.WriteBoundaryMarker(ctx, traceJobID, markerKindBegin, describeStep(es.step)); ok {
 		mk.begin = t
 	}

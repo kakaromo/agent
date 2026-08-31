@@ -109,9 +109,14 @@ func (m *Manager) WriteBoundaryMarker(ctx context.Context, traceJobID string,
 	//
 	// 실패해도 uptime 은 찍히게 `;` 로 잇지 않고, marker 실패를 알 수 있도록
 	// 종료 코드를 함께 싣는다.
+	// ⚠ 라벨을 format 문자열에 넣지 않는다. `%` 가 printf 지시자로 먹혀 **조용히
+	// 깨진다** — 실기기 확인: `printf 'AGENT_BOUNDARY|B|50% off\n'` → `500ff` 이고
+	// rc=0 이라 실패로도 안 잡힌다. 스텝 이름엔 `%` 가 충분히 들어온다("50% 할인").
+	// 그래서 `%s` 인자로 넘긴다.
 	cmd := fmt.Sprintf(
-		`printf '%s|%s|%s\n' > %s/trace_marker 2>/dev/null; rc=$?; cut -d" " -f1 /proc/uptime; echo "rc=$rc"`,
-		markerPrefix, kind, sanitizeMarkerLabel(label), tracingDir)
+		`printf '%%s|%%s|%%s\n' %s %s %s > %s/trace_marker 2>/dev/null; rc=$?; `+
+			`cut -d" " -f1 /proc/uptime; echo "rc=$rc"`,
+		shellQuote(markerPrefix), shellQuote(kind), shellQuote(sanitizeMarkerLabel(label)), tracingDir)
 
 	out, serr := md.Device.Shell(cctx, cmd)
 	if serr != nil {
@@ -146,6 +151,15 @@ func parseMarkerOutput(out string) (float64, bool) {
 		return 0, false
 	}
 	return uptime, true
+}
+
+// shellQuote — 셸 인자로 안전하게 감싼다.
+//
+// sanitizeMarkerLabel 이 따옴표류를 이미 걸러내지만, 인자 경로에서는 **공백이 있는
+// 라벨이 여러 인자로 쪼개지는** 문제가 남는다("스크롤 down ×4" → 3개 인자).
+// 작은따옴표로 감싸 한 인자로 만든다.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // sanitizeMarkerLabel — 라벨을 marker 한 줄에 안전하게 싣는다.

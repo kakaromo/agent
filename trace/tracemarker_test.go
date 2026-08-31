@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -95,5 +96,43 @@ func TestParseMarkerOutput(t *testing.T) {
 func TestMarkerPrefixIsDistinct(t *testing.T) {
 	if markerPrefix == "" || !strings.HasPrefix(markerPrefix, "AGENT") {
 		t.Errorf("markerPrefix=%q — 남의 marker 와 구분되는 접두사여야 한다", markerPrefix)
+	}
+}
+
+// ⚠⚠ 라벨은 printf **인자**로 넘겨야 한다. format 문자열에 넣으면 `%` 가 지시자로
+// 먹혀 조용히 깨진다 — 실기기 확인: `printf 'AGENT_BOUNDARY|B|50% off\n'` → `500ff`,
+// 게다가 rc=0 이라 실패로도 안 잡힌다. 스텝 이름엔 `%` 가 충분히 들어온다("50% 할인").
+func TestMarkerLabelNotInFormatString(t *testing.T) {
+	src, err := os.ReadFile("tracemarker.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	i := strings.Index(body, "cmd := fmt.Sprintf(")
+	if i < 0 {
+		t.Fatal("marker 명령 조립부를 찾지 못했다 — 테스트가 낡았다")
+	}
+	seg := body[i:]
+	if j := strings.Index(seg, "\n\n"); j > 0 {
+		seg = seg[:j]
+	}
+	// 라벨이 printf 인자 자리에 있어야 한다 (`%s` 지시자 + 인자 전달).
+	if !strings.Contains(seg, "%%s|%%s|%%s") {
+		t.Error("라벨이 printf format 문자열에 직접 들어간다 — `%` 가 포함된 라벨이 조용히 깨진다")
+	}
+	if !strings.Contains(seg, "shellQuote(") {
+		t.Error("인자를 셸 인용하지 않는다 — 공백이 있는 라벨이 여러 인자로 쪼개진다")
+	}
+}
+
+// 공백·따옴표가 있어도 한 인자로 묶여야 한다.
+func TestShellQuote(t *testing.T) {
+	if got := shellQuote("스크롤 down ×4"); got != `'스크롤 down ×4'` {
+		t.Errorf("shellQuote = %q", got)
+	}
+	// 작은따옴표가 들어오면 escape 되어야 셸이 안 깨진다.
+	got := shellQuote("a'b")
+	if !strings.HasPrefix(got, "'") || !strings.HasSuffix(got, "'") || strings.Contains(got, "a'b") {
+		t.Errorf("작은따옴표가 escape 되지 않았다: %q", got)
 	}
 }

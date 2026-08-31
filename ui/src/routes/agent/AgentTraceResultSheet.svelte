@@ -88,14 +88,25 @@
 		return true;
 	});
 
-	// ⚠ 예전엔 `!clockSyncUsable ? [] :` 로 전부 버렸다. 그러면 trace_marker 폴백으로
-	// 채운 구간(clockSync 는 못 믿지만 mono 는 커널이 직접 찍어 멀쩡하다)까지 같이
-	// 사라져 **Behavior 탭이 아예 안 뜬다.** 판정은 개별 구간의 mono 유효성으로 한다 —
-	// 아래 filter 가 이미 `finishedMono > startedMono && startedMono > 0` 을 본다.
+	// ⚠⚠ 판정은 **구간마다** 한다 — clockSync 하나로 전부 자르지도, 전부 통과시키지도 않는다.
+	//
+	//   offset 으로 채운 구간: clockSyncUsable 을 **반드시** 본다. mono 는 스텝이
+	//     끝나는 순간 시작 offset 으로 박히고 drift 는 StopTrace 에서야 드러나므로,
+	//     드리프트 잡은 **0 이 아닌 그럴듯한 값이 조용히 밀려 있다.**
+	//   trace_marker 로 채운 구간: 커널이 직접 찍은 값이라 clockSync 와 무관하다.
+	//     오히려 이 폴백은 **정의상 clockSyncUsable=false 일 때만** 동작하므로,
+	//     clockSync 로 자르면 폴백이 채운 구간을 100% 버리게 된다.
+	//
+	// 한때 이 조건을 통째로 뺐다가(폴백을 살리려고) 드리프트 잡의 밀린 구간이 경고 없이
+	// 그려지는 회귀를 만들었다. 두 경우는 성격이 달라 **같이 처리하면 한쪽이 반드시 틀린다.**
+	const boundaryTrusted = (b: StepBoundary): boolean =>
+		b.finishedMono > b.startedMono &&
+		b.startedMono > 0 &&
+		(b.boundarySource === 'trace_marker' || clockSyncUsable);
+
 	const allBoundaries = $derived(
 		boundaries.filter(b =>
-			b.finishedMono > b.startedMono &&
-			b.startedMono > 0 &&
+			boundaryTrusted(b) &&
 			!BOUNDARY_SKIP_TYPES.has(b.type) &&
 			(selectedLoop <= 0 || b.loopIndex === selectedLoop) &&
 			(selectedRepeat <= 0 || b.repeatIndex === selectedRepeat)
@@ -183,9 +194,7 @@
 	// 멀쩡한 상태다. 그때 이 배너를 띄우면 **실제로 있는 구간을 못 쓴다고 막는 셈**이라,
 	// 폴백을 만들어 둔 의미가 사라진다(백엔드는 채웠는데 화면만 거부).
 	// 그래서 판정 기준은 "쓸 수 있는 mono 가 하나라도 있는가" 하나로 둔다.
-	const usableMonoCount = $derived(
-		boundaries.filter(b => b.finishedMono > b.startedMono && b.startedMono > 0).length
-	);
+	const usableMonoCount = $derived(boundaries.filter(boundaryTrusted).length);
 	const boundariesUnusable = $derived(boundaries.length > 0 && usableMonoCount === 0);
 	// 구간이 marker 폴백으로 채워졌나 — 화면이 출처를 알려줄 때 쓴다.
 	const usesMarkerFallback = $derived(
