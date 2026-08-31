@@ -42,7 +42,7 @@ sqliteDB, err = sqlitedb.Open(dbPath)
 
 - 기본 경로: `$HOME/.agent-standalone/agent.db`
 - override: `--db-path` 또는 `[standalone] db_path = "..."`
-- 7 테이블 자동 마이그레이션 (CREATE TABLE IF NOT EXISTS)
+- 8 테이블 자동 마이그레이션 (CREATE TABLE IF NOT EXISTS)
 - WAL 모드, busy_timeout 5초, foreign_keys ON
 
 ### 3. 자기 자신 localhost agent 자동 등록
@@ -158,7 +158,7 @@ routerOpts.EnableUI = true
 ```
 $HOME/
 └── .agent-standalone/
-    ├── agent.db                    # SQLite (7 tables)
+    ├── agent.db                    # SQLite (8 tables)
     ├── agent.db-shm                # WAL shared memory
     ├── agent.db-wal                # WAL log
     └── archive/                    # /api/agent/upload/* 산출물

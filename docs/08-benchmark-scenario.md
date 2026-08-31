@@ -167,6 +167,26 @@ multi-step 실행. portal `AgentScenarioBuilder` 의 시각적 DAG → proto `Sc
 
 APK 번들 폴더와 운영 정책은 [`tools/apks/README.md`](../tools/apks/README.md) 참고.
 
+### 잡 파라미터로 켜는 부가 수집
+
+step 이 아니라 **잡 전체**에 딸리는 수집이다. step 을 만들지 않는 이유는
+`scenario/steptypes.go` 가 단일 진실 소스라 프롬프트·검증·UI 파생물이 전부 늘어나기 때문.
+
+| 파라미터 | 값 | 효과 |
+|---|---|---|
+| `logcat` | `on` | logcat 수집 켜기 (on-device AI 측정용) |
+| `logcat_tags` | `A,B,C` | measure 모드 — 해당 태그만. **실측정엔 필수** |
+| (태그 없음) | — | explore 모드 — 전체 버퍼, 탐색용 1회성 |
+
+⚠ explore 는 전체 버퍼를 받으므로 그 자체가 IO/CPU 를 써서 수백 ms 단위 TTFT 를 흔든다.
+
+⚠ 수집은 선형 루프와 DAG 루프 **양쪽 모두**에 배선돼 있다. 한쪽만 있으면 캔버스
+시나리오에서 조용히 안 켜지는데 화면상으론 잡이 정상이라 안 걸린다
+(`TestBothScenarioLoopsStartLogcat` 이 소스 수준에서 막는다).
+
+수집된 로그를 읽는 REST 와 패턴 프로파일은
+[05-rest-api.md](05-rest-api.md) 의 `16. Logcat / AI Log Profile` 참고.
+
 ### Loop
 
 ```json

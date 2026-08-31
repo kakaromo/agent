@@ -672,6 +672,132 @@ SSE 와 동일한 progress 데이터를 WebSocket message 로.
 ### `WS /ws/monitor?serials=A,B&interval_seconds=1`
 SSE monitoring 과 동일.
 
+## 16. Logcat / AI Log Profile (on-device AI 측정, 7 endpoint)
+
+on-device AI(LLM) 의 TTFT/TPOT 를 logcat 문구에서 뽑는다. 런타임이 찍는 문자열이
+AP·세트·버전마다 달라 정규식을 **DB 프리셋**으로 두고, 형식을 모를 땐 탐색으로 찾는다.
+
+⚠ **수집 시작/중지 endpoint 는 없다.** logcat 은 잡 옵션으로 켜지므로(아래) 시나리오
+실행 경로가 수집을 관장한다. 여기 REST 는 **이미 수집된 로그를 읽는 쪽**이다.
+
+⚠ standalone 전용이 아니다 — 탐색/파싱은 DB 없이도 동작하도록 DB 블록 밖에 등록한다
+(사무실 모드에서 로그 형식 조사). `profileId` 로 파싱할 때만 DB 가 필요하다.
+
+### 잡에서 수집 켜기 (REST 아님, 시나리오 파라미터)
+
+```
+logcat=on            수집 켜기
+logcat_tags=A,B,C    measure 모드 (해당 태그만 — 실측정엔 필수)
+(태그 없음)           explore 모드 (전체 버퍼, 탐색용 1회성)
+```
+
+⚠ explore 는 전체 버퍼를 받으므로 그 자체가 IO/CPU 를 써서 수백 ms 단위 TTFT 를
+흔든다. 실측정에는 반드시 태그를 지정한다.
+
+⚠ 잡 수집은 **epoch 축**(`logcat -v epoch`)으로 고정이다. IO 트레이스가 전부
+BOOTTIME 인데 `-v monotonic` 은 누적 suspend 만큼 어긋난다(실기기 실측 120.5초).
+
+### `POST /api/agent/logcat/explore`
+
+태그를 모를 때 후보를 찾는다. 결과는 **후보 제시까지**이고 프로파일을 자동 생성하지
+않는다 — 사람이 원문을 보고 고르는 것이 오탐을 막는 유일한 방법이다.
+
+요청:
+```json
+{ "jobId": "abc-123", "idleFrom": 100.0, "idleTo": 130.0, "runFrom": 140.0, "runTo": 160.0 }
+```
+`jobId` 대신 `path` 직접 지정도 가능 (허용 루트 밖 경로는 400 — 경로 격리 가드).
+유휴/추론 구간을 주면 **차분**으로 "추론 때만 나타난 태그" 를 가려낸다. 벤더 이름을
+몰라도 걸리는 방법이라 형식이 블랙박스일 때 사실상 유일한 수단이다.
+
+응답:
+```json
+{
+  "path": "/…/logcat.log",
+  "result": {
+    "totalLines": 282149, "parsedLines": 282136, "distinctTags": 3231,
+    "candidates": [
+      { "tag": "Genie", "pids": [900], "lines": 412,
+        "unitHits": 88, "keywordHits": 120, "strongHits": 64,
+        "onlyDuringRun": true, "score": 2680,
+        "samples": ["101.500 900 900 I Genie: first token emitted — TTFT 2840 ms"] }
+    ],
+    "weakOnly": false,
+    "diagnosis": []
+  }
+}
+```
+
+⚠⚠ **`weakOnly`** — 후보는 있으나 LLM 고유 신호(토큰 개념·prefill/decode·TTFT)가
+**0건**이라는 뜻이다. 온디바이스 ML 은 종류를 불문하고 "모델 로드"·"추론" 이라는 같은
+어휘를 쓰므로(음성 wakeword·얼굴인식 등) 목록이 전부 무관한 것일 수 있다. 화면은
+이 경우를 반드시 눈에 띄게 구분해야 한다 — 목록이 있다는 것만으로 답이 있다고 읽히면
+사용자가 헛수고한다.
+
+### `POST /api/agent/logcat/parse`
+
+저장된 패턴으로 TTFT/TPOT 를 뽑는다.
+
+요청: `{ "jobId": "abc-123", "profileId": 3 }` 또는 `{ "path": "…", "patternsJson": "{…}" }`
+
+⚠ **매칭 0건이어도 200 이다.** 에러로 만들면 "왜 0건인지" 진단이 화면까지 못 간다 —
+그게 이 기능의 핵심 산출물이다(런타임이 stderr 로 뱉어 애초에 못 잡는 경우인지,
+패턴이 틀린 것인지를 갈라준다). 실패 판정은 호출자가 `totalHits`/`partial` 로 한다.
+반면 **패턴 자체가 잘못된 것은 400** 이다.
+
+응답:
+```json
+{
+  "path": "/…/logcat.log",
+  "result": {
+    "totalLines": 4210, "parsedLines": 4210, "matchedTags": ["Genie"],
+    "marks": [ { "key": "prefill_begin", "timeSec": 1756272146.408 } ],
+    "series": {
+      "tpot": { "key": "tpot", "unit": "ms", "count": 128,
+                "min": 22.1, "max": 41.7, "mean": 25.3, "median": 24.1, "p99": 38.9,
+                "points": [ { "timeSec": 1756272146.5, "value": 24.1 } ] }
+    },
+    "stats": [ { "key": "tpot", "kind": "series", "hits": 128, "parseFailures": 0 } ],
+    "totalHits": 129, "partial": false, "missingKeys": [], "diagnosis": []
+  }
+}
+```
+
+⚠ **`partial`** — 패턴 일부만 맞았다. 성공으로 처리하면 화면에 **반쪽 지표가 정상처럼**
+뜬다(TTFT 는 나오는데 TPOT 은 없는 식). `parseFailures` 는 "정규식은 맞았는데 캡처
+값이 숫자가 아니었다" = 패턴이 아니라 **캡처 그룹** 문제라 안내가 갈려야 한다.
+
+series 요약에 median/p99 를 함께 주는 이유: TPOT 은 평균만 보면 "뒤로 갈수록 느려짐" 을
+놓친다.
+
+### AILogProfile CRUD (5)
+
+`GET / POST /api/agent/ai-log-profiles`, `GET / PUT / DELETE /api/agent/ai-log-profiles/{id}`
+
+`GET` 은 `?runtime=` `?soc=` 필터를 받는다 — 기기가 붙었을 때 "이 AP 에 맞는 프로파일" 을
+고르기 위해 컬럼으로 뺐다. ⚠ `soc` 필터는 **빈 soc 프로파일도 포함**한다 (빈 값 =
+"런타임 공용" 이라 특정 soc 를 물었을 때 배제하면 공용 프로파일을 못 쓴다).
+
+`patternsJson` 은 문자열/객체 양쪽을 받는다 (UI 는 객체가, 스크립트는 문자열이 자연스럽다).
+
+```json
+{ "name": "QNN Genie", "runtime": "qnn", "soc": "SM8650",
+  "patternsJson": {
+    "tags": ["Genie", "QnnHtp"],
+    "marks":  [ { "key": "prefill_begin", "regex": "prefill begin" } ],
+    "series": [ { "key": "ttft", "regex": "TTFT ([0-9.]+) ms", "unit": "ms" },
+                { "key": "tpot", "regex": "decode ([0-9.]+) ms/tok", "unit": "ms" } ]
+  } }
+```
+
+⚠ 저장 시점에 검증하고 실패는 **400** 이다 (500 을 주면 서버 탓처럼 보여 사용자가 자기
+패턴을 고칠 생각을 못 한다). 막는 것들은 전부 "통과시키면 측정 시점에 조용히 틀리는" 종류다:
+잘못된 정규식 / series 에 캡처 그룹 없음 / key 중복 / 패턴 0개.
+
+⚠ mark 정규식은 **좁게** 쓴다. `stage=prefill` 처럼 시작(`stage=prefill tokens=384`)과
+종료(`stage=prefill finished`) 양쪽에 걸리면 mark 가 2번 찍혀 구간 경계가 중복되고,
+나중에 IO 를 겹칠 때 구간이 잘못 잘린다.
+
 ## HTTP status code 정리
 
 | 상태 | 의미 |
@@ -718,9 +844,14 @@ if (res.status === 404) {
 | Archive | 2 |
 | Screen WS | 2 (legacy + portal 호환 path) |
 | 보조 WS | 2 |
-| **합계** | **70** |
+| Logcat | 2 (explore + parse) |
+| AI Log Profile | 5 (CRUD) |
+| **합계** | **77** |
 
 (portal AgentController 47 + 사이드 컨트롤러 + 보조 WS + 추가 magic path 들)
+
+⚠ Logcat / AI Log Profile 7개는 **standalone 고유**로 portal 에 대응 컨트롤러가 없다
+(gRPC RPC 도 없는 REST 전용).
 
 ## 다음
 
