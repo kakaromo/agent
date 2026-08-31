@@ -83,6 +83,61 @@ func TestExplore_VoiceMLIsNotMistakenForLLM(t *testing.T) {
 	}
 }
 
+// ⚠ 코덱·인증처럼 **LLM 과 무관한 도메인**이 토큰/decode 어휘를 쓴다.
+// 앞의 wakeword 사례가 "다른 ML 이 같은 낱말을 쓴다" 였다면 이건 한 발 더 나간
+// 경우다 — ML 조차 아닌 흔한 시스템 로그가 걸린다. 동영상 재생 한 번이면
+// MediaCodec 이 뜨므로 실기기에선 상시 오탐이고, 그러면 WeakOnly 가 영영 안 떠서
+// "LLM 신호 0건" 경고가 통째로 죽는다.
+func TestExplore_CodecAndAuthAreNotLLM(t *testing.T) {
+	log := strings.Join([]string{
+		"100.000 1100 1100 I MediaCodec: video decode 8 ms per frame",
+		"100.100 1100 1100 D ACodec  : decode latency 12 ms",
+		"100.200 1200 1200 I AudioFlinger: decode 5 ms buffer underrun",
+		"100.300 1300 1300 I OAuth   : refreshed 2 tokens for account xyz",
+		"100.400 1300 1300 D TokenCache: parsed 15 tokens",
+		"100.500 1400 1400 I NetworkSecurity: validated 3 tokens",
+	}, "\n")
+
+	res := ExploreLogcat(strings.NewReader(log), ExploreOptions{})
+	for _, c := range res.Candidates {
+		if c.StrongHits > 0 {
+			t.Errorf("코덱/인증 태그 %q 가 LLM 고유 신호로 잡혔다 (StrongHits=%d, samples=%v)",
+				c.Tag, c.StrongHits, c.Samples)
+		}
+	}
+	if len(res.Candidates) > 0 && !res.WeakOnly {
+		t.Error("LLM 고유 신호가 없는데 WeakOnly 가 꺼져 있다 — 안전장치가 죽는다")
+	}
+}
+
+// 오탐을 막느라 **진짜 신호까지 지우면** 안 된다. 위 좁히기가 과했는지 본다.
+// (토큰 문맥이 같은 줄에 있는 형태들 — 순서·표현이 런타임마다 다르다)
+func TestExplore_TokenContextStillStrong(t *testing.T) {
+	for _, line := range []string{
+		"100.000 900 900 I Genie   : decode finished, 128 tokens generated",
+		"100.100 900 900 I Runtime : generated 256 tokens in 3.2s",
+		"100.200 900 900 I Engine  : prefill 384 tokens",
+		"100.300 900 900 I llama   : 24 tokens/s",
+		"100.400 900 900 I Genie   : decode 24.1 ms/tok",
+	} {
+		res := ExploreLogcat(strings.NewReader(line), ExploreOptions{})
+		if len(res.Candidates) == 0 || res.Candidates[0].StrongHits == 0 {
+			t.Errorf("진짜 LLM 줄인데 강한 신호로 안 잡혔다: %q", line)
+		}
+	}
+}
+
+// keywordRe 의 어간(`generat`/`quantiz`)이 `\b` 에 막혀 죽어 있던 회귀.
+// `\b(...|generat|...)\b` 는 "generate" 에 안 걸린다 — 잘린 어간 뒤에
+// 단어 경계를 요구하기 때문이다. 실제 낱말로 확인한다.
+func TestExplore_KeywordStemsMatchRealWords(t *testing.T) {
+	for _, w := range []string{"generate", "generation", "generating", "quantize", "quantized", "quantization"} {
+		if !keywordRe.MatchString(w) {
+			t.Errorf("keywordRe 가 %q 를 못 잡는다 — 어간 뒤 \\b 때문에 죽은 패턴", w)
+		}
+	}
+}
+
 // GPS 의 `Time To First Fix` 는 TTFT 로 오인되기 쉬운 실제 사례다.
 func TestExplore_GpsTimeToFirstFixExcluded(t *testing.T) {
 	log := "100.500 6047 6111 I GpsSession_FLP: Time To First Fix   : 0 seconds"
