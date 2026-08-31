@@ -19,7 +19,7 @@
 │   │   gRPC server             │                                     │
 │   │       ↓                   │         ┌──────────────────────────┐│
 │   │   DeviceAgentServer       │         │  SQLite (standalone)     ││
-│   │   (server/grpc.go)        │         │  7 tables                ││
+│   │   (server/grpc.go)        │         │  8 tables                ││
 │   │                           │         │  (storage/sqlitedb/)     ││
 │   │  HTTP/1.1 (cmux.Any)      │         └──────────────────────────┘│
 │   │       ↓                   │                    ↑                │
@@ -169,6 +169,8 @@ os.Setenv("AGENT_PARSER", "go")
 | `rest_preset.go` | BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD |
 | `rest_schedule.go` | ScheduledJob CRUD + trigger/enable |
 | `rest_archive.go` | `/api/agent/upload/*` 로컬 디스크 복사 |
+| `rest_logcat.go` | logcat 탐색/파싱 REST (경로 격리 가드 포함) |
+| `rest_ailogprofile.go` | AILogProfile CRUD (검증 실패는 400) |
 | `rest_convert.go` | proto → map 변환, enum 문자열화, TraceFilter 빌더 |
 | `rest_hook.go` | JobExecutionRecorder 인터페이스 + dbRecorder |
 | `rest_summary.go` | terminal 잡의 metrics summary 추출 |
@@ -182,12 +184,13 @@ os.Setenv("AGENT_PARSER", "go")
 | 파일 | 책임 |
 |---|---|
 | `db.go` | `Open()`, 마이그레이션, `SeedLocalServer`, `DefaultPath` |
-| `models.go` | 7 entity 구조체 (camelCase JSON 매칭) |
+| `models.go` | 8 entity 구조체 (camelCase JSON 매칭) |
 | `repo_server.go` | AgentServer CRUD |
 | `repo_execution.go` | JobExecution CRUD + filter + stats + MarkStaleRunningAsFailed |
-| `repo_preset.go` | BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD |
+| `repo_preset.go` | BenchmarkPreset / IOTestPreset / ScenarioTemplate / AILogProfile CRUD |
 | `repo_macro_schedule.go` | AppMacro / ScheduledJob CRUD + toggle |
-| `db_test.go` | 6 단위 테스트 |
+| `ailogpattern.go` | AILogPatterns 구조 + `ValidatePatternsJSON` |
+| `db_test.go` | 단위 테스트 |
 
 ### `schedule/`
 
@@ -208,13 +211,17 @@ os.Setenv("AGENT_PARSER", "go")
 | `tracer.go` | ftrace 활성화, trace_pipe 캡처, parquet 파싱 |
 | `stats.go` | DuckDB 로 parquet 통계 계산 |
 | `sampler.go` | 대용량 raw events 샘플링 |
+| `logcat.go` | logcat 수집기 (adb 자식 관리, epoch 축) |
+| `logcat_line.go` | logcat 한 줄 파서 (monotonic/epoch 공용) |
+| `logcat_explore.go` | 태그 후보 탐색 (유휴/추론 차분, WeakOnly 판정) |
+| `logcat_parse.go` | 패턴 매칭 → TTFT/TPOT (mark/series, 진단) |
 | `parser/` | Go 내장 파서 (`AGENT_PARSER=go` 시 사용) |
 
 ### `ui/`
 
 | 디렉토리 | 책임 |
 |---|---|
-| `src/routes/agent/*` | portal agent 메인 페이지 + 32 컴포넌트 |
+| `src/routes/agent/*` | portal agent 메인 페이지 + 컴포넌트 (최상위 25, 하위 포함 47) |
 | `src/routes/agent/scenario-canvas/*` | @xyflow/svelte 시각적 DAG 빌더 |
 | `src/routes/agent/iotest/*` | I/O Test 폼 + 진행 표시 |
 | `src/lib/api/agent.ts` | typed REST 클라이언트 (portal 와 동일) |

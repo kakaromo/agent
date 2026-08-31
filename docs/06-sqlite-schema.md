@@ -11,13 +11,13 @@ DSN:
 {path}?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)
 ```
 
-- **foreign_keys=ON**: 미래 FK 추가 시 위해 (현재 7 테이블에 FK 는 없으나 enable)
+- **foreign_keys=ON**: 미래 FK 추가 시 위해 (현재 8 테이블에 FK 는 없으나 enable)
 - **busy_timeout=5s**: 동시 쓰기 시 락 대기
 - **journal_mode=WAL**: 읽기/쓰기 동시성 향상, crash 안전
 
 Connection pool: MaxOpen=4, MaxIdle=2 (단일 standalone 프로세스라 작게).
 
-## 7 테이블
+## 8 테이블
 
 ### `agent_servers`
 
@@ -249,6 +249,50 @@ CREATE TABLE scheduled_jobs (
 
 `cron_expression`: 표준 5-field (분 시 일 월 요일) + robfig descriptor (`@every 5m`, `@daily` 등).
 
+### `ai_log_profiles`
+
+on-device AI(LLM) 의 TTFT/TPOT 를 logcat 문구에서 뽑기 위한 정규식 묶음. 런타임이 찍는
+문자열이 AP·세트·버전마다 달라 코드에 박을 수 없어 프리셋으로 둔다.
+
+```sql
+CREATE TABLE ai_log_profiles (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  runtime       TEXT NOT NULL,   -- qnn | llamacpp | vendor ... (조회 필터)
+  soc           TEXT,            -- 빈 값 = 런타임 공용
+  patterns_json TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+```
+
+`runtime`/`soc` 만 컬럼으로 뺀 이유: 기기가 붙었을 때 "이 AP 에 맞는 프로파일" 을 고르려면
+**조회 조건**이 돼야 한다. JSON 안에 있으면 못 거른다. 나머지가 `patterns_json` 인 이유는
+패턴 종류가 런타임마다 늘어나는데 컬럼이면 매번 마이그레이션이 필요해서다
+(`benchmark_presets.params_json` 과 같은 판단).
+
+⚠ 측정 **결과**는 여기 안 들어간다. 프로파일은 "어떻게 읽을지" 이고 측정값은 잡 산출물이라
+`job_executions.result_summary` 로 간다. 섞으면 프로파일 하나를 여러 잡이 쓸 때 꼬인다.
+
+`patterns_json` 예:
+
+```json
+{
+  "tags": ["Genie", "QnnHtp"],
+  "minPriority": "I",
+  "marks":  [ { "key": "prefill_begin", "regex": "prefill begin" } ],
+  "series": [ { "key": "ttft", "regex": "TTFT ([0-9.]+) ms", "unit": "ms" },
+              { "key": "tpot", "regex": "decode ([0-9.]+) ms/tok", "unit": "ms" } ]
+}
+```
+
+`marks` 는 걸린 줄의 **시각만** 써서 구간 경계로 쓰고, `series` 는 캡처 그룹에서 **숫자**를
+뽑아 시계열이 된다. 성격이 달라 분리했다 — 뭉치면 파싱이 지저분해진다.
+
+⚠ `ValidatePatternsJSON` 이 저장 시점에 막는 것들 (전부 "통과시키면 측정 시점에 조용히
+틀리는" 종류): 잘못된 정규식 / series 에 캡처 그룹 없음 / key 중복 / 패턴 0개.
+
 ## Repository API
 
 각 파일이 1 entity 의 CRUD 를 담당:
@@ -280,7 +324,7 @@ MarkStaleRunningAsFailed(ctx, reason) (int64, error)               // 부팅 시
 
 ### `repo_preset.go`
 
-BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD (각 5 함수).
+BenchmarkPreset / IOTestPreset / ScenarioTemplate / AILogProfile CRUD.
 
 ### `repo_macro_schedule.go`
 
@@ -302,7 +346,7 @@ sqlite3 ~/.agent-standalone/agent.db
 
 .tables
 # agent_servers       benchmark_presets   job_executions      scheduled_jobs
-# app_macros          iotest_presets      scenario_templates
+# ai_log_profiles     app_macros          iotest_presets      scenario_templates
 
 .schema job_executions
 

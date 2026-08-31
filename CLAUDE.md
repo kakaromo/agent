@@ -43,7 +43,7 @@ portal 의 풀 UX 를 그대로 재현한다. 사무실 모드(standalone=false)
 - **127.0.0.1 바인딩 (기본)** — 외부 LAN 접근 차단 (인증 없음 전제). `--bind 0.0.0.0` 또는 `--bind <IP>` 로 override 가능, 사용 시 부팅 로그에 명시적 경고
 - **Svelte SPA 서빙** — `//go:embed all:ui/build` 로 바이너리에 임베드 (`/` SPA, `/_app/...` 자산, 미존재 경로는 `index.html` fallback)
 - **`AGENT_PARSER=go` 자동 setenv** — `tools/trace` 외부 바이너리 미사용 → Windows 후속 빌드 시 trace.exe 불필요
-- **SQLite 영속화** — `$HOME/.agent-standalone/agent.db` (config `[standalone] db_path` 로 override). 7 테이블 (agent_servers, job_executions, benchmark_presets, iotest_presets, scenario_templates, app_macros, scheduled_jobs)
+- **SQLite 영속화** — `$HOME/.agent-standalone/agent.db` (config `[standalone] db_path` 로 override). 8 테이블 (agent_servers, job_executions, benchmark_presets, iotest_presets, scenario_templates, app_macros, scheduled_jobs, ai_log_profiles)
 - **로컬 archive 폴더** — `$HOME/.agent-standalone/archive` (MinIO 미사용). `[standalone] archive_base` 또는 `--archive-base` 로 override
 - **Cron 러너** — robfig/cron v3. enabled ScheduledJob 자동 fire, 결과 JobExecution 영구 저장
 - 부팅 시 stale running 잡 자동 `failed` 정리 (메모리 휘발 호환)
@@ -54,7 +54,7 @@ portal 의 풀 UX 를 그대로 재현한다. 사무실 모드(standalone=false)
 #### UI
 
 `ui/` 디렉토리는 `portal/frontend` 의 agent UI 를 통째로 복사 + 인증 스텁화 한 SvelteKit 앱이다.
-- `routes/agent` — 메인 페이지 (3 패널 + 7 모드 탭: Benchmark / Scenario / Trace / IOTest / Macro / Schedule / Results)
+- `routes/agent` — 메인 페이지 (3 패널 + 8 모드 탭: Benchmark / Scenario / Trace / IOTest / Macro / Schedule / Results / AI (LLM))
 - `routes/agent/scenario-canvas/*` — @xyflow/svelte 기반 시각적 DAG 빌더
 - `lib/components/data-table`, `ui/*` — shadcn-svelte primitives (bits-ui 기반)
 - `lib/stores/auth.svelte.ts` — **stub**. 항상 ADMIN 인증 상태로 응답 (시그니처는 portal 동일)
@@ -120,6 +120,13 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - `DELETE /api/agent/executions/{id}`
 - `GET    /api/agent/executions/stats?serverId=`
 
+**Logcat / AI Log Profile (7)** — on-device AI(LLM) TTFT/TPOT 측정
+- `POST   /api/agent/logcat/explore` body `{jobId|path, idleFrom, idleTo, runFrom, runTo}` — 태그를 모를 때 후보 탐색. 유휴/추론 구간을 주면 차분으로 "추론 때만 나타난 태그" 를 가려낸다. ⚠ 응답 `weakOnly=true` 는 "LLM 고유 신호 0건" = 후보가 전부 무관할 수 있다는 경고
+- `POST   /api/agent/logcat/parse` body `{jobId|path, profileId|patternsJson}` — 패턴으로 TTFT/TPOT 추출. ⚠ 매칭 0건도 **200** (진단이 핵심 산출물이라 에러로 만들면 화면까지 못 간다). 패턴 자체가 잘못된 것만 400
+- AILogProfile CRUD 5: `GET/POST /api/agent/ai-log-profiles`, `GET/PUT/DELETE /api/agent/ai-log-profiles/{id}` (`?runtime=` `?soc=` 필터, 빈 soc = 런타임 공용이라 항상 포함)
+- ⚠ 수집 시작/중지 endpoint 는 없다 — **잡 옵션**으로 켠다: 시나리오 파라미터 `logcat=on` (+`logcat_tags=A,B` 없으면 explore). 잡 수집은 **epoch 축** 고정 (IO 트레이스가 BOOTTIME 인데 monotonic 은 suspend 만큼 어긋남)
+- ⚠ gRPC RPC 없음 — REST 전용 (portal 대응 컨트롤러도 없는 standalone 고유)
+
 **Archive (2)**
 - `POST   /api/agent/upload/trace` body `{jobIds, remotePath}` — 로컬 `archive_base/{remotePath}/{jobId}/` 로 parquet + trace.log 복사
 - `POST   /api/agent/upload/benchmark` body `{jobId, remotePath}` — `{deviceId}_result.json` 로컬 저장
@@ -152,12 +159,14 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - **`server/rest_preset.go`** — BenchmarkPreset / IOTestPreset / ScenarioTemplate CRUD
 - **`server/rest_schedule.go`** — ScheduledJob CRUD + trigger/enable
 - **`server/rest_archive.go`** — `/api/agent/upload/*` 로컬 디스크 archive (MinIO 미사용)
+- **`server/rest_logcat.go`** — logcat 탐색/파싱 REST (경로 격리 가드)
+- **`server/rest_ailogprofile.go`** — AILogProfile CRUD (검증 실패 400)
 - **`server/rest_hook.go`** — `JobExecutionRecorder` 인터페이스 + dbRecorder (OnStart/OnState/OnResult)
 - **`server/rest_summary.go`** — terminal 잡의 metrics summary 추출 → DB 영구 저장
 - **`server/sse.go`** — `/api/agent/benchmark/progress`, `/api/agent/monitoring/stream` (portal EventSource 호환)
 - **`server/ws.go`** — 보조 WebSocket (`/ws/jobs/{id}/progress`, `/ws/monitor`)
 - **`schedule/runner.go`** — robfig/cron v3 기반 cron 실행기
-- **`storage/sqlitedb/`** — modernc.org/sqlite (pure Go) 영속화. 7 entity CRUD
+- **`storage/sqlitedb/`** — modernc.org/sqlite (pure Go) 영속화. 8 entity CRUD
 - **`adb/`** — ADB 디바이스 관리 (검색, 연결, 셸 명령, install/uninstall)
 - **`apkmgr/`** — `tools/apks/*.apk` 목록 + 디바이스 push/install/uninstall (경로 traversal 가드)
 - **`benchmark/`** — 벤치마크 오케스트레이터 (시나리오 실행, trace 연동)
@@ -166,6 +175,10 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
   - `tracer.go` — 트레이스 세션 시작/중지 (adb trace_pipe → 로그 파일 → Parquet 변환)
   - `stats.go` — DuckDB로 Parquet 통계 계산 (latency, QD, histogram, cmd별 분석)
   - `sampler.go` — 대용량 데이터 샘플링 (50만 이벤트 초과 시 extremes + uniform 샘플링)
+  - `logcat.go` — logcat 수집기 (adb 자식 관리, 잡 수집은 epoch 축)
+  - `logcat_line.go` — logcat 한 줄 파서 (monotonic/epoch 공용, 축 변환은 안 함)
+  - `logcat_explore.go` — 태그 후보 탐색. ⚠ strongRe 는 **LLM 고유 신호만** (토큰 개념·prefill/decode·TTFT). 온디바이스 ML 은 어휘가 겹쳐 `model load`/`inference` 로는 못 거른다
+  - `logcat_parse.go` — 패턴 매칭 → TTFT/TPOT (mark=시각, series=값+분포)
 - **`tools/`** — 외부 바이너리 (trace 파서 등)
 - **`config/`** — 설정 파일 (`devices.toml`)
 - **`pb/`** — 생성된 protobuf Go 코드

@@ -14,13 +14,14 @@ Go 기반 Android 디바이스 평가 에이전트의 상세 문서.
 
 ### Standalone (출장용 원바이너리)
 - **[Standalone 모드](04-standalone-mode.md)** — `--standalone` 플래그가 켜는 모든 동작
-- **[REST/SSE/WS API 레퍼런스](05-rest-api.md)** — portal 호환 47+ endpoints
-- **[SQLite 스키마](06-sqlite-schema.md)** — 7 테이블, 영속화 hook, stale 정리
+- **[REST/SSE/WS API 레퍼런스](05-rest-api.md)** — portal 호환 + standalone 고유, 77 endpoints
+- **[SQLite 스키마](06-sqlite-schema.md)** — 8 테이블, 영속화 hook, stale 정리
 
 ### 핵심 기능
 - **[Trace 수집/파싱](07-trace.md)** — ftrace → parquet → 통계/raw 조회
 - **[Benchmark / Scenario](08-benchmark-scenario.md)** — fio/iozone/iotest 실행 흐름
 - **[Schedule (cron)](10-cron-schedule.md)** — robfig/cron 기반 자동 실행
+- **on-device AI (LLM) 측정** — logcat 패턴으로 TTFT/TPOT → [05-rest-api.md#16-logcat--ai-log-profile-on-device-ai-측정-7-endpoint](05-rest-api.md)
 
 ### UI
 - **[Svelte UI 구조](09-ui.md)** — portal/frontend 포팅 노트, 인증 stub, 사이즈 프리셋

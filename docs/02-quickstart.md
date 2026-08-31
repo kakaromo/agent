@@ -60,7 +60,7 @@ INFO agent starting port=50051 services="gRPC + WebSocket(screen)"
 - 자동으로 `/agent` 로 리다이렉트
 - 좌측 패널에 `localhost (this agent:50051)` 서버 자동 등록되어 있음
 - 디바이스 목록에 연결된 단말 표시
-- 중앙에 7개 모드 탭: **Benchmark / Scenario / Trace / IOTest / Macro / Schedule / Results**
+- 중앙에 8개 모드 탭: **Benchmark / Scenario / Trace / IOTest / Macro / Schedule / Results / AI (LLM)**
 
 ### 사무실 모드 (헤드리스 gRPC)
 
