@@ -118,13 +118,17 @@
 	// (데이터 없다고 막지는 않는 기본값), 그대로 두면 드리프트 잡이 처음엔 offset
 	// 시각으로 그려졌다가 응답이 오면 marker 로 **점프한다.** 그 사이 화면은 밀린
 	// 자리를 경고 없이 보여준다 — 짧아도 "그럴듯하게 틀린" 상태다.
-	const clockSyncLoaded = $derived(clockSync !== null);
+	// ⚠ "아직 안 왔다" 와 "왔는데 값이 없다" 를 **구분**한다. clockSync=null 하나로
+	// 판단하면 조회 실패 시 영영 pending 이 되어 Behavior 탭이 사라지고, 배너는
+	// "clock offset 측정 실패" 라는 **틀린 원인**을 댄다 (실제로는 네트워크 실패).
+	// 기능이 사라진 것처럼 보이는 게 가장 나쁜 실패라 원인을 흐리면 안 된다.
+	let clockSyncAttempted = $state(false);
 	const useMarker = (b: StepBoundary): boolean =>
-		hasMarker(b) && clockSyncLoaded && !clockSyncUsable;
-	/** marker 가 실린 구간이 있는데 아직 clockSync 를 모르면 그릴 수 없다. */
-	const boundaryPending = $derived(
-		!clockSyncLoaded && boundaries.some(hasMarker)
-	);
+		hasMarker(b) && clockSyncAttempted && !clockSyncUsable;
+	/** 응답 전에는 그리지 않는다 — 그 사이 밀린 자리를 경고 없이 보여주게 된다.
+	 *  ⚠ marker 유무와 무관하게 건다: offset 만 있는 잡이 더 위험하다(밀린 값이
+	 *  그럴듯하게 그려졌다가 사라진다). */
+	const boundaryPending = $derived(!clockSyncAttempted && boundaries.length > 0);
 	const boundaryTrusted = (b: StepBoundary): boolean =>
 		!boundaryPending && (useMarker(b) || (hasOffset(b) && clockSyncUsable));
 
@@ -1059,6 +1063,11 @@
 
 	async function loadClockSync() {
 		if (serverId == null || activeJobIds.length === 0) return;
+		// ⚠ 잡이 바뀌면 **이전 잡의 판정을 버린다.** 안 지우면 새 잡의 구간을 옛
+		// clockSync 로 판단해, 드리프트 잡을 깨끗한 잡 다음에 열었을 때 응답이 올
+		// 때까지 밀린 자리에 그린다 (첫 조회만 막던 가드가 두 번째부터 무력해진다).
+		clockSync = null;
+		clockSyncAttempted = false;
 		try {
 			const res = await getTraceClockSync(serverId, activeJobIds);
 			clockSync = res.clockSync ?? null;
@@ -1066,6 +1075,10 @@
 			// 조회 실패는 조회 자체를 막지 않는다 — 배너가 일반 문구로 내려갈 뿐.
 			console.error('clock sync 조회 실패:', e);
 			clockSync = null;
+		} finally {
+			// ⚠ 성공·실패 **모두** 시도했음을 남긴다. 실패를 pending 으로 두면
+			// Behavior 탭이 영영 안 뜨고, 원인도 "clock offset 실패" 로 오인된다.
+			clockSyncAttempted = true;
 		}
 	}
 
@@ -1079,12 +1092,24 @@
 		// 쓰면 실제보다 작은 값을 보여줘 "정밀한데 틀린 숫자" 가 된다 (실측: marker 창이
 		// 스텝보다 40~60ms 넓었다). marker 창의 초과분은 **직접 잴 수 있으므로**
 		// (marker 폭 − offset 폭) 추정하지 않고 실측값을 쓴다.
+		// ⚠ offset 이 **애초에 실패한** 잡이 marker 폴백의 주 케이스인데, 그때는
+		// hasOffset 이 false 라 (marker 폭 − offset 폭) 을 잴 수 없다. 그 경우까지
+		// 건너뛰면 결국 offset 오차 모델로 돌아가고, 측정이 아예 없으면 0 이 되어
+		// **빗금이 사라진다** — 실제로는 창이 40~60ms 넓은데 오차 0으로 보인다.
+		// → 잴 수 있으면 실측, 없으면 markerTimeout 이 아니라 호스트 시각 폭과의
+		//   차이로 근사한다 (startedAt/finishedAt 은 항상 있다).
+		// ⚠ 초과분은 **양 끝에 나뉘어** 붙으므로(begin 은 실행 전, end 는 실행 후)
+		//   ± 반폭으로 준다. 그대로 주면 화면이 두 배로 그린다.
 		const markerExcess = boundaries.reduce((worst, b) => {
-			if (!useMarker(b) || !hasOffset(b)) return worst;
-			const d = (b.markerFinishedMono! - b.markerStartedMono!) - (b.finishedMono - b.startedMono);
+			if (!useMarker(b)) return worst;
+			const markerWidth = b.markerFinishedMono! - b.markerStartedMono!;
+			const ref = hasOffset(b)
+				? b.finishedMono - b.startedMono
+				: (b.finishedAt - b.startedAt) / 1000; // 호스트 시각 폭 (ms → s)
+			const d = markerWidth - ref;
 			return d > worst ? d : worst;
 		}, 0);
-		if (markerExcess > 0) return markerExcess;
+		if (markerExcess > 0) return markerExcess / 2;
 
 		if (!clockSync) return 0;
 		let worst = 0;

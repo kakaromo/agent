@@ -170,10 +170,10 @@ func TestStepBoundaryConversionIsShared(t *testing.T) {
 	if i < 0 {
 		t.Fatal("collectStepBoundariesFrom 을 찾지 못했다 — 테스트가 낡았다")
 	}
-	body := string(src)[i:]
-	if j := strings.Index(body[1:], "\nfunc "); j > 0 {
-		body = body[:j+1]
-	}
+	// ⚠ 함수 끝을 `\nfunc ` 로 찾으면 이 함수가 파일 마지막일 때 **나머지 전체**가
+	// body 가 되어 가드가 조용히 넓어진다(엉뚱한 함수의 필드 목록에 반응).
+	// 열린 중괄호를 세어 실제 함수 끝에서 자른다.
+	body := funcBody(t, string(src)[i:])
 	if !strings.Contains(body, "stepBoundaryToMap(") {
 		t.Error("영속화가 공용 변환을 안 쓴다 — 필드가 갈라지면 만료된 잡에서만 구간이 사라진다")
 	}
@@ -197,4 +197,30 @@ func TestStepBoundaryToMapCarriesMarkerTimes(t *testing.T) {
 	if m["markerStartedMono"] != float64(200) {
 		t.Errorf("markerStartedMono=%v", m["markerStartedMono"])
 	}
+}
+
+// funcBody — `func …{` 로 시작하는 문자열에서 그 함수 본문까지만 잘라낸다.
+//
+// ⚠ 문자열/주석 안의 중괄호는 세지 않는다 — 이 파일들엔 그런 경우가 없어 단순
+// 계수로 충분하지만, 생기면 여기가 먼저 틀어진다는 것을 알고 있어야 한다.
+func funcBody(t *testing.T, src string) string {
+	t.Helper()
+	open := strings.IndexByte(src, '{')
+	if open < 0 {
+		t.Fatal("함수 본문 시작을 못 찾았다")
+	}
+	depth := 0
+	for i := open; i < len(src); i++ {
+		switch src[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return src[open : i+1]
+			}
+		}
+	}
+	t.Fatal("함수 본문 끝을 못 찾았다 — 테스트가 낡았다")
+	return ""
 }

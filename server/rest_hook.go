@@ -248,7 +248,12 @@ func collectStepBoundariesFrom(resp *pb.GetBenchmarkResultResponse) string {
 			// ⚠ 라이브 응답(rest_convert)과 **같은 변환**을 쓴다. 필드 목록을 따로
 			// 들고 있다가 새 필드를 한쪽에만 넣으면, 잡이 만료된 뒤에만 구간이
 			// 사라지는 버그가 난다 — 라이브로 확인하면 정상이라 발견이 늦다.
-			out = append(out, stepBoundaryToMap(b))
+			m := stepBoundaryToMap(b)
+			// ⚠ boundarySource 는 백엔드가 더 이상 안 채운다. 영속화에 빈 값을 남기면
+			// 구버전 잡의 진짜 값과 구분이 안 돼 신호가 흐려진다 — 읽기 호환만 하고
+			// 쓰기는 하지 않는다.
+			delete(m, "boundarySource")
+			out = append(out, m)
 		}
 	}
 	if len(out) == 0 {
