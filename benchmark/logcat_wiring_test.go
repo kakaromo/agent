@@ -262,9 +262,11 @@ func TestMarkerWritesOutsideTimingWindow(t *testing.T) {
 		if i < 0 {
 			t.Fatalf("%s 를 찾지 못했다 — 테스트가 낡았다", c.fn)
 		}
+		// ⚠ body[1:] 의 인덱스를 body[:j] 에 그대로 쓰면 1바이트 어긋난다.
+		// 종료 조건도 `func (` 전반으로 넓혀야 뒤따르는 자유 함수까지 삼키지 않는다.
 		body := src[i:]
-		if j := strings.Index(body[1:], "\nfunc (o *Orchestrator)"); j > 0 {
-			body = body[:j]
+		if j := strings.Index(body[1:], "\nfunc "); j > 0 {
+			body = body[:j+1]
 		}
 		bi, si := strings.Index(body, c.begin), strings.Index(body, c.start)
 		if bi < 0 || si < 0 {

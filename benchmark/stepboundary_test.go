@@ -203,7 +203,8 @@ func TestFirstNonEmpty(t *testing.T) {
 	}
 }
 
-// ⚠ marker 는 **폴백**이다. offset 이 멀쩡하면 기기에 쓰지 않는 쪽이 기본이어야 한다.
+// marker 시각은 offset 과 **나란히** 실린다. 어느 쪽을 쓸지는 화면이 drift 를 아는
+// 시점에 고르므로, 여기서 검증할 것은 "둘 다 온전히 기록되는가" 다.
 func TestMarkerFallback(t *testing.T) {
 	es := expandedStep{
 		step:      &pb.ScenarioStep{Type: "scroll"},
@@ -219,7 +220,7 @@ func TestMarkerFallback(t *testing.T) {
 	//
 	// marker 는 커널이 자기 시계로 찍은 값이라 adb 왕복이 오차에 안 들어간다 —
 	// offset 보다 정확하므로 있으면 쓰는 것이 맞다.
-	t.Run("marker 가 있으면 offset 보다 우선한다", func(t *testing.T) {
+	t.Run("marker 와 offset 이 나란히 기록된다", func(t *testing.T) {
 		f := &fakeTraceCtl{offset: 100, usable: true, markerOK: true, markerSeq: []float64{7, 8}}
 		o := &Orchestrator{traceMgr: f}
 		j := &Job{}
@@ -227,12 +228,15 @@ func TestMarkerFallback(t *testing.T) {
 		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
 
 		b := j.takeStepBoundaries("dev1")[0]
-		if b.GetBoundarySource() != "trace_marker" {
-			t.Errorf("marker 가 있는데 안 쓰였다: source=%q — 드리프트 잡에서 구간이 전멸한다",
-				b.GetBoundarySource())
+		// offset 은 그대로 (덮어쓰지 않는다 — marker 창은 adb 왕복을 감싸 더 넓다)
+		if b.GetStartedMono() != 101 {
+			t.Errorf("offset 값이 덮어써졌다: %v — 정상 기기의 구간이 왕복만큼 부푼다",
+				b.GetStartedMono())
 		}
-		if b.GetStartedMono() != 7 {
-			t.Errorf("marker 값이 아니다: %v", b.GetStartedMono())
+		// marker 도 함께 실려야 드리프트 시 화면이 대체할 수 있다
+		if b.GetMarkerStartedMono() != 7 || b.GetMarkerFinishedMono() != 8 {
+			t.Errorf("marker 시각이 안 실렸다: %v~%v — 드리프트 잡에서 구간이 전멸한다",
+				b.GetMarkerStartedMono(), b.GetMarkerFinishedMono())
 		}
 	})
 
@@ -243,8 +247,8 @@ func TestMarkerFallback(t *testing.T) {
 		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, nil)
 
 		b := j.takeStepBoundaries("dev1")[0]
-		if b.GetBoundarySource() != "" {
-			t.Errorf("marker 가 없는데 marker 로 표시됐다: %q", b.GetBoundarySource())
+		if b.GetMarkerStartedMono() != 0 {
+			t.Errorf("marker 가 없는데 값이 실렸다: %v", b.GetMarkerStartedMono())
 		}
 		if b.GetStartedMono() != 101 { // 1000ms/1000 + 100
 			t.Errorf("offset 값이 아니다: %v", b.GetStartedMono())
@@ -259,11 +263,13 @@ func TestMarkerFallback(t *testing.T) {
 		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
 
 		b := j.takeStepBoundaries("dev1")[0]
-		if b.GetStartedMono() != 7.5 || b.GetFinishedMono() != 8.25 {
-			t.Errorf("marker 값이 안 들어갔다: %v~%v", b.GetStartedMono(), b.GetFinishedMono())
+		// offset 이 실패했으므로 mono 는 0 이고, marker 만 실린다.
+		if b.GetStartedMono() != 0 {
+			t.Errorf("offset 이 실패했는데 mono 가 채워졌다: %v", b.GetStartedMono())
 		}
-		if b.GetBoundarySource() != "trace_marker" {
-			t.Errorf("출처 표시가 없다: %q — 화면이 신뢰도를 못 알린다", b.GetBoundarySource())
+		if b.GetMarkerStartedMono() != 7.5 || b.GetMarkerFinishedMono() != 8.25 {
+			t.Errorf("marker 값이 안 들어갔다: %v~%v",
+				b.GetMarkerStartedMono(), b.GetMarkerFinishedMono())
 		}
 	})
 
@@ -280,8 +286,8 @@ func TestMarkerFallback(t *testing.T) {
 			o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
 
 			b := j.takeStepBoundaries("dev1")[0]
-			if b.GetStartedMono() != 0 || b.GetFinishedMono() != 0 {
-				t.Errorf("불완전한 marker(%+v)로 구간을 만들었다 — 반쪽 구간은 엉뚱한 범위를 그린다", mk)
+			if b.GetMarkerStartedMono() != 0 || b.GetMarkerFinishedMono() != 0 {
+				t.Errorf("불완전한 marker(%+v)를 실었다 — 반쪽 구간은 엉뚱한 범위를 그린다", mk)
 			}
 		}
 	})
@@ -304,9 +310,11 @@ func TestMarkerFallback_DriftJobKeepsBoundaries(t *testing.T) {
 	o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
 
 	b := j.takeStepBoundaries("dev1")[0]
-	if b.GetBoundarySource() != "trace_marker" {
-		t.Fatalf("offset 이 스텝 중 성공했다고 marker 를 버렸다 (source=%q) — "+
-			"드리프트가 드러나면 UI 가 이 구간을 거부해 Behavior 가 통째로 사라진다",
-			b.GetBoundarySource())
+	// ⚠ 스텝 중에는 offset 이 성공하므로 mono 가 채워진다. 그렇다고 marker 를 버리면
+	// 나중에 drift 가 드러났을 때 화면이 대체할 값이 없어 **구간이 전멸한다.**
+	if b.GetMarkerStartedMono() == 0 || b.GetMarkerFinishedMono() == 0 {
+		t.Fatalf("offset 이 스텝 중 성공했다고 marker 를 안 실었다 (%v~%v) — "+
+			"드리프트가 드러나면 화면이 쓸 대체 시각이 없어 Behavior 가 통째로 사라진다",
+			b.GetMarkerStartedMono(), b.GetMarkerFinishedMono())
 	}
 }

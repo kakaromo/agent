@@ -99,10 +99,30 @@
 	//
 	// 한때 이 조건을 통째로 뺐다가(폴백을 살리려고) 드리프트 잡의 밀린 구간이 경고 없이
 	// 그려지는 회귀를 만들었다. 두 경우는 성격이 달라 **같이 처리하면 한쪽이 반드시 틀린다.**
+	// ⚠ marker 시각이 실려 있는가 (offset 과 별도 필드다).
+	const hasMarker = (b: StepBoundary): boolean =>
+		(b.markerFinishedMono ?? 0) > (b.markerStartedMono ?? 0) && (b.markerStartedMono ?? 0) > 0;
+	const hasOffset = (b: StepBoundary): boolean =>
+		b.finishedMono > b.startedMono && b.startedMono > 0;
+
+	// ⚠⚠ **어느 시각을 쓸지는 여기서 정한다** — drift 는 수집이 끝나야 알 수 있으므로
+	// 기록 시점에는 고를 수 없다(그래서 백엔드가 둘 다 싣는다).
+	//
+	//   clockSync 멀쩡 → offset. 창이 executeStep 만 감싸 정확하다.
+	//   드리프트로 못 믿음 → marker. 창은 adb 왕복까지 감싸 넓지만 **밀리지 않는다.**
+	//
+	// 한때 marker 를 무조건 우선했다가 정상 기기의 구간이 왕복 지연만큼 부풀었다.
+	// 반대로 offset 만 쓰면 드리프트 잡의 구간이 통째로 사라진다. 둘 다 틀린 선택이라
+	// **상황에 따라 고르는 것**이 유일한 답이다.
+	const useMarker = (b: StepBoundary): boolean => hasMarker(b) && !clockSyncUsable;
 	const boundaryTrusted = (b: StepBoundary): boolean =>
-		b.finishedMono > b.startedMono &&
-		b.startedMono > 0 &&
-		(b.boundarySource === 'trace_marker' || clockSyncUsable);
+		useMarker(b) || (hasOffset(b) && clockSyncUsable);
+
+	/** 화면에 그릴 시각 — 위 판정에 따라 고른 쪽. */
+	const boundaryStart = (b: StepBoundary): number =>
+		useMarker(b) ? (b.markerStartedMono ?? 0) : b.startedMono;
+	const boundaryFinish = (b: StepBoundary): number =>
+		useMarker(b) ? (b.markerFinishedMono ?? 0) : b.finishedMono;
 
 	const allBoundaries = $derived(
 		boundaries.filter(b =>
@@ -176,8 +196,9 @@
 		if (usableBoundaries.length === 0) return null;
 		let lo = Infinity, hi = -Infinity;
 		for (const b of usableBoundaries) {
-			if (b.startedMono < lo) lo = b.startedMono;
-			if (b.finishedMono > hi) hi = b.finishedMono;
+			const bs = boundaryStart(b), bf = boundaryFinish(b);
+			if (bs < lo) lo = bs;
+			if (bf > hi) hi = bf;
 		}
 		if (!isFinite(lo) || !(hi > lo)) return null;
 		// 경계에 딱 붙으면 끝점 IO 가 잘려 보인다. 5% 여유.
@@ -200,9 +221,9 @@
 	// ⚠ **화면에 실제로 그려지는 구간** 기준이어야 한다. 배너의 목적이 "지금 보이는
 	// 구간을 믿어도 되는 근거" 라서, loop 필터로 marker 구간이 빠졌는데도 배너가 뜨면
 	// 근거가 아니라 오해가 된다.
-	const usesMarkerFallback = $derived(
-		allBoundaries.some(b => b.boundarySource === 'trace_marker')
-	);
+	// ⚠ **실제로 marker 를 쓴 구간**이 있을 때만 배너를 띄운다. marker 가 실려 있다는
+	// 것만으로 띄우면 정상 기기(offset 사용)에도 "adb 가 느려서" 라는 **거짓 설명**이 뜬다.
+	const usesMarkerFallback = $derived(allBoundaries.some(useMarker));
 	const hasBehavior = $derived(allBoundaries.length > 0);
 
 	// 구간 색 — **순번대로 여러 색**을 돌린다.
@@ -1221,9 +1242,9 @@
 			return lo;
 		};
 		return usableBoundaries.map((b, i) => {
-			const from = lowerBound(b.startedMono);
+			const from = lowerBound(boundaryStart(b));
 			let to = from;
-			while (to < sorted.length && sorted[to].time <= b.finishedMono) to++;
+			while (to < sorted.length && sorted[to].time <= boundaryFinish(b)) to++;
 			const inRange = sorted.slice(from, to);
 			// latency 는 완료 이벤트에만 실린다 (send 행의 dtoc 는 0).
 			const lat = inRange.map(e => e.dtoc).filter(v => v > 0).sort((a, c) => a - c);
@@ -1251,7 +1272,7 @@
 				colorIndex: colorIndexOf(b),
 				label: behaviorLabel(b),
 				type: b.type,
-				durationSec: b.finishedMono - b.startedMono,
+				durationSec: boundaryFinish(b) - boundaryStart(b),
 				events: inRange.length,
 				readBytes,
 				writeBytes,
@@ -1283,8 +1304,9 @@
 		if (usableBoundaries.length === 0) return { t0: 0, t1: 1 };
 		let t0 = Infinity, t1 = -Infinity;
 		for (const b of usableBoundaries) {
-			if (b.startedMono < t0) t0 = b.startedMono;
-			if (b.finishedMono > t1) t1 = b.finishedMono;
+			const s0 = boundaryStart(b), f0 = boundaryFinish(b);
+			if (s0 < t0) t0 = s0;
+			if (f0 > t1) t1 = f0;
 		}
 		// 폭이 0 이면 나눗셈이 깨진다 (스텝 하나가 순간에 끝난 경우).
 		if (!(t1 > t0)) t1 = t0 + 1;
@@ -1303,7 +1325,7 @@
 		if (edgeUncertaintySec <= 0 || allBoundaries.length === 0) return false;
 		let shortest = Infinity;
 		for (const b of allBoundaries) {
-			const d = b.finishedMono - b.startedMono;
+			const d = boundaryFinish(b) - boundaryStart(b);
 			if (d > 0 && d < shortest) shortest = d;
 		}
 		if (!isFinite(shortest)) return false;
@@ -1521,11 +1543,16 @@
 						     믿어도 되나" 를 알 수 없다 — marker 는 오히려 더 정확하므로
 						     불안이 아니라 **근거**를 준다. -->
 						<div class="mb-2 rounded border border-sky-500/40 bg-sky-500/10 p-2 text-[9px] leading-relaxed">
-							<b>구간 경계를 기기에서 직접 찍었습니다 (trace_marker).</b>
-							adb 왕복이 느려 clock offset 을 못 믿는 상황이라, 호스트 시각 대신
-							커널이 자기 시계로 찍은 값을 씁니다.
+							<b>구간 경계를 기기에서 직접 찍은 값으로 대체했습니다 (trace_marker).</b>
+							{#if clockSyncReason}
+								<span class="font-mono">{clockSyncReason}</span>
+							{:else}
+								clock offset 을 믿을 수 없어 호스트 시각 대신 커널이 찍은 값을 씁니다.
+							{/if}
 							<div class="mt-0.5 {captionMuted}">
-								adb 왕복이 오차에 들어가지 않으므로 이 구간은 offset 방식보다 오히려 정확합니다.
+								이 값은 시계가 밀려도 어긋나지 않습니다. 다만 구간 폭에 adb 왕복
+								시간이 포함돼 <strong>실제 스텝보다 조금 넓게</strong> 잡힙니다 —
+								경계 근처의 IO 귀속은 그만큼 느슨하게 보세요.
 							</div>
 						</div>
 					{/if}

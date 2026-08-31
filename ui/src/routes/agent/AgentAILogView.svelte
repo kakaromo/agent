@@ -132,8 +132,10 @@
 		// 취소한 뒤 여기로 오면 직전 프로파일의 이름·설명·soc 와 **죽은 logcat 패턴**
 		// (marks/series)이 그대로 섞여 저장된다. marker 검증기는 counters/sections 만
 		// 보므로 그 잔재를 못 잡고 조용히 통과시킨다.
-		// runtime/soc 은 사용자가 고른 값이라 유지한다 (위 seedProfileFromTag 와 같은 이유).
-		form = { ...form, name: `${c.name} profile`, description: '',
+		// ⚠ runtime 은 유지하되 **soc 는 비운다.** soc 는 기기별 값(SM8975 등)인데
+		// seed 는 방금 본 trace 의 기기 기준이라, 직전 프로파일 값을 이어받으면 조회
+		// 필터가 어긋나 저장한 프로파일이 목록에서 사라진 것처럼 보인다.
+		form = { ...form, name: `${c.name} profile`, description: '', soc: '',
 			source: 'marker', patternsJson: '{}' };
 		editingId = null;
 		const cur: MarkerPatterns = {};
@@ -157,9 +159,9 @@
 		// (`TTFT ([0-9.]+) ms` 등)이 초안에 박히는데, 클라이언트·서버 검증을 모두
 		// 통과하므로 그대로 저장하면 **어디에도 안 맞는 프로파일**이 조용히 만들어진다.
 		// 토스트는 "원문을 보고 정규식을 채우세요" 라고 말하는데 이미 채워져 있는 셈이다.
-		// ⚠ runtime/soc 은 사용자가 고른 값이라 유지한다 — 초기화하면 조회 필터가
-		// 바뀌어 저장한 프로파일이 목록에서 사라진 것처럼 보인다.
-		form = { ...form, name: `${tag} profile`, description: '',
+		// ⚠ runtime 은 사용자가 고른 값이라 유지한다(초기화하면 조회 필터가 바뀐다).
+		// soc 는 기기별 값이라 **비운다** — 직전 프로파일 것을 이어받으면 안 된다.
+		form = { ...form, name: `${tag} profile`, description: '', soc: '',
 			source: 'logcat', patternsJson: JSON.stringify(emptyPatterns, null, 2) };
 		editingId = null;
 		const cur = parsePatterns(form.patternsJson);

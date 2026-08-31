@@ -97,6 +97,16 @@ export interface StepBoundary {
 	 * 보이면 "느린 기기였지만 구간은 오히려 더 정확하다" 는 뜻이다).
 	 */
 	boundarySource?: string;
+	/**
+	 * trace_marker 로 찍은 시각 — `startedMono` 를 **대체하지 않고 나란히** 온다.
+	 *
+	 * 두 값은 정확도 특성이 다르다:
+	 *   offset: 스텝 실행 구간만 감싼다(정확) — 단 드리프트 시 통째로 밀린다
+	 *   marker: 커널이 직접 찍어 안 밀린다 — 단 창이 adb 왕복까지 감싸 더 넓다
+	 * 어느 쪽을 쓸지는 drift 를 아는 시점(수집 후)에 화면이 고른다.
+	 */
+	markerStartedMono?: number;
+	markerFinishedMono?: number;
 	success: boolean;
 	error: string;
 }

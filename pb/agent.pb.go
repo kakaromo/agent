@@ -1525,8 +1525,19 @@ type StepBoundary struct {
 	// 화면이 "이 구간을 얼마나 믿을 수 있나" 를 표시할 근거다 — marker 는 adb 왕복이
 	// 오차에 안 들어가므로 오히려 더 정확하다.
 	BoundarySource string `protobuf:"bytes,12,opt,name=boundary_source,json=boundarySource,proto3" json:"boundary_source,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// marker_started_mono / marker_finished_mono — ftrace trace_marker 로 찍은 시각.
+	//
+	// ⚠ started_mono 를 **덮어쓰지 않고 나란히** 싣는다. 두 값은 정확도 특성이 다르다:
+	//
+	//	offset: 스텝 실행 구간만 감싼다(정확한 창) — 단 드리프트 시 통째로 밀린다
+	//	marker: 커널이 직접 찍어 밀리지 않는다 — 단 창이 adb 왕복까지 감싸 더 넓다
+	//
+	// 어느 쪽을 쓸지는 **drift 를 아는 시점**(수집 종료 후)에야 정할 수 있으므로,
+	// 기록 시점에 하나를 골라 버리면 나중에 되돌릴 수 없다.
+	MarkerStartedMono  float64 `protobuf:"fixed64,13,opt,name=marker_started_mono,json=markerStartedMono,proto3" json:"marker_started_mono,omitempty"`
+	MarkerFinishedMono float64 `protobuf:"fixed64,14,opt,name=marker_finished_mono,json=markerFinishedMono,proto3" json:"marker_finished_mono,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *StepBoundary) Reset() {
@@ -1641,6 +1652,20 @@ func (x *StepBoundary) GetBoundarySource() string {
 		return x.BoundarySource
 	}
 	return ""
+}
+
+func (x *StepBoundary) GetMarkerStartedMono() float64 {
+	if x != nil {
+		return x.MarkerStartedMono
+	}
+	return 0
+}
+
+func (x *StepBoundary) GetMarkerFinishedMono() float64 {
+	if x != nil {
+		return x.MarkerFinishedMono
+	}
+	return 0
 }
 
 type DeleteJobRequest struct {
@@ -8865,7 +8890,7 @@ const file_agent_proto_rawDesc = "" +
 	"loop_index\x18\x03 \x01(\x05R\tloopIndex\x12!\n" +
 	"\frepeat_index\x18\x04 \x01(\x05R\vrepeatIndex\x12\x1d\n" +
 	"\n" +
-	"trace_type\x18\x05 \x01(\tR\ttraceType\"\xfa\x02\n" +
+	"trace_type\x18\x05 \x01(\tR\ttraceType\"\xdc\x03\n" +
 	"\fStepBoundary\x12\x1d\n" +
 	"\n" +
 	"step_index\x18\x01 \x01(\x05R\tstepIndex\x12\x1d\n" +
@@ -8883,7 +8908,9 @@ const file_agent_proto_rawDesc = "" +
 	"\asuccess\x18\n" +
 	" \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\v \x01(\tR\x05error\x12'\n" +
-	"\x0fboundary_source\x18\f \x01(\tR\x0eboundarySource\")\n" +
+	"\x0fboundary_source\x18\f \x01(\tR\x0eboundarySource\x12.\n" +
+	"\x13marker_started_mono\x18\r \x01(\x01R\x11markerStartedMono\x120\n" +
+	"\x14marker_finished_mono\x18\x0e \x01(\x01R\x12markerFinishedMono\")\n" +
 	"\x10DeleteJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11DeleteJobResponse\x12\x18\n" +

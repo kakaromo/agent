@@ -1224,8 +1224,11 @@ type stepMarks struct {
 
 // markStepBegin — 스텝 실행 **전에** 경계를 기기 축에 찍는다.
 //
-// ⚠ trace 가 안 돌거나 marker 를 못 쓰면 조용히 0 을 남긴다. 이건 폴백이라
-// 실패가 시나리오를 막으면 안 된다 — 정상 기기는 애초에 이 값을 안 쓴다.
+// ⚠ trace 가 안 돌거나 marker 를 못 쓰면 조용히 0 을 남긴다. 부가 기록이라
+// 실패가 시나리오를 막으면 안 된다.
+//
+// ⚠ 값은 **항상 기록**하되 쓸지 말지는 화면이 정한다 — drift 는 수집이 끝나야
+// 알 수 있어서 여기서는 고를 수 없다 (attachMarkerTimes 주석 참고).
 func (o *Orchestrator) markStepBegin(ctx context.Context, traceJobID string, es expandedStep) *stepMarks {
 	mk := &stepMarks{}
 	if o.traceMgr == nil || traceJobID == "" {
@@ -1273,17 +1276,27 @@ const (
 	markerKindEnd   = "E"
 )
 
-// applyMarkerFallback — offset 경로가 실패했을 때 marker 시각으로 구간을 채운다.
+// attachMarkerTimes — marker 시각을 **덮어쓰지 않고 나란히** 싣는다.
 //
-// ⚠ **양쪽이 다 있어야 쓴다.** 한쪽만 채우면 시작은 기기 축, 끝은 0 인 반쪽 구간이
-// 되어 UI 가 엉뚱한 범위를 그린다. 없는 편이 낫다.
-func applyMarkerFallback(b *pb.StepBoundary, mk *stepMarks) {
+// ⚠ 한때 offset 값을 marker 로 덮어썼는데(드리프트를 덮으려고) 그게 더 나빴다:
+// marker 창은 `executeStep` **바깥**에서 읽힌다(begin 은 실행 전 셸, end 는 실행 후 셸)
+// — 즉 스텝 양쪽의 adb 왕복을 감싸므로 호스트 창보다 **넓다.** 정상 기기에서
+// 그걸 기본값으로 쓰면 모든 구간이 왕복 지연만큼 부풀고, 앞뒤 구간의 IO 가 섞여 든다.
+// 측정 도구가 자기 측정을 망치는 셈이다.
+//
+// 어느 쪽을 쓸지는 **drift 를 아는 시점**(수집 종료 후)에야 정할 수 있다. 그래서
+// 기록 시점에는 둘 다 남기고, 화면이 그때 고른다:
+//
+//	clockSync 가 멀쩡  → offset (창이 정확)
+//	드리프트로 못 믿음  → marker (밀리지 않음)
+//
+// ⚠ 양쪽 경계가 다 있어야 싣는다. 한쪽만 있으면 반쪽 구간이라 쓸 수 없다.
+func attachMarkerTimes(b *pb.StepBoundary, mk *stepMarks) {
 	if mk == nil || mk.begin == 0 || mk.end == 0 || mk.end < mk.begin {
 		return
 	}
-	b.StartedMono = mk.begin
-	b.FinishedMono = mk.end
-	b.BoundarySource = "trace_marker"
+	b.MarkerStartedMono = mk.begin
+	b.MarkerFinishedMono = mk.end
 }
 
 // recordStepBoundary — 스텝 하나의 실행 구간을 Job 에 기록한다.
@@ -1323,17 +1336,9 @@ func (o *Orchestrator) recordStepBoundaryWith(job *Job, deviceID string, es expa
 		if m, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, finishedAt); ok {
 			b.FinishedMono = m
 		}
-		// ⚠⚠ **marker 시각이 있으면 그쪽을 쓴다** (offset 값이 채워졌더라도).
-		//
-		// 한때 `mono == 0` 일 때만 폴백했는데, 그러면 **드리프트를 영영 못 덮는다**:
-		// HostToDeviceMonotonic 은 스텝 중엔 항상 성공하므로(ClockSync.Stop 이 아직
-		// nil 이라 Usable() 이 조기 true) mono 가 "그럴듯하지만 밀린" 값으로 채워지고,
-		// 그 조건이 거짓이 되어 marker 를 버린다. 정작 StopTrace 에서 drift 가 잡히면
-		// UI 는 offset 구간을 거부하고 — marker 는 이미 버려져 **구간이 전멸한다.**
-		//
-		// marker 는 커널이 자기 시계로 찍은 값이라 offset 보다 정확하다(adb 왕복이
-		// 오차에 안 들어간다). 있으면 쓰는 것이 맞고, 없을 때만 offset 이 남는다.
-		applyMarkerFallback(b, mk)
+		// marker 시각은 **덮어쓰지 않고 나란히** 싣는다. 선택은 화면이 drift 를 아는
+		// 시점에 한다 (attachMarkerTimes 주석 참고).
+		attachMarkerTimes(b, mk)
 	}
 	job.appendStepBoundary(deviceID, b)
 }

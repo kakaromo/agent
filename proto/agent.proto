@@ -246,6 +246,16 @@ message StepBoundary {
   // 화면이 "이 구간을 얼마나 믿을 수 있나" 를 표시할 근거다 — marker 는 adb 왕복이
   // 오차에 안 들어가므로 오히려 더 정확하다.
   string boundary_source = 12;
+
+  // marker_started_mono / marker_finished_mono — ftrace trace_marker 로 찍은 시각.
+  //
+  // ⚠ started_mono 를 **덮어쓰지 않고 나란히** 싣는다. 두 값은 정확도 특성이 다르다:
+  //   offset: 스텝 실행 구간만 감싼다(정확한 창) — 단 드리프트 시 통째로 밀린다
+  //   marker: 커널이 직접 찍어 밀리지 않는다 — 단 창이 adb 왕복까지 감싸 더 넓다
+  // 어느 쪽을 쓸지는 **drift 를 아는 시점**(수집 종료 후)에야 정할 수 있으므로,
+  // 기록 시점에 하나를 골라 버리면 나중에 되돌릴 수 없다.
+  double marker_started_mono = 13;
+  double marker_finished_mono = 14;
 }
 
 message DeleteJobRequest {

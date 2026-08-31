@@ -149,6 +149,10 @@ func benchmarkResultToMap(r *pb.BenchmarkResult) map[string]any {
 				// 구간을 무엇으로 얻었나 — ""=ClockOffset(기본), "trace_marker"=폴백.
 				// ⚠ 여기서 빠뜨리면 proto 에 넣어도 화면까지 안 간다 (조용히 사라지는 필드).
 				"boundarySource": b.GetBoundarySource(),
+				// ⚠ 이 둘도 반드시 싣는다 — 빠뜨리면 화면이 드리프트 잡에서 쓸 대체
+				// 시각을 못 받아 구간이 통째로 사라진다.
+				"markerStartedMono":  b.GetMarkerStartedMono(),
+				"markerFinishedMono": b.GetMarkerFinishedMono(),
 			})
 		}
 		m["stepBoundaries"] = bs
