@@ -439,9 +439,24 @@ func (m *LogcatManager) StartLogcatForJob(ctx context.Context, deviceID string,
 			"부하가 크므로 실측정에는 태그를 지정할 것", "device", deviceID)
 	}
 	return m.StartLogcat(ctx, StartLogcatRequest{
-		DeviceID:  deviceID,
-		Mode:      mode,
-		Tags:      tags,
+		DeviceID: deviceID,
+		Mode:     mode,
+		Tags:     tags,
+		// ⚠⚠ 잡에 딸린 수집은 **반드시 epoch** 이다. 기본값(monotonic)을 그대로
+		// 두면 안 된다 — IO 트레이스(ftrace `trace_clock=boot`, fsiotrace
+		// `--clock=boot`, ClockOffset 의 `/proc/uptime`)가 전부 BOOTTIME 인데
+		// MONOTONIC 은 누적 suspend 만큼 어긋난다 (실기기 실측 120.5초).
+		//
+		// 이 축 차이가 **조용히 틀리는** 이유: 탐색 화면은 사용자에게 유휴/추론
+		// 구간을 초 단위로 받는다. 사용자는 그 숫자를 trace 타임라인에서 읽어
+		// 넣는데, 축이 다르면 엉뚱한 구간의 줄이 뽑히고 OnlyDuringRun(차분)이
+		// 통째로 무의미해진다. 그런데 화면상으론 결과가 멀쩡히 나온다.
+		//
+		// epoch 을 고른 이유: wall clock 이라 호스트 시각과 직접 대조되고,
+		// ClockOffset 이 이미 호스트↔BOOTTIME 을 재고 있으므로 둘을 이으면
+		// 변환이 성립한다. monotonic 은 suspend 누적을 따로 재지 않는 한
+		// 어떤 방법으로도 BOOTTIME 으로 옮길 수 없다.
+		Format:    LogcatFormatEpoch,
 		OutputDir: outputDir,
 	})
 }
