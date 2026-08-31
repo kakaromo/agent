@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -143,6 +144,14 @@ func resolvePatterns(r *http.Request, body map[string]any, db *sqlitedb.DB) (str
 		p, err := db.FindAILogProfile(r.Context(), id)
 		if err != nil {
 			return "", errText("프로파일을 찾을 수 없다")
+		}
+		// ⚠ 소스 가드 (marker 쪽과 대칭). marker 프로파일을 logcat 파싱에 넣으면
+		// 필드 이름이 달라(counters/sections vs marks/series) 빈 패턴으로 풀리고
+		// "패턴이 비어 있다" 라는 **엉뚱한 원인**이 나간다. UI 의 프로파일 목록은
+		// 소스와 무관하게 전부 보여주므로 한 번의 클릭으로 닿는 경로다.
+		if p.Source == sqlitedb.AISourceMarker {
+			return "", errText(fmt.Sprintf(
+				"프로파일 %d 은 marker 용이다 — logcat 파싱에는 쓸 수 없다 (패턴 구조가 다르다)", id))
 		}
 		return p.PatternsJSON, nil
 	}
