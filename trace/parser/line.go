@@ -41,18 +41,49 @@ type ftraceHeader struct {
 func parseFtraceHeader(line string) (ftraceHeader, bool) {
 	var h ftraceHeader
 
-	// 1) `[CPU]` 위치를 찾는다. comm 에 `[` 가 들어가는 케이스는 거의 없으므로
-	// 첫 `[` 다음 닫는 `]` 까지를 CPU 토큰으로 본다.
-	openIdx := strings.IndexByte(line, '[')
-	if openIdx <= 0 {
+	// 1) `[CPU]` 위치를 찾는다.
+	//
+	// ⚠⚠ 예전엔 "comm 에 `[` 가 들어가는 케이스는 거의 없다" 고 보고 **첫 `[`** 를
+	// 썼는데, 실기기에서 틀렸다. 안드로이드 스레드 이름에 대괄호가 흔하다:
+	//
+	//	highpool[392]-7685    [002] d.h1. …   ← 첫 `[` 는 스레드 이름의 것
+	//	     ^^^^^                  ^^^^^        진짜 CPU 는 뒤쪽
+	//
+	// 그러면 CPU 를 392 로 읽고, 범위를 넘으면 그 줄을 통째로 버린다. 실측(S25 앱
+	// 전환 1회): ufshcd 줄 583건이 이 형태였고 393건이 버려졌다. **send/complete
+	// 균형이 깨져 QD 가 회수되지 않고 157까지 누적**됐다(하드웨어 상한은 32×8).
+	// 조용히 틀리는 종류다 — 줄이 사라진 것은 안 보이고 QD 그래프만 이상해진다.
+	//
+	// CPU 토큰은 `[` + 숫자 + `]` 이고 **뒤에 공백이 온다**. 스레드 이름의 대괄호는
+	// `highpool[392]-7685` 처럼 뒤에 `-` 나 다른 문자가 붙는다. 그래서 "닫는 대괄호
+	// 다음이 공백" 인 것을 CPU 로 본다 — 첫 번째로 그 조건을 만족하는 것을 쓴다.
+	// ⚠ comm 이 16자에서 잘려 **여는 대괄호만 남는** 경우가 있다
+	// (`IntentService[C-9374`). 그때 `]` 를 못 찾는다고 포기하면 그 줄을 통째로
+	// 버리게 되므로, 닫는 짝이 없으면 **다음 `[` 로 계속 넘어간다.**
+	openIdx, closeIdx := -1, -1
+	for i := 0; i < len(line); i++ {
+		if line[i] != '[' {
+			continue
+		}
+		j := strings.IndexByte(line[i:], ']')
+		if j <= 0 {
+			continue // 닫는 짝 없음 — comm 이 잘린 경우. 다음 후보로.
+		}
+		j += i
+		// CPU 필드의 조건 두 가지를 **모두** 본다:
+		//   ① `]` 바로 뒤가 공백      (스레드 이름의 대괄호는 `-` 등이 붙는다)
+		//   ② 대괄호 안이 숫자만       (`[C-9374    [005` 같은 잘못된 짝을 배제)
+		// ⚠ ②가 없으면 comm 이 잘려 여는 대괄호만 남은 경우
+		// (`IntentService[C-9374   [005]`) 에 comm 의 `[` 와 CPU 의 `]` 가 짝지어져
+		// 안쪽이 `C-9374    [005` 가 되는데, 뒤가 공백이라 ①만으로는 통과해 버린다.
+		if j+1 < len(line) && line[j+1] == ' ' && isAllDigits(line[i+1:j]) {
+			openIdx, closeIdx = i, j
+			break
+		}
+	}
+	if openIdx <= 0 || closeIdx <= openIdx {
 		return h, false
 	}
-	closeIdx := strings.IndexByte(line[openIdx:], ']')
-	if closeIdx <= 0 {
-		return h, false
-	}
-	closeIdx += openIdx
-
 	// 2) `process` = openIdx 이전 trim 한 토큰
 	process := strings.TrimSpace(line[:openIdx])
 	if process == "" {
@@ -401,4 +432,17 @@ func parseUFSCustomLine(line string) (UFSCustomEvent, bool) {
 		DtoC:      dtoc,
 		Aligned:   isUFSAligned(lba),
 	}, true
+}
+
+// isAllDigits — 빈 문자열이 아니고 전부 0-9 인가. CPU 토큰 판정용.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
