@@ -105,3 +105,52 @@ func TestCreateAILogProfile_MarkerValidation(t *testing.T) {
 		t.Errorf("빈 source 가 %q 로 저장됐다 — logcat 이어야 한다", p.Source)
 	}
 }
+
+// ⚠ 검증 메시지가 전부 400 으로 분류돼야 한다. 하나라도 500 이 나가면 사용자는
+// 서버 탓으로 읽고 자기 패턴을 고칠 생각을 못 한다 (이 함수의 존재 이유).
+// 반대로 매칭이 너무 넓으면 진짜 서버 에러가 400 으로 둔갑한다.
+func TestStatusForProfileErr_MarkerMessages(t *testing.T) {
+	db, err := sqlitedb.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	ctx := context.Background()
+
+	// marker 검증이 거부하는 모든 경우를 실제로 태워 본다.
+	bad := []string{
+		`{}`,                                     // counters/sections 둘 다 없음
+		`{"counters":[{"name":"x"}]}`,            // key 없음
+		`{"counters":[{"key":"a"}]}`,             // name/regex 둘 다 없음
+		`{"counters":[{"key":"a","regex":"("}]}`, // 잘못된 정규식
+		`{"counters":[{"key":"a","name":"x"}],"sections":[{"key":"a","name":"y"}]}`, // 키 중복
+	}
+	for _, pj := range bad {
+		_, err := db.CreateAILogProfile(ctx, &sqlitedb.AILogProfile{
+			Name: "n", Runtime: "r", Source: sqlitedb.AISourceMarker, PatternsJSON: pj,
+		})
+		if err == nil {
+			t.Errorf("검증을 통과했다: %s", pj)
+			continue
+		}
+		if got := statusForProfileErr(err); got != 400 {
+			t.Errorf("%s → HTTP %d (400 이어야 한다): %v", pj, got, err)
+		}
+	}
+
+	// 서버 에러는 500 이어야 한다.
+	//
+	// ⚠ 영어 DB 에러만으로는 검증이 안 된다 — 한국어 문구와 겹칠 일이 없어서
+	// 매칭이 아무리 넓어도 통과한다. **한국어가 섞인 서버 에러**를 넣어야 넓은 매칭이
+	// 드러난다 (이 코드베이스는 에러 메시지를 한국어로 쓴다).
+	for _, msg := range []string{
+		"database is locked",
+		"disk I/O error",
+		"잡 폴더를 만들 수 없다: 디스크 공간이 비어 있다",      // "비어 있다" 를 담은 서버 에러
+		"archive 경로가 설정돼 있어야 한다 (설정 파일 확인)", // "있어야 한다" 를 담은 서버 에러
+	} {
+		if got := statusForProfileErr(errText(msg)); got != 500 {
+			t.Errorf("서버 에러 %q 가 HTTP %d 로 분류됐다 — 사용자가 자기 패턴 탓으로 오해한다", msg, got)
+		}
+	}
+}

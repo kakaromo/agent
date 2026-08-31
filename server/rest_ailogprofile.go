@@ -125,7 +125,14 @@ func registerAILogProfileRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 // 400 으로 돌려주는 것이 사용자에게 가장 도움이 된다.
 func statusForProfileErr(err error) int {
 	msg := err.Error()
-	for _, s := range []string{"required", "regex", "캡처 그룹", "중복", "patternsJson"} {
+	// ⚠ marker 검증 메시지도 포함해야 한다. 빠뜨리면 사용자 패턴 문제인데 500 이 나가고,
+	// 그러면 사용자는 서버 탓으로 읽어 자기 패턴을 고칠 생각을 못 한다.
+	// ⚠ 다만 문구는 **검증기 고유의 것**만 넣는다 — "있어야 한다" 같은 일반 한국어를
+	// 넣으면 나중에 서버 에러가 우연히 그 낱말을 담았을 때 400 으로 둔갑한다.
+	for _, s := range []string{
+		"required", "regex", "캡처 그룹", "중복", "patternsJson",
+		"counters 또는 sections", "key 가 비어 있다", "name 또는 regex",
+	} {
 		if strings.Contains(msg, s) {
 			return http.StatusBadRequest
 		}
