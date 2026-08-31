@@ -214,6 +214,15 @@ type TraceController interface {
 	// 보여서 검증에서 안 걸러진다 (trace/clockoffset.go 참고).
 	HostToDeviceMonotonic(traceJobID string, hostMillis int64) (float64, bool)
 
+	// WriteBoundaryMarker — ftrace trace_marker 로 경계를 **기기 축에 직접** 찍고
+	// 그 시각(boot clock 초)을 돌려준다. HostToDeviceMonotonic 이 실패했을 때의 폴백.
+	//
+	// ⚠ 폴백인 이유: 기기에 쓰기가 발생하고 `tracing_on=1` 일 때만 된다. 대신 커널이
+	// 자기 시계로 찍으므로 **adb 왕복이 오차에 안 들어간다** — offset 방식이 RTT 때문에
+	// 비활성화되는 느린 기기에서 구간 분할을 살리는 유일한 수단이다.
+	WriteBoundaryMarker(ctx context.Context, traceJobID string,
+		kind string, label string) (float64, bool)
+
 	// TraceTypeOf — 그 잡이 실제로 어떤 trace_type 으로 돌고 있는지.
 	//
 	// trace_stop 스텝은 자기 params 에 trace_type 이 없는 게 보통이라(그 선택은

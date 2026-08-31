@@ -13,13 +13,30 @@ type fakeTraceCtl struct {
 	offset    float64
 	usable    bool
 	traceType string // TraceTypeOf 가 돌려줄 값 (빈 값 = 모르는 잡)
+
+	// marker 폴백용 — markerOK 면 markerSeq 를 하나씩 돌려준다.
+	markerOK  bool
+	markerSeq []float64
+	markerN   int
 }
 
 func (f *fakeTraceCtl) StartTrace(context.Context, *pb.StartTraceRequest) (string, error) {
 	return "", nil
 }
-func (f *fakeTraceCtl) StopTrace(string) error      { return nil }
-func (f *fakeTraceCtl) TraceTypeOf(string) string  { return f.traceType }
+func (f *fakeTraceCtl) StopTrace(string) error    { return nil }
+func (f *fakeTraceCtl) TraceTypeOf(string) string { return f.traceType }
+func (f *fakeTraceCtl) WriteBoundaryMarker(_ context.Context, _ string, _, _ string) (float64, bool) {
+	if !f.markerOK {
+		return 0, false
+	}
+	if f.markerN >= len(f.markerSeq) {
+		return 0, false
+	}
+	v := f.markerSeq[f.markerN]
+	f.markerN++
+	return v, true
+}
+
 func (f *fakeTraceCtl) HostToDeviceMonotonic(_ string, hostMillis int64) (float64, bool) {
 	if !f.usable {
 		return 0, false
@@ -180,4 +197,63 @@ func TestFirstNonEmpty(t *testing.T) {
 	if got := firstNonEmpty("", ""); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
+}
+
+// ⚠ marker 는 **폴백**이다. offset 이 멀쩡하면 기기에 쓰지 않는 쪽이 기본이어야 한다.
+func TestMarkerFallback(t *testing.T) {
+	es := expandedStep{
+		step:      &pb.ScenarioStep{Type: "scroll"},
+		stepIndex: 1, repeatIndex: 1,
+	}
+
+	t.Run("offset 이 쓸 만하면 marker 값을 안 쓴다", func(t *testing.T) {
+		f := &fakeTraceCtl{offset: 100, usable: true, markerOK: true, markerSeq: []float64{7, 8}}
+		o := &Orchestrator{traceMgr: f}
+		j := &Job{}
+		mk := &stepMarks{begin: 7, end: 8}
+		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
+
+		b := j.takeStepBoundaries("dev1")[0]
+		if b.GetBoundarySource() != "" {
+			t.Errorf("offset 이 되는데 marker 로 표시됐다: %q", b.GetBoundarySource())
+		}
+		if b.GetStartedMono() != 101 { // 1000ms/1000 + 100
+			t.Errorf("offset 값이 아니다: %v", b.GetStartedMono())
+		}
+	})
+
+	t.Run("offset 이 안 되면 marker 로 채운다", func(t *testing.T) {
+		f := &fakeTraceCtl{usable: false}
+		o := &Orchestrator{traceMgr: f}
+		j := &Job{}
+		mk := &stepMarks{begin: 7.5, end: 8.25}
+		o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
+
+		b := j.takeStepBoundaries("dev1")[0]
+		if b.GetStartedMono() != 7.5 || b.GetFinishedMono() != 8.25 {
+			t.Errorf("marker 값이 안 들어갔다: %v~%v", b.GetStartedMono(), b.GetFinishedMono())
+		}
+		if b.GetBoundarySource() != "trace_marker" {
+			t.Errorf("출처 표시가 없다: %q — 화면이 신뢰도를 못 알린다", b.GetBoundarySource())
+		}
+	})
+
+	t.Run("한쪽만 찍힌 marker 는 쓰지 않는다", func(t *testing.T) {
+		for _, mk := range []*stepMarks{
+			{begin: 7.5, end: 0},  // 끝을 못 찍음
+			{begin: 0, end: 8.25}, // 시작을 못 찍음
+			{begin: 9, end: 8},    // 역전 (시각이 거꾸로)
+			nil,
+		} {
+			f := &fakeTraceCtl{usable: false}
+			o := &Orchestrator{traceMgr: f}
+			j := &Job{}
+			o.recordStepBoundaryWith(j, "dev1", es, "trace1", 1000, 2000, nil, mk)
+
+			b := j.takeStepBoundaries("dev1")[0]
+			if b.GetStartedMono() != 0 || b.GetFinishedMono() != 0 {
+				t.Errorf("불완전한 marker(%+v)로 구간을 만들었다 — 반쪽 구간은 엉뚱한 범위를 그린다", mk)
+			}
+		}
+	})
 }

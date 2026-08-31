@@ -336,11 +336,13 @@ func (o *Orchestrator) runScenarioOnDevice(ctx context.Context, job *Job, device
 
 		prevTraceID := activeTraceJobID
 		stepStartedAt := time.Now().UnixMilli()
+		mk := o.markStepBegin(ctx, prevTraceID, es)
 		stepOut, stepMetrics, err := o.executeStep(ctx, job, md, es, i, stepFiles, deviceID, &activeTraceJobID)
+		mk.markEnd(ctx, o, firstNonEmpty(prevTraceID, activeTraceJobID))
 		// 구간 기록 — trace_start 스텝은 실행 **후**에야 잡 ID 가 생기므로 전/후 중
 		// 있는 쪽을 쓴다. (통짜 1잡이면 두 값이 같다)
-		o.recordStepBoundary(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
-			stepStartedAt, time.Now().UnixMilli(), err)
+		o.recordStepBoundaryWith(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
+			stepStartedAt, time.Now().UnixMilli(), err, mk)
 
 		// trace 상태가 바뀌었으면 job에 등록/해제 (cancel 시 정리용)
 		if activeTraceJobID != prevTraceID {
@@ -1206,6 +1208,61 @@ func describeStep(step *pb.ScenarioStep) string {
 	return step.GetType()
 }
 
+// stepMarks — marker 폴백으로 얻은 기기 축 시각 (초, boot clock).
+//
+// 0 이면 못 찍었다는 뜻이다. expandedStep 에 담지 않는 이유: 그 구조체는 값으로
+// 복사돼 돌아다녀서 실행 중 채운 값이 호출자에게 안 돌아온다.
+type stepMarks struct {
+	begin float64
+	end   float64
+}
+
+// markStepBegin — 스텝 실행 **전에** 경계를 기기 축에 찍는다.
+//
+// ⚠ trace 가 안 돌거나 marker 를 못 쓰면 조용히 0 을 남긴다. 이건 폴백이라
+// 실패가 시나리오를 막으면 안 된다 — 정상 기기는 애초에 이 값을 안 쓴다.
+func (o *Orchestrator) markStepBegin(ctx context.Context, traceJobID string, es expandedStep) *stepMarks {
+	mk := &stepMarks{}
+	if o.traceMgr == nil || traceJobID == "" {
+		return mk
+	}
+	if t, ok := o.traceMgr.WriteBoundaryMarker(ctx, traceJobID, markerKindBegin, describeStep(es.step)); ok {
+		mk.begin = t
+	}
+	return mk
+}
+
+// end — 스텝 실행 **후** 경계를 찍는다. begin 을 못 찍었으면 시도하지 않는다
+// (한쪽만 있는 구간은 쓸 수 없어서 기기에 쓰기만 늘리는 셈이다).
+func (mk *stepMarks) markEnd(ctx context.Context, o *Orchestrator, traceJobID string) {
+	if mk == nil || mk.begin == 0 || o.traceMgr == nil || traceJobID == "" {
+		return
+	}
+	if t, ok := o.traceMgr.WriteBoundaryMarker(ctx, traceJobID, markerKindEnd, ""); ok {
+		mk.end = t
+	}
+}
+
+// marker 종류 — trace 패키지의 상수와 같은 값. benchmark 가 trace 를 import 하면
+// 순환이라(TraceController 가 인터페이스로 끊는 이유) 여기 문자열로 둔다.
+const (
+	markerKindBegin = "B"
+	markerKindEnd   = "E"
+)
+
+// applyMarkerFallback — offset 경로가 실패했을 때 marker 시각으로 구간을 채운다.
+//
+// ⚠ **양쪽이 다 있어야 쓴다.** 한쪽만 채우면 시작은 기기 축, 끝은 0 인 반쪽 구간이
+// 되어 UI 가 엉뚱한 범위를 그린다. 없는 편이 낫다.
+func applyMarkerFallback(b *pb.StepBoundary, mk *stepMarks) {
+	if mk == nil || mk.begin == 0 || mk.end == 0 || mk.end < mk.begin {
+		return
+	}
+	b.StartedMono = mk.begin
+	b.FinishedMono = mk.end
+	b.BoundarySource = "trace_marker"
+}
+
 // recordStepBoundary — 스텝 하나의 실행 구간을 Job 에 기록한다.
 //
 // **왜 필요한가.** Trace Result 는 잡 전체가 한 타임라인이라 "스크롤 중 write" 와
@@ -1217,6 +1274,11 @@ func describeStep(step *pb.ScenarioStep) string {
 // (호스트 시각은 그대로 남아 로그 대조에는 쓸 수 있다).
 func (o *Orchestrator) recordStepBoundary(job *Job, deviceID string, es expandedStep,
 	traceJobID string, startedAt, finishedAt int64, err error) {
+	o.recordStepBoundaryWith(job, deviceID, es, traceJobID, startedAt, finishedAt, err, nil)
+}
+
+func (o *Orchestrator) recordStepBoundaryWith(job *Job, deviceID string, es expandedStep,
+	traceJobID string, startedAt, finishedAt int64, err error, mk *stepMarks) {
 
 	b := &pb.StepBoundary{
 		StepIndex:   int32(es.stepIndex),
@@ -1237,6 +1299,14 @@ func (o *Orchestrator) recordStepBoundary(job *Job, deviceID string, es expanded
 		}
 		if m, ok := o.traceMgr.HostToDeviceMonotonic(traceJobID, finishedAt); ok {
 			b.FinishedMono = m
+		}
+		// ⚠ offset 을 못 믿는 기기(adb RTT 가 임계 초과)에서는 위가 둘 다 0 으로 남아
+		// **구간 분할이 통째로 비활성화된다.** 그 경우에만 marker 폴백이 이미 찍어 둔
+		// 기기 축 시각을 쓴다 (markStepBoundary 가 스텝 실행 전후에 넣어 둔다).
+		//
+		// 정상 기기에서는 여기 안 온다 — 기기에 쓰기를 만들지 않는 offset 경로가 기본이다.
+		if b.StartedMono == 0 || b.FinishedMono == 0 {
+			applyMarkerFallback(b, mk)
 		}
 	}
 	job.appendStepBoundary(deviceID, b)
@@ -1485,11 +1555,13 @@ func (o *Orchestrator) runScenarioOnDeviceDAG(ctx context.Context, job *Job, dev
 
 			prevTraceID := activeTraceJobID
 			dagStepStartedAt := time.Now().UnixMilli()
+			dagMk := o.markStepBegin(ctx, prevTraceID, es)
 			stepOut, stepMetrics, execErr := o.executeStep(ctx, job, md, es, executedSteps-1, stepFiles, deviceID, &activeTraceJobID)
+			dagMk.markEnd(ctx, o, firstNonEmpty(prevTraceID, activeTraceJobID))
 			// 선형 루프와 **같은 기록**을 남긴다. 한쪽만 넣으면 캔버스(DAG) 시나리오에서
 			// 조용히 빈 화면이 된다.
-			o.recordStepBoundary(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
-				dagStepStartedAt, time.Now().UnixMilli(), execErr)
+			o.recordStepBoundaryWith(job, deviceID, es, firstNonEmpty(prevTraceID, activeTraceJobID),
+				dagStepStartedAt, time.Now().UnixMilli(), execErr, dagMk)
 
 			// trace 상태 변경 → job에 등록/해제
 			if activeTraceJobID != prevTraceID {

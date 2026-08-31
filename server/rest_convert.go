@@ -146,6 +146,9 @@ func benchmarkResultToMap(r *pb.BenchmarkResult) map[string]any {
 				"finishedMono": b.GetFinishedMono(),
 				"success":      b.GetSuccess(),
 				"error":        b.GetError(),
+				// 구간을 무엇으로 얻었나 — ""=ClockOffset(기본), "trace_marker"=폴백.
+				// ⚠ 여기서 빠뜨리면 proto 에 넣어도 화면까지 안 간다 (조용히 사라지는 필드).
+				"boundarySource": b.GetBoundarySource(),
 			})
 		}
 		m["stepBoundaries"] = bs

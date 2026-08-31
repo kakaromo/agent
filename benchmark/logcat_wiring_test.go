@@ -194,3 +194,32 @@ func TestRunScenarioPopulatesJobParams(t *testing.T) {
 			"영영 읽히지 않아 시나리오에서 수집이 안 켜진다")
 	}
 }
+
+// ⚠⚠ marker 폴백도 **선형·DAG 두 루프 모두**에 배선돼야 한다.
+// 한쪽만 넣으면 캔버스 시나리오에서 느린 기기의 구간이 조용히 사라진다
+// (화면상 잡은 정상이라 안 걸린다). startJobLogcat 과 같은 함정.
+func TestBothScenarioLoopsMarkStepBoundary(t *testing.T) {
+	src := readScenarioSource(t)
+	if n := strings.Count(src, "markStepBegin("); n < 3 {
+		// 정의 1 + 호출 2
+		t.Errorf("markStepBegin 이 %d곳 — 정의 1 + 선형/DAG 호출 2 여야 한다", n)
+	}
+	i := strings.Index(src, "func (o *Orchestrator) runScenarioOnDeviceDAG(")
+	if i < 0 {
+		t.Fatal("DAG 함수를 찾지 못했다 — 테스트가 낡았다")
+	}
+	if !strings.Contains(src[i:], "markStepBegin(") {
+		t.Error("DAG 루프에 markStepBegin 호출이 없다")
+	}
+	j := strings.Index(src, "func (o *Orchestrator) runScenarioOnDevice(")
+	if j < 0 {
+		t.Fatal("선형 함수를 찾지 못했다 — 테스트가 낡았다")
+	}
+	if !strings.Contains(src[j:i], "markStepBegin(") {
+		t.Error("선형 루프에 markStepBegin 호출이 없다")
+	}
+	// 양쪽 다 markEnd 도 불러야 한다 (begin 만 찍으면 반쪽이라 폴백이 안 걸린다).
+	if strings.Count(src, ".markEnd(") < 2 {
+		t.Error("markEnd 호출이 2곳 미만 — begin 만 찍힌 구간은 폴백에 쓰이지 않는다")
+	}
+}

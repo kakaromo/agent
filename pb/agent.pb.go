@@ -1513,12 +1513,20 @@ type StepBoundary struct {
 	FinishedAt int64 `protobuf:"varint,7,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
 	// 기기 monotonic (초) — parquet `time` 과 **같은 축**이라 구간 질의에 그대로 쓴다.
 	// clock offset 을 못 쟀으면 0 이고, 그때는 구간 분할이 비활성화된다.
-	StartedMono   float64 `protobuf:"fixed64,8,opt,name=started_mono,json=startedMono,proto3" json:"started_mono,omitempty"`
-	FinishedMono  float64 `protobuf:"fixed64,9,opt,name=finished_mono,json=finishedMono,proto3" json:"finished_mono,omitempty"`
-	Success       bool    `protobuf:"varint,10,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string  `protobuf:"bytes,11,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StartedMono  float64 `protobuf:"fixed64,8,opt,name=started_mono,json=startedMono,proto3" json:"started_mono,omitempty"`
+	FinishedMono float64 `protobuf:"fixed64,9,opt,name=finished_mono,json=finishedMono,proto3" json:"finished_mono,omitempty"`
+	Success      bool    `protobuf:"varint,10,opt,name=success,proto3" json:"success,omitempty"`
+	Error        string  `protobuf:"bytes,11,opt,name=error,proto3" json:"error,omitempty"`
+	// boundary_source — started_mono/finished_mono 를 무엇으로 얻었나.
+	//
+	//	""(빈 값)      : ClockOffset 변환 (기본 경로)
+	//	"trace_marker" : ftrace trace_marker 폴백 (offset 을 못 믿는 느린 기기)
+	//
+	// 화면이 "이 구간을 얼마나 믿을 수 있나" 를 표시할 근거다 — marker 는 adb 왕복이
+	// 오차에 안 들어가므로 오히려 더 정확하다.
+	BoundarySource string `protobuf:"bytes,12,opt,name=boundary_source,json=boundarySource,proto3" json:"boundary_source,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StepBoundary) Reset() {
@@ -1624,6 +1632,13 @@ func (x *StepBoundary) GetSuccess() bool {
 func (x *StepBoundary) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *StepBoundary) GetBoundarySource() string {
+	if x != nil {
+		return x.BoundarySource
 	}
 	return ""
 }
@@ -8850,7 +8865,7 @@ const file_agent_proto_rawDesc = "" +
 	"loop_index\x18\x03 \x01(\x05R\tloopIndex\x12!\n" +
 	"\frepeat_index\x18\x04 \x01(\x05R\vrepeatIndex\x12\x1d\n" +
 	"\n" +
-	"trace_type\x18\x05 \x01(\tR\ttraceType\"\xd1\x02\n" +
+	"trace_type\x18\x05 \x01(\tR\ttraceType\"\xfa\x02\n" +
 	"\fStepBoundary\x12\x1d\n" +
 	"\n" +
 	"step_index\x18\x01 \x01(\x05R\tstepIndex\x12\x1d\n" +
@@ -8867,7 +8882,8 @@ const file_agent_proto_rawDesc = "" +
 	"\rfinished_mono\x18\t \x01(\x01R\ffinishedMono\x12\x18\n" +
 	"\asuccess\x18\n" +
 	" \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\v \x01(\tR\x05error\")\n" +
+	"\x05error\x18\v \x01(\tR\x05error\x12'\n" +
+	"\x0fboundary_source\x18\f \x01(\tR\x0eboundarySource\")\n" +
 	"\x10DeleteJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"G\n" +
 	"\x11DeleteJobResponse\x12\x18\n" +

@@ -239,6 +239,13 @@ message StepBoundary {
 
   bool success = 10;
   string error = 11;
+
+  // boundary_source — started_mono/finished_mono 를 무엇으로 얻었나.
+  //   ""(빈 값)      : ClockOffset 변환 (기본 경로)
+  //   "trace_marker" : ftrace trace_marker 폴백 (offset 을 못 믿는 느린 기기)
+  // 화면이 "이 구간을 얼마나 믿을 수 있나" 를 표시할 근거다 — marker 는 adb 왕복이
+  // 오차에 안 들어가므로 오히려 더 정확하다.
+  string boundary_source = 12;
 }
 
 message DeleteJobRequest {

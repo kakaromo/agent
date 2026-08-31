@@ -87,6 +87,16 @@ export interface StepBoundary {
 	finishedAt: number;
 	startedMono: number;
 	finishedMono: number;
+	/**
+	 * mono 값을 무엇으로 얻었나.
+	 *   ""(또는 없음) — ClockOffset 변환 (기본 경로, 기기에 아무것도 안 쓴다)
+	 *   "trace_marker" — ftrace trace_marker 폴백
+	 *
+	 * marker 는 커널이 자기 시계로 찍으므로 **adb 왕복이 오차에 안 들어간다.**
+	 * offset 방식이 RTT 때문에 비활성화되는 느린 기기에서만 쓰인다 (그래서 이 값이
+	 * 보이면 "느린 기기였지만 구간은 오히려 더 정확하다" 는 뜻이다).
+	 */
+	boundarySource?: string;
 	success: boolean;
 	error: string;
 }
