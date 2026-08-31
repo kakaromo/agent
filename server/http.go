@@ -28,6 +28,10 @@ type HTTPRouterOptions struct {
 	ArchiveBase string
 	// TraceBase — trace 잡 출력 디렉토리 (cfg.Server.TraceDir). fs/open 의 target=trace 가 사용.
 	TraceBase string
+	// TraceMgr — trace 수집기. nil 이면 /api/agent/marker/* 미등록.
+	// (marker 지표는 trace 잡의 trace.log 에서 읽는다.)
+	TraceMgr *trace.Manager
+
 	// LogcatMgr — logcat 수집기. nil 이면 /api/agent/logcat/* 미등록.
 	LogcatMgr *trace.LogcatManager
 	// AI — 로컬 ollama 기반 결과 해석. Enabled=true 일 때만 /api/agent/ai/* endpoint 활성화
@@ -101,6 +105,11 @@ func NewHTTPRouter(opts HTTPRouterOptions) http.Handler {
 		registerAILogProfileRoutes(mux, opts.DB)
 		registerScheduleRoutes(mux, opts.DB, opts.ScheduleRunner)
 		installJobExecutionHook(opts.Agent, opts.DB, opts.ArchiveBase)
+	}
+	// trace_marker 기반 AI 지표 탐색/파싱 — logcat 과 같은 이유로 DB 없이도 탐색은 된다.
+	// ⚠ 소스가 trace 잡의 trace.log 라 TraceMgr 이 필요하다 (logcat 과 다른 점).
+	if opts.TraceMgr != nil {
+		registerMarkerRoutes(mux, opts.TraceMgr, opts.DB)
 	}
 	// logcat 탐색/파싱 — DB 없이도 탐색은 되어야 한다 (사무실 모드에서 형식 조사).
 	// profileId 로 파싱하려면 DB 가 필요하지만 그건 핸들러가 개별 판단한다.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // AILogPatterns — ai_log_profiles.patterns_json 의 구조.
@@ -40,6 +41,98 @@ type AILogSeries struct {
 	Key   string `json:"key"`
 	Regex string `json:"regex"`
 	Unit  string `json:"unit,omitempty"`
+}
+
+// AI 지표를 읽어오는 소스.
+//
+// ⚠ 두 소스는 patterns_json 의 **필드 이름이 다르다**:
+//
+//	logcat: {"marks":[{key,regex}], "series":[{key,regex,unit}]}
+//	marker: {"counters":[{key,name|regex,unit}], "sections":[{key,name|regex}]}
+//
+// 섞으면 JSON 파싱은 통과하는데 매칭이 **조용히 0건**이 된다 — 사용자는 정규식을
+// 고쳐가며 헛수고한다. 그래서 프로파일에 소스를 박아 두고 파싱 전에 막는다.
+const (
+	AISourceLogcat = "logcat"
+	AISourceMarker = "marker"
+)
+
+// normalizeAISource — 빈 값은 기존 동작(logcat)으로 본다.
+// 이 컬럼이 없던 시절 저장된 행과 호환되어야 한다.
+func normalizeAISource(s string) string {
+	if s == AISourceMarker {
+		return AISourceMarker
+	}
+	return AISourceLogcat
+}
+
+// ValidateMarkerPatternsJSON — marker 패턴을 저장 전에 검증한다.
+//
+// ⚠ logcat 과 검증 항목이 다르다. 저쪽은 "series 에 캡처 그룹이 있는가" 가 핵심인데,
+// marker 의 `C|` 는 값이 이미 분리돼 있어 **캡처 그룹 자체가 필요 없다.** 대신
+// "무엇을 찾을지"(name 또는 regex)가 있는지를 본다.
+func ValidateMarkerPatternsJSON(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("patternsJson required")
+	}
+	var p struct {
+		Counters []struct {
+			Key, Name, Regex string
+		} `json:"counters"`
+		Sections []struct {
+			Key, Name, Regex string
+		} `json:"sections"`
+	}
+	if err := json.Unmarshal([]byte(s), &p); err != nil {
+		return fmt.Errorf("patternsJson: %w", err)
+	}
+	if len(p.Counters) == 0 && len(p.Sections) == 0 {
+		return fmt.Errorf("counters 또는 sections 중 최소 하나는 있어야 한다 " +
+			"(없으면 매칭이 항상 0건이다)")
+	}
+	seen := map[string]bool{}
+	check := func(kind, key, name, expr string) error {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%s: key 가 비어 있다", kind)
+		}
+		if seen[key] {
+			// 나중 것이 앞의 것을 덮어써 한쪽이 조용히 사라진다.
+			return fmt.Errorf("key 중복: %q", key)
+		}
+		seen[key] = true
+		if strings.TrimSpace(name) == "" && strings.TrimSpace(expr) == "" {
+			return fmt.Errorf("%s %q: name 또는 regex 중 하나는 있어야 한다", kind, key)
+		}
+		if expr != "" {
+			if _, err := regexp.Compile(expr); err != nil {
+				// 여기서 안 막으면 **측정 시점에** 터진다 — 그때는 기기를 붙들고 있다.
+				return fmt.Errorf("%s %q: regex: %w", kind, key, err)
+			}
+		}
+		return nil
+	}
+	for _, c := range p.Counters {
+		if err := check("counter", c.Key, c.Name, c.Regex); err != nil {
+			return err
+		}
+	}
+	for _, c := range p.Sections {
+		if err := check("section", c.Key, c.Name, c.Regex); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateBySource — 소스에 맞는 검증기를 고른다.
+//
+// ⚠ 여기서 안 갈라주면 marker 패턴이 logcat 검증(캡처 그룹 필수)에 걸려 저장이
+// 거부되거나, 반대로 logcat 패턴이 marker 로 저장돼 측정 시 0건이 된다.
+func validateBySource(source, patternsJSON string) error {
+	if normalizeAISource(source) == AISourceMarker {
+		return ValidateMarkerPatternsJSON(patternsJSON)
+	}
+	return ValidatePatternsJSON(patternsJSON)
 }
 
 // ParseAILogPatterns — patterns_json 을 구조체로 푼다.

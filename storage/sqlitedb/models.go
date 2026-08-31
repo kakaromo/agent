@@ -55,14 +55,14 @@ type JobExecution struct {
 	StepBoundaries sql.NullString `json:"stepBoundaries"`
 
 	// Trace archive 메타 (nullable)
-	TraceRawKey         sql.NullString `json:"traceRawKey"`
-	TraceRawFormat      sql.NullString `json:"traceRawFormat"`
-	TraceRawSize        sql.NullInt64  `json:"traceRawSize"`
-	TraceRawUploadedAt  sql.NullTime   `json:"traceRawUploadedAt"`
-	TraceParquetKeys    sql.NullString `json:"traceParquetKeys"`
-	TraceParsedAt       sql.NullTime   `json:"traceParsedAt"`
-	TraceParseState     sql.NullString `json:"traceParseState"`
-	TraceParseError     sql.NullString `json:"traceParseError"`
+	TraceRawKey        sql.NullString `json:"traceRawKey"`
+	TraceRawFormat     sql.NullString `json:"traceRawFormat"`
+	TraceRawSize       sql.NullInt64  `json:"traceRawSize"`
+	TraceRawUploadedAt sql.NullTime   `json:"traceRawUploadedAt"`
+	TraceParquetKeys   sql.NullString `json:"traceParquetKeys"`
+	TraceParsedAt      sql.NullTime   `json:"traceParsedAt"`
+	TraceParseState    sql.NullString `json:"traceParseState"`
+	TraceParseError    sql.NullString `json:"traceParseError"`
 }
 
 // BenchmarkPreset — FIO/IOZONE/TIOTEST/IOTEST 의 params 프리셋.
@@ -144,9 +144,15 @@ type ScheduledJob struct {
 // Runtime/SOC 가 별도 컬럼인 이유는 db.go 의 CREATE TABLE 주석 참고 (조회 조건).
 // SOC 가 빈 값이면 해당 런타임 공용 프로파일로 본다.
 type AILogProfile struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Source — 어디서 읽는 패턴인가. "logcat"(기본) 또는 "marker".
+	//
+	// ⚠ 둘은 patterns_json 의 **필드 이름이 다르다**(logcat=marks/series,
+	// marker=counters/sections). 섞어 쓰면 조용히 0건이 되고 사용자는 "패턴이
+	// 안 맞나" 로 시간을 쓴다. 그래서 저장 시 기록해 두고 파싱 전에 막는다.
+	Source       string    `json:"source,omitempty"`
 	Runtime      string    `json:"runtime"`
 	SOC          string    `json:"soc"`
 	PatternsJSON string    `json:"patternsJson"`
