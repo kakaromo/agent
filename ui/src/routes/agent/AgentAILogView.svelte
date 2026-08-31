@@ -283,13 +283,18 @@
 					<strong>유휴 구간</strong>을 함께 지정하면 "추론 때만 나타난 태그" 를 가려낼 수 있어
 					정확도가 크게 올라갑니다 (벤더 이름을 몰라도 걸립니다).
 				</p>
+				<p class="mb-2 text-[11px] text-amber-600 dark:text-amber-500">
+					⚠ 시각은 <strong>로그 파일에 찍힌 값 그대로</strong> 넣으세요 (잡 수집은 epoch =
+					UNIX 초). 아래 후보의 원문 샘플 앞머리에 보이는 숫자와 같은 축입니다 — trace
+					차트의 상대 시각을 그대로 넣으면 엉뚱한 구간이 잡힙니다.
+				</p>
 				<div class="flex flex-wrap items-end gap-2">
 					{#each [['유휴 시작', idleFrom, (v: string) => (idleFrom = v)], ['유휴 끝', idleTo, (v: string) => (idleTo = v)], ['추론 시작', runFrom, (v: string) => (runFrom = v)], ['추론 끝', runTo, (v: string) => (runTo = v)]] as [label, val, set] (label)}
 						<div class="flex flex-col gap-0.5">
 							<span class="text-[10px] text-muted-foreground">{label}</span>
 							<input
 								class="h-7 w-28 rounded border bg-background px-2 text-xs font-mono"
-								placeholder="초"
+								placeholder="로그 시각(초)"
 								value={val as string}
 								oninput={(e) => (set as (v: string) => void)(e.currentTarget.value)}
 							/>

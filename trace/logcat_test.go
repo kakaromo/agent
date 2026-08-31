@@ -28,6 +28,43 @@ func TestBuildLogcatArgs(t *testing.T) {
 	}
 }
 
+// ⚠⚠ 잡에 딸린 수집은 epoch 축이어야 한다.
+//
+// 기본값(monotonic)으로 두면 IO 트레이스(BOOTTIME)와 누적 suspend 만큼 어긋나는데
+// (실기기 실측 120.5초) **화면상으론 결과가 멀쩡히 나온다.** 사용자가 trace
+// 타임라인에서 읽은 초를 탐색 구간에 넣으면 엉뚱한 줄이 뽑히고 차분이 무의미해진다.
+// 조용히 틀리는 종류라 소스 수준에서 못을 박는다.
+func TestStartLogcatForJobUsesEpochAxis(t *testing.T) {
+	src, err := os.ReadFile("logcat.go")
+	if err != nil {
+		t.Fatalf("소스를 못 읽었다: %v", err)
+	}
+	i := strings.Index(string(src), "func (m *LogcatManager) StartLogcatForJob(")
+	if i < 0 {
+		t.Fatal("StartLogcatForJob 을 찾지 못했다 — 테스트가 낡았다")
+	}
+	body := string(src)[i:]
+	if j := strings.Index(body, "\nfunc "); j > 0 {
+		body = body[:j]
+	}
+	if !strings.Contains(body, "Format:") {
+		t.Error("StartLogcatForJob 이 Format 을 지정하지 않는다 — 기본값 monotonic 으로 " +
+			"떨어져 IO 트레이스(BOOTTIME)와 축이 어긋난다")
+	}
+	if !strings.Contains(body, "LogcatFormatEpoch") {
+		t.Error("잡 수집이 epoch 축이 아니다 — monotonic 은 suspend 누적을 따로 재지 " +
+			"않는 한 BOOTTIME 으로 변환할 수 없다")
+	}
+}
+
+// 축 선택이 실제 adb 인자까지 흘러가는지 (설정만 바꾸고 안 쓰이면 의미 없다).
+func TestBuildLogcatArgsCarriesFormat(t *testing.T) {
+	got := strings.Join(buildLogcatArgs("S", LogcatFormatEpoch, LogcatModeMeasure, []string{"Genie"}), " ")
+	if !strings.Contains(got, "-v epoch") {
+		t.Errorf("epoch 이 adb 인자에 반영되지 않았다: %s", got)
+	}
+}
+
 // ⚠⚠ 이 테스트가 보안 가드다. output_dir 은 사무실 모드에서 인증 없는 0.0.0.0
 // 바인딩 위로 들어온다. 허용 루트 밖 경로를 그대로 쓰면 임의 경로 쓰기가 된다.
 func TestLogcatResolveOutputBase(t *testing.T) {
