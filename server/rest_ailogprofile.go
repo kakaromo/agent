@@ -147,6 +147,11 @@ func buildAILogProfileFromBody(body map[string]any) *sqlitedb.AILogProfile {
 	if v, ok := body["soc"].(string); ok {
 		p.SOC = v
 	}
+	// source — "logcat"(기본) 또는 "marker". 빈 값은 저장 시 logcat 으로 정규화된다
+	// (이 컬럼이 없던 시절 저장된 프로파일과 호환).
+	if v, ok := body["source"].(string); ok {
+		p.Source = v
+	}
 	// JSON 필드는 문자열/객체 양쪽을 받는다 (기존 프리셋과 같은 dual-form 처리).
 	// UI 가 객체로 보내는 편이 자연스럽고, 스크립트는 문자열이 편하다.
 	if v, ok := body["patternsJson"].(string); ok {
@@ -161,11 +166,14 @@ func buildAILogProfileFromBody(body map[string]any) *sqlitedb.AILogProfile {
 
 func aiLogProfileToMap(p *sqlitedb.AILogProfile) map[string]any {
 	return map[string]any{
-		"id":           p.ID,
-		"name":         p.Name,
-		"description":  p.Description,
-		"runtime":      p.Runtime,
-		"soc":          p.SOC,
+		"id":          p.ID,
+		"name":        p.Name,
+		"description": p.Description,
+		"runtime":     p.Runtime,
+		"soc":         p.SOC,
+		// ⚠ 응답에 반드시 싣는다. 빠뜨리면 화면이 소스를 몰라 logcat 프로파일을
+		// marker 측정에 넣게 되고, 그러면 조용히 0건이 된다.
+		"source":       p.Source,
 		"patternsJson": p.PatternsJSON,
 		"createdAt":    p.CreatedAt.Format(time.RFC3339Nano),
 		"updatedAt":    p.UpdatedAt.Format(time.RFC3339Nano),
