@@ -1,15 +1,20 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"agent/trace"
+
+	"github.com/google/uuid"
 )
 
 // 파일 업로드 → 자동 판별 → 파싱/저장.
@@ -108,6 +113,25 @@ func registerUploadRoutes(mux *http.ServeMux, agent *DeviceAgentServer, archiveB
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			// Result 목록에 남긴다 — 안 남기면 업로드한 잡을 나중에 다시 찾을 방법이
+			// 없다(메모리에만 있고 화면 어디에도 안 뜬다). 수집 잡과 같은 hook 을 써서
+			// 상태 갱신·상세 조회가 동일하게 동작한다.
+			if rec := currentRecorder(); rec != nil {
+				rec.OnStart(r.Context(), jobID, "trace", det.TraceType, name, nil,
+					map[string]any{
+						"source":    "upload",
+						"filename":  hdr.Filename,
+						"sizeBytes": hdr.Size,
+						"detected":  det.Reason,
+					})
+			}
+			// 파싱이 끝나면 DB 상태를 직접 갱신한다.
+			//
+			// ⚠ 이게 없으면 목록에 **running 으로 영영 남는다.** 기존 경로는 status
+			// 폴링이나 SSE 가 terminal 을 보고 sync 하는데, 업로드 잡은 화면이
+			// 구독하지 않을 수 있다(업로드하고 다른 탭으로 가면 끝).
+			go watchUploadedTraceState(agent, jobID)
+
 			writeJSON(w, http.StatusOK, map[string]any{
 				"kind":      "trace",
 				"jobId":     jobID,
@@ -117,12 +141,31 @@ func registerUploadRoutes(mux *http.ServeMux, agent *DeviceAgentServer, archiveB
 			})
 
 		case trace.UploadKindBenchmark:
-			path, meta, err := saveUploadedBenchmark(archiveBase, hdr.Filename, file)
+			path, meta, doc, err := saveUploadedBenchmark(archiveBase, hdr.Filename, file)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			// Result 목록에 남긴다. 벤치마크 JSON 은 이미 완결된 산출물이라 잡으로
+			// 돌릴 게 없으므로, 등록 즉시 completed 로 두고 파일 안의 metrics 를
+			// 그대로 summary 로 저장한다 — Result 화면이 수집 잡과 같게 읽는다.
+			uploadJobID := "upload-" + uuid.New().String()
+			if rec := currentRecorder(); rec != nil {
+				rec.OnStart(r.Context(), uploadJobID, "benchmark", meta["tool"], name,
+					devicesOf(meta), map[string]any{
+						"source":    "upload",
+						"filename":  hdr.Filename,
+						"sizeBytes": hdr.Size,
+						"detected":  det.Reason,
+						"path":      path,
+					})
+				rec.OnState(r.Context(), uploadJobID, uploadedBenchmarkState(doc), "")
+				if sum := uploadedBenchmarkSummary(uploadJobID, doc); sum != "" {
+					saveUploadedSummary(r.Context(), uploadJobID, sum)
+				}
+			}
 			writeJSON(w, http.StatusOK, map[string]any{
+				"jobId":    uploadJobID,
 				"kind":     "benchmark",
 				"path":     path,
 				"deviceId": meta["deviceId"],
@@ -141,13 +184,13 @@ func registerUploadRoutes(mux *http.ServeMux, agent *DeviceAgentServer, archiveB
 //
 // 잡으로 등록하지 않는다 — 벤치마크 결과는 이미 완결된 산출물이라 파싱할 것이
 // 없고, 화면은 파일 내용을 그대로 보여주면 된다. 경로와 핵심 필드만 돌려준다.
-func saveUploadedBenchmark(archiveBase, filename string, r io.Reader) (string, map[string]string, error) {
+func saveUploadedBenchmark(archiveBase, filename string, r io.Reader) (string, map[string]string, map[string]any, error) {
 	if archiveBase == "" {
-		return "", nil, fmt.Errorf("archive 경로가 설정되지 않았습니다 (standalone 모드가 아닌 듯)")
+		return "", nil, nil, fmt.Errorf("archive 경로가 설정되지 않았습니다 (standalone 모드가 아닌 듯)")
 	}
 	dir := filepath.Join(archiveBase, "uploads")
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", nil, fmt.Errorf("uploads 디렉토리 생성 실패: %w", err)
+		return "", nil, nil, fmt.Errorf("uploads 디렉토리 생성 실패: %w", err)
 	}
 
 	// 파일명은 그대로 믿지 않는다 — 경로 구분자가 들어오면 상위로 새어나간다.
@@ -159,15 +202,15 @@ func saveUploadedBenchmark(archiveBase, filename string, r io.Reader) (string, m
 
 	body, err := io.ReadAll(r)
 	if err != nil {
-		return "", nil, fmt.Errorf("업로드 읽기 실패: %w", err)
+		return "", nil, nil, fmt.Errorf("업로드 읽기 실패: %w", err)
 	}
 	// 판별에서 한 번 봤지만 여기서 전체를 다시 검증한다 — 앞부분만 유효한 파일을 막는다.
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return "", nil, fmt.Errorf("JSON 파싱 실패: %w", err)
+		return "", nil, nil, fmt.Errorf("JSON 파싱 실패: %w", err)
 	}
 	if err := os.WriteFile(dest, body, 0644); err != nil {
-		return "", nil, fmt.Errorf("저장 실패: %w", err)
+		return "", nil, nil, fmt.Errorf("저장 실패: %w", err)
 	}
 
 	meta := map[string]string{}
@@ -177,5 +220,108 @@ func saveUploadedBenchmark(archiveBase, filename string, r io.Reader) (string, m
 	if v, ok := doc["tool"].(string); ok {
 		meta["tool"] = v
 	}
-	return dest, meta, nil
+	return dest, meta, doc, nil
+}
+
+// devicesOf — summary/목록 표시에 쓸 deviceId 목록.
+func devicesOf(meta map[string]string) []string {
+	if d := meta["deviceId"]; d != "" {
+		return []string{d}
+	}
+	return nil
+}
+
+// uploadedBenchmarkState — 업로드된 결과 파일의 성공 여부 → 잡 상태 문자열.
+//
+// ⚠ 파일에 success=false 가 적혀 있으면 **failed 로 남긴다.** 업로드했다는 이유로
+// completed 로 칠하면 "실패한 측정"이 성공으로 보인다.
+func uploadedBenchmarkState(doc map[string]any) string {
+	if ok, exists := doc["success"].(bool); exists && !ok {
+		return "failed"
+	}
+	return "completed"
+}
+
+// uploadedBenchmarkSummary — 파일 안의 metrics 를 Result 화면이 읽는 shape 으로.
+//
+// buildBenchmarkSummaryFrom 과 같은 구조({jobId, devices:[...]})를 쓴다 — 화면이
+// 업로드 잡과 수집 잡을 구분하지 않고 같은 코드로 읽게 하기 위해서다.
+func uploadedBenchmarkSummary(jobID string, doc map[string]any) string {
+	if doc == nil {
+		return ""
+	}
+	dev := map[string]any{}
+	if v, ok := doc["deviceId"].(string); ok {
+		dev["deviceId"] = v
+	}
+	if v, ok := doc["tool"].(string); ok {
+		dev["tool"] = v
+	}
+	if v, ok := doc["success"].(bool); ok {
+		dev["success"] = v
+	}
+	if v, ok := doc["error"].(string); ok {
+		dev["error"] = v
+	}
+	// metrics 는 그대로 싣는다 — 업로드 파일이 이미 최종 산출물이라 압축할 이유가 없다.
+	if m, ok := doc["metrics"].(map[string]any); ok {
+		dev["metrics"] = m
+	}
+	out := map[string]any{"jobId": jobID, "devices": []any{dev}}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// saveUploadedSummary — result_summary 를 DB 에 직접 저장한다.
+//
+// recorder 의 OnResult 는 agent 메모리의 잡을 fetch 하는데, 업로드 잡은 거기에
+// 없다(파일이 곧 결과다). 그래서 summary 만 따로 넣는다.
+func saveUploadedSummary(ctx context.Context, jobID, summary string) {
+	rec := currentRecorder()
+	if rec == nil {
+		return
+	}
+	if s, ok := rec.(*dbRecorder); ok && s.db != nil {
+		if err := s.db.UpdateJobExecutionResultSummary(ctx, jobID, summary); err != nil {
+			slog.Warn("업로드 결과 summary 저장 실패", "jobId", jobID, "error", err)
+		}
+	}
+}
+
+// watchUploadedTraceState — 업로드 잡의 파싱이 끝나면 DB 상태를 갱신한다.
+//
+// 폴링을 쓰는 이유: trace Manager 의 완료 통지는 SubscribeProgress 채널인데,
+// 업로드 직후 아무도 구독하지 않으면 알림이 갈 곳이 없다. 짧은 주기로 몇 분만
+// 지켜보고, 그 안에 안 끝나면 포기한다(그때는 화면 폴링이 이어받는다).
+func watchUploadedTraceState(agent *DeviceAgentServer, jobID string) {
+	const (
+		tick     = 2 * time.Second
+		maxWatch = 30 * time.Minute
+	)
+	deadline := time.Now().Add(maxWatch)
+	for time.Now().Before(deadline) {
+		time.Sleep(tick)
+		if agent == nil || agent.traceMgr == nil {
+			return
+		}
+		job, err := agent.traceMgr.GetJob(jobID)
+		if err != nil {
+			return
+		}
+		job.Mu.Lock()
+		state := jobStateString(job.State)
+		errMsg := job.Error
+		job.Mu.Unlock()
+
+		if !isTerminalState(state) {
+			continue
+		}
+		if rec := currentRecorder(); rec != nil {
+			rec.OnState(context.Background(), jobID, state, errMsg)
+		}
+		return
+	}
 }
