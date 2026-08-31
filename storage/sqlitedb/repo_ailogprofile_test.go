@@ -53,3 +53,33 @@ func TestAILogProfileCRUD(t *testing.T) {
 		t.Errorf("두 번째 delete 는 ErrNotFound 여야 한다: %v", err)
 	}
 }
+
+// ⚠ Update 가 필수 검사를 건너뛰면 patternsJson 만 담긴 PUT 이 name/runtime 을
+// 빈 값으로 덮어쓴다. runtime 은 조회 필터 컬럼이라(`GET ?runtime=`) 비면 그
+// 프로파일이 목록에서 조용히 사라진 것처럼 보인다.
+func TestUpdateAILogProfileRequiresFields(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	created, err := db.CreateAILogProfile(ctx, &AILogProfile{
+		Name: "keep", Runtime: "qnn",
+		PatternsJSON: `{"series":[{"key":"ttft","regex":"TTFT ([0-9.]+)"}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// name/runtime 을 비운 부분 업데이트는 거절돼야 한다.
+	_, err = db.UpdateAILogProfile(ctx, created.ID, &AILogProfile{
+		PatternsJSON: `{"series":[{"key":"ttft","regex":"TTFT ([0-9.]+)"}]}`,
+	})
+	if err == nil {
+		t.Error("name/runtime 없이 통과했다 — 필터 컬럼이 비어 프로파일이 안 보이게 된다")
+	}
+	// 원본이 살아 있어야 한다.
+	got, err := db.FindAILogProfile(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "keep" || got.Runtime != "qnn" {
+		t.Errorf("원본이 덮어써졌다: name=%q runtime=%q", got.Name, got.Runtime)
+	}
+}

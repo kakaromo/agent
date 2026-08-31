@@ -198,3 +198,26 @@ func TestExplore_Diagnosis(t *testing.T) {
 		t.Errorf("형식 불일치 진단이 없다: %v", garbage.Diagnosis)
 	}
 }
+
+// ⚠ 강한 신호 줄은 약한 줄이 자리를 다 채운 뒤에도 보여야 한다.
+// 예전엔 둘 다 `len < SampleLimit` 조건이라, 약한 줄 5개가 먼저 들어오면
+// 강한 줄이 영영 안 보였다 — 점수는 strong 으로 받았는데 화면엔 소음만 뜬다.
+// 원문 샘플이 사람이 판단할 유일한 재료라, 이게 비면 기능의 목적이 무너진다.
+func TestExplore_StrongSamplesSurviveWeakFlood(t *testing.T) {
+	var lines []string
+	// 약한 줄(keyword 만)로 SampleLimit 을 먼저 채운다.
+	for i := 0; i < SampleLimit+3; i++ {
+		lines = append(lines, "100.00 900 900 I Genie   : inference warmup step")
+	}
+	// 그 뒤에 진짜 지표 줄이 온다.
+	lines = append(lines, "101.00 900 900 I Genie   : decode 24.1 ms/tok")
+
+	res := ExploreLogcat(strings.NewReader(strings.Join(lines, "\n")), ExploreOptions{})
+	if len(res.Candidates) == 0 {
+		t.Fatal("후보가 없다")
+	}
+	joined := strings.Join(res.Candidates[0].Samples, "\n")
+	if !strings.Contains(joined, "ms/tok") {
+		t.Errorf("강한 신호 줄이 샘플에 없다 — 약한 줄에 밀렸다.\nsamples=%v", res.Candidates[0].Samples)
+	}
+}

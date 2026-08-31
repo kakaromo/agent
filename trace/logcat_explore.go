@@ -205,12 +205,19 @@ func ExploreLogcat(r io.Reader, opt ExploreOptions) ExploreResult {
 		}
 		// 샘플은 강한 신호를 우선 채운다 — 사람이 처음 보는 줄이
 		// 판단에 가장 도움 되는 줄이어야 한다.
-		if hasStrong && len(a.samples) < SampleLimit {
+		//
+		// ⚠ 강한 줄은 **자리가 찼어도 약한 줄을 밀어내고** 들어간다. 예전엔 둘 다
+		// `len < SampleLimit` 이라, 약한 줄 5개가 먼저 차면 강한 줄이 영영 안 보였다
+		// — 점수는 strong 으로 받았는데 화면엔 소음만 뜨는 셈이라 사람이 판단할
+		// 근거가 사라진다. 원문 샘플이 이 기능의 유일한 판단 재료다.
+		switch {
+		case hasStrong:
 			a.samples = append([]string{raw}, a.samples...)
 			if len(a.samples) > SampleLimit {
+				// 뒤(약한 것)부터 버린다.
 				a.samples = a.samples[:SampleLimit]
 			}
-		} else if (hasUnit || hasKeyword) && len(a.samples) < SampleLimit {
+		case (hasUnit || hasKeyword) && len(a.samples) < SampleLimit:
 			a.samples = append(a.samples, raw)
 		}
 	}

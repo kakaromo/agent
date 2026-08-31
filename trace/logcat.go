@@ -2,7 +2,9 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -230,14 +232,18 @@ func (m *LogcatManager) StartLogcat(ctx context.Context, req StartLogcatRequest)
 		return "", fmt.Errorf("start logcat: %w", err)
 	}
 
-	// 데이터가 흐르기 시작할 여유를 준다 (tracer.go:283 과 같다).
-	time.Sleep(500 * time.Millisecond)
-
+	// ⚠ cancel 을 **sleep 전에** 등록한다. 아래 500ms 동안 잡은 이미 running 이고
+	// m.jobs 에도 올라가 있어서, 그 사이 StopLogcat 이 들어오면 State 검사는 통과하는데
+	// adbCancel 이 nil 이라 **kill 을 건너뛴다.** 잡은 completed 로 넘어가지만 adb
+	// logcat 자식은 살아남아 agent 종료까지 로그를 계속 쌓는다 (조용히 새는 경로).
 	job.Mu.Lock()
 	job.adbCancel = adbCancel
 	job.adbCmd = adbCmd
 	job.logFd = logFd
 	job.Mu.Unlock()
+
+	// 데이터가 흐르기 시작할 여유를 준다 (tracer.go:283 과 같다).
+	time.Sleep(500 * time.Millisecond)
 
 	slog.Info("logcat started", "job_id", jobID, "device", req.DeviceID,
 		"mode", mode, "format", format, "tags", req.Tags, "output_dir", outputDir)
@@ -358,7 +364,14 @@ func countLines(path string) (int, error) {
 			}
 		}
 		if err != nil {
-			break
+			// ⚠ io.EOF 만 정상 종료다. 다른 에러를 nil 로 삼키면 **줄 수가 적게
+			// 나온 것이 성공처럼 보인다.** Lines 는 "수집이 실패했나(0줄)" 와
+			// "패턴이 틀렸나(줄은 있는데 매칭 0)" 를 가르는 유일한 근거라,
+			// 조용한 undercount 는 그 진단을 통째로 무력화한다.
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return n, fmt.Errorf("read %s: %w", path, err)
 		}
 	}
 	return n, nil

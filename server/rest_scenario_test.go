@@ -129,7 +129,6 @@ func TestScenarioRequestFromScheduleConfig_BadJSON(t *testing.T) {
 	}
 }
 
-
 // ⚠⚠ 탐색 → 프로파일 → 측정 루프의 **핸드오프**를 지킨다.
 //
 // UI 는 탐색에서 찾은 태그를 프로파일의 tags 에 넣어 저장하는데, 수집 쪽은 잡

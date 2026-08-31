@@ -376,7 +376,11 @@
 									<div class="mb-1 text-[10px] font-medium text-muted-foreground">
 										원문 샘플 — 이 줄을 보고 판단하세요
 									</div>
-									{#each c.samples as s (s)}
+									<!-- ⚠ 인덱스 키. 원문 샘플은 **같은 줄이 반복되는 것이 정상**이라
+									     (같은 ms 에 같은 메시지가 두 번 찍히는 일이 흔하다) 값으로 키를
+									     만들면 each_key_duplicate 로 패널이 통째로 죽는다. 재정렬 없는
+									     읽기 전용 목록이라 인덱스로 충분하다. -->
+									{#each c.samples as s, i (i)}
 										<pre class="overflow-x-auto whitespace-pre-wrap break-all rounded bg-background/70 p-1.5 text-[10px] font-mono leading-relaxed">{s}</pre>
 									{/each}
 									<button
@@ -435,10 +439,12 @@
 									<div class="mt-0.5 text-[11px] text-muted-foreground">{p.description}</div>
 								{/if}
 								<div class="mt-1 flex flex-wrap gap-1">
-									{#each pat.marks ?? [] as m (m.key)}
+									<!-- ⚠ 인덱스 키. key 중복은 UI 가 경고로 잡아주는 "있을 수 있는
+									     상태" 라, 그 상태에서 목록이 죽으면 정작 경고를 못 본다. -->
+									{#each pat.marks ?? [] as m, i (i)}
 										<span class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-mono text-blue-700 dark:text-blue-400">mark:{m.key}</span>
 									{/each}
-									{#each pat.series ?? [] as s (s.key)}
+									{#each pat.series ?? [] as s, i (i)}
 										<span class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-mono text-emerald-700 dark:text-emerald-400">
 											{s.key}{s.unit ? ` (${s.unit})` : ''}
 										</span>
@@ -548,7 +554,10 @@
 					{#if parseRes.marks.length > 0}
 						<div class="rounded border p-2">
 							<div class="mb-1 text-[11px] font-medium text-muted-foreground">구간 경계 (mark)</div>
-							{#each parseRes.marks as m (m.key + m.timeSec)}
+							<!-- ⚠ 인덱스 키. logcat 은 같은 밀리초에 여러 줄을 찍으므로
+							     key+timeSec 이 중복될 수 있다 (mark 정규식이 버스트에 두 번
+							     걸리는 경우). 값으로 키를 만들면 측정 탭이 죽는다. -->
+							{#each parseRes.marks as m, i (i)}
 								<div class="flex items-center gap-2 border-b py-0.5 text-[11px] last:border-b-0">
 									<span class="font-mono tabular-nums text-muted-foreground">{m.timeSec.toFixed(3)}</span>
 									<span class="rounded bg-blue-500/10 px-1.5 text-[10px] font-mono text-blue-700 dark:text-blue-400">{m.key}</span>
@@ -632,7 +641,9 @@
 
 			{#if patternIssues.length > 0}
 				<div class="rounded border border-destructive/50 bg-destructive/10 p-2">
-					{#each patternIssues as issue (issue)}
+					<!-- ⚠ 인덱스 키. 같은 경고 문구가 두 번 나올 수 있다
+					     (예: key 가 빈 항목이 둘이면 같은 메시지가 반복). -->
+					{#each patternIssues as issue, i (i)}
 						<div class="text-[11px] text-destructive">{issue}</div>
 					{/each}
 				</div>

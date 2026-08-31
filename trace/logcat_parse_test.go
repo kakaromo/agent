@@ -191,3 +191,28 @@ func TestParseLogcatPatternsJSON(t *testing.T) {
 		t.Error("깨진 JSON 이 통과됐다")
 	}
 }
+
+// ⚠ 키 중복은 저장 경로(ValidatePatternsJSON)가 막지만, `POST /logcat/parse` 의
+// inline patternsJson 은 그 검증을 안 탄다. 통과시키면 stat map 에서 한쪽이 다른
+// 쪽을 덮어써 **Stats 에 같은 항목이 두 번 실리고 TotalHits 가 부풀려진다** —
+// 매칭 통계는 진단의 근거라 근거 없이 틀리면 안 된다.
+func TestParseLogcat_RejectsDuplicateKeys(t *testing.T) {
+	p := &LogcatPatterns{
+		Marks:  []LogcatMark{{Key: "x", Regex: "prefill"}},
+		Series: []LogcatSeries{{Key: "x", Regex: "TTFT ([0-9.]+)"}},
+	}
+	_, err := ParseLogcat(strings.NewReader("100.0 1 1 I T: prefill\n"), p)
+	if err == nil {
+		t.Error("mark 와 series 가 키를 공유하는데 통과했다 — 통계가 조용히 틀어진다")
+	}
+}
+
+// ⚠ 시간 상한 검사 주기가 파일 길이보다 크면 **상한이 아예 안 걸린다.**
+// 1만 줄 미만 파일 + catastrophic backtracking 정규식 = 무한정.
+// (사무실 모드는 0.0.0.0·인증 없음이라 요청 하나로 goroutine 을 붙잡을 수 있다.)
+func TestParseLogcat_DeadlineCheckCoversShortFiles(t *testing.T) {
+	if deadlineCheckEvery > 1000 {
+		t.Errorf("상한 검사 주기가 %d 줄 — 그보다 짧은 파일은 검사를 한 번도 안 탄다",
+			deadlineCheckEvery)
+	}
+}
