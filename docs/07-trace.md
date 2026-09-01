@@ -137,8 +137,39 @@ mixed schema (UFS + Block 동시) 는 DuckDB `union_by_name=true` 로 합쳐 읽
 - **cmdSizeCounts**: (cmd, size) 별 count
 - **continuousCount/Ratio**, **alignedCount/Ratio**
 - **readTotalBytes / writeTotalBytes / discardTotalBytes**, **sendCount**
+- **directionContiguity**: read/write × 연속/비연속 (아래) + **classifiedSendCount**
 
 filter 가 있으면 DuckDB WHERE 절로 적용.
+
+### directionContiguity — read/write 방향별 주소 연속성
+
+`continuousCount/Ratio` 와 **값이 다르다. 둘 다 맞고 묻는 질문이 다르다.**
+
+parquet 의 `continuous` 컬럼은 방향 구분 없이 **직전 send 1개**와만 비교한다.
+그래서 read/write 가 인터리빙되면 read 스트림 자체는 순차인데도 중간의 write 때문에
+끊긴 것으로 집계된다:
+
+```
+send 순서:  R(0,+1) W(100,+1) R(1,+1) W(101,+1)
+  continuous 컬럼 : false false false false  → read 0%,  write 0%   (거짓)
+  방향별 체인      : false false TRUE  TRUE   → read 50%, write 50%  (참)
+```
+
+`directionContiguity` 는 read 는 직전 read 와, write 는 직전 write 와 비교한다
+(`trace/stats.go` 의 `queryDirContiguity`). **조회 시 DuckDB 윈도우 함수로 계산하므로
+기존 잡을 재파싱 없이** 그대로 볼 수 있다.
+
+항목당: `direction`, `contiguous`, `count`, `ratioWithinDirection`(방향 내 %),
+`ratioOfSends`(전체 대비 %, 4항목 합 100), `totalBytes`, `avgRequestBytes`.
+
+- **discard/flush 는 read 도 write 도 아니라 제외**된다. 그래서 항목들의 count 합이
+  `sendCount` 보다 작고, 그 분모를 `classifiedSendCount` 로 함께 낸다.
+- 주소 공간은 LU/디바이스마다 독립이라 파티션 키에 넣는다. 빼면 서로 다른 LU 의
+  요청이 거짓으로 이어져 **연속 비율이 100% 쪽으로 부푼다.**
+  ⚠ ftrace `ufs`/`ufscustom` 은 LU 컬럼이 스키마에 없어 구분이 불가능하다 —
+  multi-LU 트레이스면 과대평가된다 (소스의 한계).
+- ufs 계열과 block 계열이 섞인 조회에서는 계산하지 않는다 (주소 단위가 4KB vs 512B 로
+  달라 섞이면 조용히 틀린다). 빈 배열로 나가고 화면은 "—" 로 렌더.
 
 ## raw events (샘플링)
 

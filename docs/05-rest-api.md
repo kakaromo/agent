@@ -291,7 +291,13 @@ ftrace 중지 + adb 종료 + COLLECTING 상태로 전이 후 즉시 리턴. parq
     "continuousCount": ..., "continuousRatio": ...,
     "alignedCount":    ..., "alignedRatio":    ...,
     "readTotalBytes":  ..., "writeTotalBytes": ..., "discardTotalBytes": ...,
-    "sendCount":       ...
+    "sendCount":       ...,
+    "directionContiguity": [
+      {"direction":"read","contiguous":true,"count":1796,
+       "ratioWithinDirection":72.2,"ratioOfSends":44.9,
+       "totalBytes":120750080,"avgRequestBytes":67232.8}
+    ],
+    "classifiedSendCount": 4000
   }
 }
 ```
