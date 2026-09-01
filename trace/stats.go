@@ -168,7 +168,19 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	stats := &pb.TraceStats{}
 
 	// 1. Total events + duration
-	q := fmt.Sprintf(`SELECT count(*), min(time), max(time) FROM read_parquet(%s) %s`, glob, where)
+	//
+	// ⚠ 시간 컬럼을 `time` 으로 박아 두면 **ufscustom 이 통째로 실패한다** —
+	// UFSCustomEvent 는 한 행이 곧 한 요청이라 `start_time`/`end_time` 을 쓰고
+	// `time` 이 없다 (trace/parser/types.go). 이 쿼리가 1단계라 뒤의 모든 집계가
+	// 못 돌고 "Referenced column time not found" 로 죽었다.
+	// detectTimeColumn 이 그래서 있는 것이고, 여기만 안 쓰고 있었다.
+	timeSel := timeCol
+	if timeSel == "" {
+		// 시간 컬럼이 아예 없으면 duration 은 포기하되 count 는 살린다.
+		timeSel = "NULL"
+	}
+	q := fmt.Sprintf(`SELECT count(*), min(%[1]s), max(%[1]s) FROM read_parquet(%[2]s) %[3]s`,
+		timeSel, glob, where)
 	var total int64
 	var minTime, maxTime sql.NullFloat64
 	if err := db.QueryRow(q).Scan(&total, &minTime, &maxTime); err != nil {

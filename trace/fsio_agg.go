@@ -253,10 +253,14 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 		// ftrace 는 sector 컬럼 유무로 block 을 가른다 (ufs 는 lba).
 		isBlockLayer = hasColumns(db, glob, "sector")["sector"]
 	}
-	reqAction, compAction := "send_req", "complete_rsp"
-	if isBlockLayer {
-		reqAction, compAction = "block_rq_issue", "block_rq_complete"
-	}
+	// send/complete 판정은 fsio_cols.go 가 정본이다.
+	//
+	// ⚠ 예전엔 `action = 'block_rq_issue'` 라는 **동등 비교**였는데, 파서가 받아 그대로
+	// 저장하는 별칭 `Q`/`C` 를 빠뜨려서 그런 트레이스는 sendCount·readBytes·totalBytes 가
+	// **전부 0** 이었다 (에러가 아니라 0 이라 안 드러난다). 실측 재현: 4행 → sc=0, bytes=0.
+	hasAction := hasColumns(db, glob, "action")["action"]
+	reqPred := cols.SendPredicate(hasAction)
+	compPred := cols.CompletePredicate(hasAction)
 	sectorBytes := 1
 	if !fsio.any() {
 		if isBlockLayer {
@@ -325,7 +329,7 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 		}
 
 		group, err := queryAttrGroup(db, glob, where, expr, cmdCol, readPred, writePred,
-			reqAction, compAction, sectorBytes, topN, dim, present, total,
+			reqPred, compPred, sectorBytes, topN, dim, present, total,
 			attrSortExpr(req.GetSortBy()))
 		if err != nil {
 			return nil, fmt.Errorf("attribution dim %v: %w", dim, err)
@@ -336,7 +340,7 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 }
 
 func queryAttrGroup(db *sql.DB, glob, where, expr, cmdCol, readPred, writePred,
-	reqAction, compAction string, sectorBytes, topN int, dim pb.AttributionDim,
+	reqPred, compPred string, sectorBytes, topN int, dim pb.AttributionDim,
 	present map[string]bool, total int64, sortExpr string) (*pb.AttributionGroup, error) {
 
 	g := &pb.AttributionGroup{Dim: dim}
@@ -364,15 +368,15 @@ func queryAttrGroup(db *sql.DB, glob, where, expr, cmdCol, readPred, writePred,
 	agg AS (
 	  SELECT %s AS k,
 	         count(*)::BIGINT AS cnt,
-	         count(*) FILTER (WHERE action = '%s')::BIGINT AS sc,
-	         COALESCE(sum(CASE WHEN action = '%s' AND %s THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS read_b,
-	         COALESCE(sum(CASE WHEN action = '%s' AND %s THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS write_b,
-	         COALESCE(sum(CASE WHEN action = '%s' THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS total_bytes,
-	         COALESCE(sum(dtoc) FILTER (WHERE action = '%s' AND dtoc > 0), 0) AS dtoc_sum,
-	         avg(dtoc) FILTER (WHERE action = '%s' AND dtoc > 0) AS dtoc_avg,
-	         quantile_disc(dtoc, 0.5) FILTER (WHERE action = '%s' AND dtoc > 0) AS dtoc_p50,
-	         quantile_disc(dtoc, 0.99) FILTER (WHERE action = '%s' AND dtoc > 0) AS dtoc_p99,
-	         COALESCE(max(dtoc) FILTER (WHERE action = '%s'), 0) AS dtoc_max,
+	         count(*) FILTER (WHERE %s)::BIGINT AS sc,
+	         COALESCE(sum(CASE WHEN %s AND %s THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS read_b,
+	         COALESCE(sum(CASE WHEN %s AND %s THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS write_b,
+	         COALESCE(sum(CASE WHEN %s THEN CAST(size AS BIGINT) * %d ELSE 0 END), 0)::BIGINT AS total_bytes,
+	         COALESCE(sum(dtoc) FILTER (WHERE %s AND dtoc > 0), 0) AS dtoc_sum,
+	         avg(dtoc) FILTER (WHERE %s AND dtoc > 0) AS dtoc_avg,
+	         quantile_disc(dtoc, 0.5) FILTER (WHERE %s AND dtoc > 0) AS dtoc_p50,
+	         quantile_disc(dtoc, 0.99) FILTER (WHERE %s AND dtoc > 0) AS dtoc_p99,
+	         COALESCE(max(dtoc) FILTER (WHERE %s), 0) AS dtoc_max,
 	         %s AS distinct_files
 	  FROM base GROUP BY 1
 	),
@@ -389,11 +393,11 @@ func queryAttrGroup(db *sql.DB, glob, where, expr, cmdCol, readPred, writePred,
 	HAVING count(*) > 0`,
 		cmdCol, glob, where,
 		expr,
-		reqAction,
-		compAction, readPred, sectorBytes,
-		compAction, writePred, sectorBytes,
-		compAction, sectorBytes,
-		compAction, compAction, compAction, compAction, compAction,
+		reqPred,
+		compPred, readPred, sectorBytes,
+		compPred, writePred, sectorBytes,
+		compPred, sectorBytes,
+		compPred, compPred, compPred, compPred, compPred,
 		filesCol,
 		sortExpr, topN, topN)
 

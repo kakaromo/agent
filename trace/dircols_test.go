@@ -211,3 +211,45 @@ func writeFsioLines(t *testing.T, lines []string, traceType string) string {
 	}
 	return d
 }
+
+// Attribution 도 `Q`/`C` 별칭을 세야 한다.
+//
+// ⚠ 예전엔 `action = 'block_rq_issue'` 동등 비교라, 별칭으로 기록된 트레이스는
+// sendCount·readBytes·totalBytes 가 **전부 0** 이었다. 에러가 아니라 0 이다.
+// (실측 재현: 4행 입력 → count=4 인데 sc=0, bytes=0)
+func TestAttributionAcceptsQCActionAlias(t *testing.T) {
+	lines := []string{}
+	for i, sec := range []int{0, 8} {
+		lines = append(lines, fmt.Sprintf(
+			"820.00%04d\tBLK\t100\t100\t0\tapp\tvfs_read\tQ\text4\t8\t0\t555\t4096\t%d\t/d\t0x0000000000000001\trwbs=R",
+			i*2, sec))
+		lines = append(lines, fmt.Sprintf(
+			"820.00%04d\tBLK\t100\t100\t0\tapp\tvfs_read\tC\text4\t8\t0\t555\t4096\t%d\t/d\t0x0000000000000001\trwbs=R",
+			i*2+1, sec))
+	}
+	dir := writeFsioLines(t, lines, "fsio_block")
+
+	resp, err := ComputeAttribution([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_block"}},
+		&pb.GetIoAttributionRequest{
+			Dims: []pb.AttributionDim{pb.AttributionDim_ATTR_DIM_COMM},
+			TopN: 20,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sc int64
+	var readB, totalB uint64
+	for _, g := range resp.GetGroups() {
+		for _, e := range g.GetEntries() {
+			sc += e.GetSendCount()
+			readB += e.GetReadBytes()
+			totalB += e.GetTotalBytes()
+		}
+	}
+	if sc != 2 {
+		t.Errorf("sendCount = %d, want 2 — `Q` 를 send 로 안 세면 0 이 된다", sc)
+	}
+	if readB == 0 || totalB == 0 {
+		t.Errorf("readBytes=%d totalBytes=%d — `C` 를 complete 로 안 세면 0 이 된다", readB, totalB)
+	}
+}
