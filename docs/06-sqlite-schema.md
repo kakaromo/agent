@@ -261,6 +261,7 @@ CREATE TABLE ai_log_profiles (
   description   TEXT,
   runtime       TEXT NOT NULL,   -- qnn | llamacpp | vendor ... (조회 필터)
   soc           TEXT,            -- 빈 값 = 런타임 공용
+  source        TEXT NOT NULL DEFAULT 'logcat',  -- logcat | marker
   patterns_json TEXT NOT NULL,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
@@ -289,6 +290,17 @@ CREATE TABLE ai_log_profiles (
 
 `marks` 는 걸린 줄의 **시각만** 써서 구간 경계로 쓰고, `series` 는 캡처 그룹에서 **숫자**를
 뽑아 시계열이 된다. 성격이 달라 분리했다 — 뭉치면 파싱이 지저분해진다.
+
+⚠ **`source` 가 patterns_json 의 구조를 정한다:**
+
+```
+logcat: {"marks":[{key,regex}], "series":[{key,regex,unit}]}      ← 캡처 그룹 필수
+marker: {"counters":[{key,name|regex,unit}], "sections":[{key,name|regex}]}
+```
+
+섞으면 JSON 파싱은 통과하는데 매칭이 **조용히 0건**이 된다 — 사용자는 정규식을
+고쳐가며 헛수고한다. 그래서 저장 시 소스별 검증기를 타고 파싱 전에 양방향으로 막는다.
+기존 행은 `DEFAULT 'logcat'` 마이그레이션으로 그대로 동작한다.
 
 ⚠ `ValidatePatternsJSON` 이 저장 시점에 막는 것들 (전부 "통과시키면 측정 시점에 조용히
 틀리는" 종류): 잘못된 정규식 / series 에 캡처 그룹 없음 / key 중복 / 패턴 0개.

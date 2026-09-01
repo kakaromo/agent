@@ -170,7 +170,8 @@ os.Setenv("AGENT_PARSER", "go")
 | `rest_schedule.go` | ScheduledJob CRUD + trigger/enable |
 | `rest_archive.go` | `/api/agent/upload/*` 로컬 디스크 복사 |
 | `rest_logcat.go` | logcat 탐색/파싱 REST (경로 격리 가드 포함) |
-| `rest_ailogprofile.go` | AILogProfile CRUD (검증 실패는 400) |
+| `rest_ailogprofile.go` | AILogProfile CRUD (검증 실패는 400, 소스별 검증기) |
+| `rest_marker.go` | trace_marker AI 지표 REST (traceJobId 만 받는다) |
 | `rest_convert.go` | proto → map 변환, enum 문자열화, TraceFilter 빌더 |
 | `rest_hook.go` | JobExecutionRecorder 인터페이스 + dbRecorder |
 | `rest_summary.go` | terminal 잡의 metrics summary 추출 |
@@ -215,6 +216,8 @@ os.Setenv("AGENT_PARSER", "go")
 | `logcat_line.go` | logcat 한 줄 파서 (monotonic/epoch 공용) |
 | `logcat_explore.go` | 태그 후보 탐색 (유휴/추론 차분, WeakOnly 판정) |
 | `logcat_parse.go` | 패턴 매칭 → TTFT/TPOT (mark/series, 진단) |
+| `aimarker.go` | trace_marker `C\|`/`B\|` 파서 → TTFT/TPOT (캡처 그룹 불필요) |
+| `aimarker_explore.go` | marker 이름 후보 탐색 (WeakOnly 판정) |
 | `parser/` | Go 내장 파서 (`AGENT_PARSER=go` 시 사용) |
 
 ### `ui/`

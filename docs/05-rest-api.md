@@ -672,7 +672,7 @@ SSE 와 동일한 progress 데이터를 WebSocket message 로.
 ### `WS /ws/monitor?serials=A,B&interval_seconds=1`
 SSE monitoring 과 동일.
 
-## 16. Logcat / AI Log Profile (on-device AI 측정, 7 endpoint)
+## 16. on-device AI 측정 — Logcat / trace_marker (9 endpoint)
 
 on-device AI(LLM) 의 TTFT/TPOT 를 logcat 문구에서 뽑는다. 런타임이 찍는 문자열이
 AP·세트·버전마다 달라 정규식을 **DB 프리셋**으로 두고, 형식을 모를 땐 탐색으로 찾는다.
@@ -770,9 +770,94 @@ BOOTTIME 인데 `-v monotonic` 은 누적 suspend 만큼 어긋난다(실기기 
 series 요약에 median/p99 를 함께 주는 이유: TPOT 은 평균만 보면 "뒤로 갈수록 느려짐" 을
 놓친다.
 
+### `POST /api/agent/marker/explore`
+
+**두 번째 소스 — ftrace `trace_marker`.** logcat 과 계약이 같고 소스만 다르다.
+
+⚠ **왜 두 경로가 필요한가.** 런타임이 **stderr 로 뱉으면 logcat 에 아예 안 남는다**
+(llama.cpp 의 `llama_print_timings()` 가 그렇다). 패턴을 아무리 고쳐도 소용없다.
+trace_marker 는 파일 write 라 그 제약이 없고, IO 트레이스와 **같은 버퍼·같은
+clock(boot)** 이라 축 변환도 필요 없다 (logcat 은 epoch → BOOTTIME 변환이 필요).
+
+요청: `{ "traceJobId": "abc-123", "idleFrom": 100.0, "idleTo": 130.0, "runFrom": 140.0, "runTo": 160.0 }`
+
+⚠ **`path` 를 받지 않는다.** logcat 쪽은 path + 격리 가드였지만 여기는 `traceJobId`
+로 잡 폴더에서 파일명을 조립한다 — 임의 경로가 들어올 여지 자체를 없애는 쪽이
+가드를 얹는 것보다 안전하다 (사무실 모드는 인증 없는 0.0.0.0 위다).
+
+응답:
+```json
+{
+  "path": "/…/trace.log",
+  "result": {
+    "totalLines": 44787, "markerLines": 574, "distinctNames": 210,
+    "candidates": [
+      { "name": "decode_ms_per_token", "kind": "counter", "count": 40,
+        "hasValue": true, "min": 22, "max": 28,
+        "llmSignal": true, "onlyDuringRun": true, "score": 10540,
+        "samples": ["… C|9001|decode_ms_per_token|24"] }
+    ],
+    "weakOnly": false, "diagnosis": []
+  }
+}
+```
+
+**Android atrace 표준 포맷** (실기기 S25 실측):
+
+```
+B|pid|name           구간 시작
+E|pid                구간 끝
+C|pid|name|value     카운터 — 값이 이미 분리돼 있다
+I|pid|name           순간 이벤트
+```
+
+⭐ **`C|` 가 logcat 대비 핵심 이점**: logcat 은 자유 문구라 사용자가 정규식과
+**캡처 그룹**을 만들어야 하는데, `C|` 는 이름과 값이 파이프로 나뉘어 있어 **캡처
+그룹 자체가 필요 없다.** 사용자는 이름만 적는다 (버전차가 있으면 regex).
+
+⚠⚠ **`token` 단독은 신호로 못 쓴다.** 실기기에서 Android 시스템 마커가 상위를
+통째로 먹었다 — Binder 가 이름 끝에 핸들을 붙인다:
+
+```
+B|2396|setTransactionState: transaction(Id:…)-token:0xb40000796fe7eea0
+B|2992|serviceBind: BindServiceData{token=…}
+```
+
+Binder 토큰과 LLM 토큰은 이름만 같은 **완전히 다른 개념**이다 (logcat 에서 음성
+wakeword 가 1위였던 것과 같은 실패 — 어휘가 겹친다). 그래서 토큰은 **LLM 문맥이
+붙은 형태**만 본다: `tok/s`, `ms/tok`, `n_tokens`, `tokens_per_sec`.
+
+### `POST /api/agent/marker/parse`
+
+요청: `{ "traceJobId": "abc-123", "profileId": 3 }` 또는 `{ "traceJobId": "…", "patternsJson": {…} }`
+
+패턴 구조가 logcat 과 다르다 — **캡처 그룹이 없다**:
+
+```json
+{
+  "counters": [
+    { "key": "ttft", "name": "llm.ttft_ms", "unit": "ms" },
+    { "key": "tpot", "name": "decode_ms_per_token", "unit": "ms" },
+    { "key": "heap", "regex": "^Heap size", "unit": "KB" }
+  ],
+  "sections": [ { "key": "prefill", "name": "prefill" } ]
+}
+```
+
+`name` 은 정확 일치, `regex` 는 부분 일치 (이름이 버전마다 다를 때). 둘 다 비면 400.
+
+응답 shape 은 **logcat parse 와 동일**하다 (`LogcatParseResult`) — 지표 성격이 같아
+화면·진단·요약 로직을 그대로 재사용한다. 0건도 200 인 것도 같다.
+
 ### AILogProfile CRUD (5)
 
 `GET / POST /api/agent/ai-log-profiles`, `GET / PUT / DELETE /api/agent/ai-log-profiles/{id}`
+
+⚠ **`source` 필드로 소스를 구분한다** — `"logcat"`(기본) 또는 `"marker"`.
+두 소스는 patterns_json 의 **필드 이름이 다르다**(`marks/series` vs
+`counters/sections`). 섞으면 JSON 파싱은 통과하는데 매칭이 **조용히 0건**이 되고,
+사용자는 정규식을 고쳐가며 헛수고한다. 그래서 저장 시 소스별 검증기를 타고,
+파싱 전에 **양방향으로** 막는다 (틀리면 400 + 원인).
 
 `GET` 은 `?runtime=` `?soc=` 필터를 받는다 — 기기가 붙었을 때 "이 AP 에 맞는 프로파일" 을
 고르기 위해 컬럼으로 뺐다. ⚠ `soc` 필터는 **빈 soc 프로파일도 포함**한다 (빈 값 =
@@ -845,12 +930,13 @@ if (res.status === 404) {
 | Screen WS | 2 (legacy + portal 호환 path) |
 | 보조 WS | 2 |
 | Logcat | 2 (explore + parse) |
+| Marker | 2 (explore + parse) |
 | AI Log Profile | 5 (CRUD) |
-| **합계** | **77** |
+| **합계** | **79** |
 
 (portal AgentController 47 + 사이드 컨트롤러 + 보조 WS + 추가 magic path 들)
 
-⚠ Logcat / AI Log Profile 7개는 **standalone 고유**로 portal 에 대응 컨트롤러가 없다
+⚠ Logcat / Marker / AI Log Profile 9개는 **standalone 고유**로 portal 에 대응 컨트롤러가 없다
 (gRPC RPC 도 없는 REST 전용).
 
 ## 다음
