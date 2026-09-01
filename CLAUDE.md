@@ -120,11 +120,20 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - `DELETE /api/agent/executions/{id}`
 - `GET    /api/agent/executions/stats?serverId=`
 
-**Logcat / AI Log Profile (7)** — on-device AI(LLM) TTFT/TPOT 측정
+**on-device AI 측정 — Logcat / trace_marker (9)** — TTFT/TPOT
 - `POST   /api/agent/logcat/explore` body `{jobId|path, idleFrom, idleTo, runFrom, runTo}` — 태그를 모를 때 후보 탐색. 유휴/추론 구간을 주면 차분으로 "추론 때만 나타난 태그" 를 가려낸다. ⚠ 응답 `weakOnly=true` 는 "LLM 고유 신호 0건" = 후보가 전부 무관할 수 있다는 경고
 - `POST   /api/agent/logcat/parse` body `{jobId|path, profileId|patternsJson}` — 패턴으로 TTFT/TPOT 추출. ⚠ 매칭 0건도 **200** (진단이 핵심 산출물이라 에러로 만들면 화면까지 못 간다). 패턴 자체가 잘못된 것만 400
 - AILogProfile CRUD 5: `GET/POST /api/agent/ai-log-profiles`, `GET/PUT/DELETE /api/agent/ai-log-profiles/{id}` (`?runtime=` `?soc=` 필터, 빈 soc = 런타임 공용이라 항상 포함)
 - ⚠ 수집 시작/중지 endpoint 는 없다 — **잡 옵션**으로 켠다: 시나리오 파라미터 `logcat=on` (+`logcat_tags=A,B` 없으면 explore). 잡 수집은 **epoch 축** 고정 (IO 트레이스가 BOOTTIME 인데 monotonic 은 suspend 만큼 어긋남)
+- `POST   /api/agent/marker/{explore,parse}` body `{traceJobId, ...}` — **두 번째 소스**.
+  런타임이 **stderr 로 뱉으면 logcat 에 안 남는다**(llama.cpp `llama_print_timings()`).
+  trace_marker 는 파일 write 라 그 제약이 없고 IO 트레이스와 **같은 clock(boot)** 이라 축 변환 불필요
+- ⚠ marker 는 `path` 를 안 받는다 — `traceJobId` 로 잡 폴더에서 조립(임의 경로 차단)
+- ⚠ atrace 포맷 `C|pid|이름|값` 이라 **캡처 그룹이 필요 없다**(이름만 적는다). logcat 은 정규식+캡처 필수
+- ⚠⚠ marker 에서 **`token` 단독은 신호로 못 쓴다** — Binder 가 이름 끝에 핸들을 붙여
+  (`-token:0x…`) 시스템 마커가 상위를 먹는다. `tok/s`·`ms/tok` 처럼 LLM 문맥이 붙은 것만
+- ⚠ 프로파일에 `source` 컬럼(logcat|marker) — patterns_json 필드 이름이 달라
+  (`marks/series` vs `counters/sections`) 섞으면 **조용히 0건**이 된다. 양방향 차단
 - ⚠ gRPC RPC 없음 — REST 전용 (portal 대응 컨트롤러도 없는 standalone 고유)
 
 **Archive (2)**
@@ -160,7 +169,8 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
 - **`server/rest_schedule.go`** — ScheduledJob CRUD + trigger/enable
 - **`server/rest_archive.go`** — `/api/agent/upload/*` 로컬 디스크 archive (MinIO 미사용)
 - **`server/rest_logcat.go`** — logcat 탐색/파싱 REST (경로 격리 가드)
-- **`server/rest_ailogprofile.go`** — AILogProfile CRUD (검증 실패 400)
+- **`server/rest_ailogprofile.go`** — AILogProfile CRUD (검증 실패 400, 소스별 검증기)
+- **`server/rest_marker.go`** — trace_marker AI 지표 REST (traceJobId 만 받는다)
 - **`server/rest_hook.go`** — `JobExecutionRecorder` 인터페이스 + dbRecorder (OnStart/OnState/OnResult)
 - **`server/rest_summary.go`** — terminal 잡의 metrics summary 추출 → DB 영구 저장
 - **`server/sse.go`** — `/api/agent/benchmark/progress`, `/api/agent/monitoring/stream` (portal EventSource 호환)
@@ -179,6 +189,9 @@ Trace 결과는 `/agent` 모드의 AgentTraceResultSheet 안에서 즉시 시각
   - `logcat_line.go` — logcat 한 줄 파서 (monotonic/epoch 공용, 축 변환은 안 함)
   - `logcat_explore.go` — 태그 후보 탐색. ⚠ strongRe 는 **LLM 고유 신호만** (토큰 개념·prefill/decode·TTFT). 온디바이스 ML 은 어휘가 겹쳐 `model load`/`inference` 로는 못 거른다
   - `logcat_parse.go` — 패턴 매칭 → TTFT/TPOT (mark=시각, series=값+분포)
+  - `aimarker.go` / `aimarker_explore.go` — trace_marker 소스. `C|` 는 값이 이미 분리돼 있어 캡처 그룹 불필요
+  - `parser/line.go` — ⚠ CPU 필드는 `]` 뒤 공백 + 안쪽 숫자만으로 판정. 첫 `[` 를 쓰면
+    스레드 이름(`highpool[392]`)을 CPU 로 오독해 줄을 버리고 **QD 가 157까지 누적**된다
 - **`tools/`** — 외부 바이너리 (trace 파서 등)
 - **`config/`** — 설정 파일 (`devices.toml`)
 - **`pb/`** — 생성된 protobuf Go 코드

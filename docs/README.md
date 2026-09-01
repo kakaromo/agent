@@ -14,7 +14,7 @@ Go 기반 Android 디바이스 평가 에이전트의 상세 문서.
 
 ### Standalone (출장용 원바이너리)
 - **[Standalone 모드](04-standalone-mode.md)** — `--standalone` 플래그가 켜는 모든 동작
-- **[REST/SSE/WS API 레퍼런스](05-rest-api.md)** — portal 호환 + standalone 고유, 77 endpoints
+- **[REST/SSE/WS API 레퍼런스](05-rest-api.md)** — portal 호환 + standalone 고유, 79 endpoints
 - **[SQLite 스키마](06-sqlite-schema.md)** — 8 테이블, 영속화 hook, stale 정리
 
 ### 핵심 기능
