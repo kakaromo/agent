@@ -290,11 +290,15 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 		topN = attrMaxTopN
 	}
 
-	// read/write 분해는 io_flags 비트가 있으면 그걸로 (가장 정확), 없으면 cmd 분류로 폴백.
-	readPred, writePred := "lower(cmd) LIKE 'r%'", "lower(cmd) LIKE 'w%'"
-	if present["io_flags"] {
-		readPred, writePred = "(io_flags & 1) != 0", "(io_flags & 2) != 0"
-	}
+	// read/write 분해 — 분류기는 fsio_cols.go 의 DirExpr 하나로 모았다.
+	//
+	// 예전엔 여기 폴백이 `lower(cmd) LIKE 'r%'` 였는데, io_flags 는 **fsio 전용 컬럼**이라
+	// ftrace 잡은 **항상 폴백을 탄다.** 그런데 ftrace UFS 의 cmd 는 `0x28`/`0x2a` 라
+	// r%/w% 어느 쪽에도 안 걸려서 **ftrace UFS 의 read/write 바이트가 전부 0** 이었다.
+	// 에러가 아니라 0 이라 아무도 못 알아챈다.
+	dirExpr := cols.DirExpr(cmdCol)
+	readPred := fmt.Sprintf("(%s) = 'read'", dirExpr)
+	writePred := fmt.Sprintf("(%s) = 'write'", dirExpr)
 
 	for _, dim := range req.GetDims() {
 		spec, ok := attrDimSQL(dim)
