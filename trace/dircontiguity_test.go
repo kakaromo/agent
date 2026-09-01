@@ -2,9 +2,13 @@ package trace
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	pb "agent/pb"
+	"agent/trace/parser"
 )
 
 // 방향별 주소 연속성 집계의 회귀 테스트.
@@ -283,5 +287,30 @@ func TestSendCountAcceptsQActionAlias(t *testing.T) {
 	}
 	if cmdSend != 3 {
 		t.Errorf("cmdStats sendCount 합 = %d, want 3", cmdSend)
+	}
+}
+
+// ComputeStats 1단계가 시간 컬럼을 `time` 으로 박아 두면 ufscustom 이 통째로 실패한다
+// (UFSCustomEvent 는 start_time/end_time 을 쓰고 time 이 없다). detectTimeColumn 이
+// 그래서 있는 것인데 이 쿼리만 안 쓰고 있었다.
+//
+// ⚠ 이 테스트는 **1단계 통과까지만** 고정한다. ufscustom 은 `qd`/`action` 도 스키마가
+// 달라 뒤 단계에서 여전히 막힌다 — 그건 별도 작업이다 (아래 Logf 로 어디서 막히는지 남긴다).
+func TestComputeStatsStep1UsesDetectedTimeColumn(t *testing.T) {
+	d := t.TempDir()
+	data := "0x28,0,8,100.000000,100.000100\n0x28,8,8,100.000200,100.000300\n"
+	if err := os.WriteFile(filepath.Join(d, "trace.log"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(filepath.Join(d, "trace.log"), d, "ufscustom", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ComputeStats([]*TraceJobInfo{{Dir: d, TraceType: "ufscustom"}}, nil, nil)
+	if err != nil && strings.Contains(err.Error(), `"time" not found`) {
+		t.Fatalf("1단계가 아직 time 을 박아 쓰고 있다: %v", err)
+	}
+	if err != nil {
+		t.Logf("1단계는 통과했고 이후 단계에서 막힌다 (별도 작업): %v", err)
 	}
 }
