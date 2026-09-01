@@ -158,3 +158,175 @@ func (c fsioCols) rawLbaExpr(lbaExpr, prefix string) string {
 	}
 	return c.mgmtNullExpr(lbaExpr, "UBIGINT", prefix)
 }
+
+// ============================================================================
+// 방향(read/write) × 주소 연속성 — 공용 컬럼식
+//
+// 판정 축은 **send 순서**다. 주소 연속성은 "발행 순서상 직전 요청에 이어지는가" 의
+// 성질이지 완료 순서의 성질이 아니다.
+//
+// parquet 의 `continuous` 컬럼을 안 쓰고 조회 시 다시 계산하는 이유 —
+// 그 컬럼은 **방향 구분 없이 직전 send 1개**와만 비교한다. read 와 write 가 섞여
+// 나가면 read 스트림 자체는 완벽히 순차인데도 중간의 write 때문에 끊긴 것으로
+// 집계된다. 여기서는 read 는 직전 read 와, write 는 직전 write 와 비교한다.
+// ============================================================================
+
+// DirExpr — send 행의 방향을 'read'/'write'/NULL 로 내는 SQL 식.
+//
+// **NULL 이 핵심이다.** discard/flush/unmap 은 read 도 write 도 아니다. 'other' 로
+// 뭉뚱그려 분모에 남기면 비율이 조용히 오염된다 — 특히 f2fs 는 discard 량이 커서
+// write 에 섞으면 눈에 띄게 부푼다. 호출부가 `dir IS NOT NULL` 로 버린다.
+//
+// 판정 우선순위:
+//  1. fsio: `is_read`/`is_write` 불리언. 파서가 io_flags 비트를 이미 푼 결과라
+//     `is_discard`/`is_flush` 와 어긋날 수 없다. union 으로 NULL 이 될 수 있어 COALESCE.
+//  2. ftrace UFS / ufscustom: opcode hex. 0x28/0x88=READ, 0x2a/0x8a=WRITE.
+//     (stats.go 의 Go 분류기와 같은 목록 — 거기가 정본이다)
+//  3. block / fsio_block: io_type / rwbs 의 **첫 글자**.
+//
+// ⚠ 3번은 반드시 첫 글자여야 한다. 완전일치로 하면 실기기에 실제로 나오는
+// `WF`/`WFS`/`WSMA` 가 전부 빠진다 (F 가 뒤에 오면 FUA 지 flush 가 아니다).
+// TestFsioRwbsClassifiedByFirstLetter 가 이걸 고정하고 있다.
+//
+// ⚠ `fsio_agg.go` 의 `lower(cmd) LIKE 'r%'` 를 재사용하면 안 된다 — ftrace UFS 의
+// cmd 는 `0x28`/`0x2a` 라 r%/w% 어느 쪽에도 안 걸려 read/write 가 전부 0 이 된다.
+func (c fsioCols) DirExpr(cmdExpr string) string {
+	return c.DirExprWith(cmdExpr, true)
+}
+
+// DirExprWith — hasRWFlags 로 `is_read`/`is_write` 컬럼 존재를 명시한다.
+//
+// ⚠ 스키마 판정(`schema.any()`)은 `is_mgmt`/`mgmt_name`/`rwbs` 로 하는데 여기서
+// 참조하는 건 `is_read`/`is_write` 라 **탐지 컬럼과 참조 컬럼이 다르다.** 지금은
+// 두 producer(Go/Rust) 모두 함께 내보내지만, 한쪽만 있는 parquet 이 들어오면
+// 쿼리가 통째로 터진다. 호출부가 확인해 넘길 수 있게 열어 둔다.
+func (c fsioCols) DirExprWith(cmdExpr string, hasRWFlags bool) string {
+	if c.schema.any() && hasRWFlags {
+		// fsio 는 파서가 구워둔 불리언이 가장 정확하다 — io_flags 비트를 이미 푼
+		// 결과라 is_discard/is_flush 와 어긋날 수 없다.
+		//
+		// ⚠ 단, 불리언이 **둘 다 false 일 수 있다.** producer 가 io_flags 를 안 준
+		// 경우(구버전 bpftrace, UFS_TAG_CTX miss)가 그렇다. 그때 그냥 포기하면
+		// 데이터가 멀쩡히 있는데도 집계가 통째로 빈다. opcode/rwbs 로 폴백한다.
+		fb := ""
+		if cmdExpr != "" {
+			l := fmt.Sprintf("lower(CAST(%s AS VARCHAR))", cmdExpr)
+			fb = fmt.Sprintf(
+				" WHEN %s IN ('0x28','0x88') THEN 'read'"+
+					" WHEN %s IN ('0x2a','0x8a') THEN 'write'"+
+					" WHEN upper(left(%s, 1)) = 'R' THEN 'read'"+
+					" WHEN upper(left(%s, 1)) = 'W' THEN 'write'", l, l, l, l)
+		}
+		return "CASE WHEN COALESCE(is_read, FALSE) THEN 'read' " +
+			"WHEN COALESCE(is_write, FALSE) THEN 'write'" + fb + " END"
+	}
+	if cmdExpr == "" {
+		return "NULL"
+	}
+	lower := fmt.Sprintf("lower(CAST(%s AS VARCHAR))", cmdExpr)
+	// ftrace 는 union 으로 ufs(opcode) + block(io_type) 이 섞일 수 있어 양쪽을 다 본다.
+	// hex 를 먼저 보고, 안 걸리면 첫 글자로 간다.
+	return fmt.Sprintf(
+		"CASE WHEN %s IN ('0x28','0x88') THEN 'read' "+
+			"WHEN %s IN ('0x2a','0x8a') THEN 'write' "+
+			"WHEN upper(left(%s, 1)) = 'R' THEN 'read' "+
+			"WHEN upper(left(%s, 1)) = 'W' THEN 'write' END",
+		lower, lower, lower, lower)
+}
+
+// SendPredicate — 이 행이 요청(send/issue)인가.
+//
+// ⚠ **ufscustom 에는 `action` 컬럼이 아예 없다** (trace/parser/types.go 의
+// UFSCustomEvent). 기존 `action IN ('send_req','block_rq_issue')` 를 그대로 쓰면
+// ufscustom 은 **조용히 0 행**이 되어 "데이터 없음" 처럼 보인다. ufscustom 은 한 행이
+// 곧 한 요청이라 TRUE 가 맞다.
+func (c fsioCols) SendPredicate(hasAction bool) string {
+	if !hasAction {
+		return "TRUE"
+	}
+	// ⚠ `Q` 는 block_rq_issue 의 별칭이다. 파서가 둘 다 받고(block.go:96,
+	// fsio_block.go:64) 원문을 그대로 parquet 에 넣으므로(fsio_line.go:263
+	// `rawAction`) 여기서도 둘 다 봐야 한다. 빠뜨리면 `Q` 로 기록된 트레이스는
+	// send 가 0 건이 되어 **에러 없이 화면이 통째로 빈다.**
+	return "action IN ('send_req', 'block_rq_issue', 'Q')"
+}
+
+// CompletePredicate — 이 행이 완료(complete) 인가. SendPredicate 의 짝.
+//
+// `C` 는 block_rq_complete 의 별칭이다 (SendPredicate 의 `Q` 와 같은 이유).
+func (c fsioCols) CompletePredicate(hasAction bool) string {
+	if !hasAction {
+		return "TRUE"
+	}
+	return "action IN ('complete_rsp', 'block_rq_complete', 'C')"
+}
+
+// EndAddrExpr — 이 요청의 끝 주소. 다음 요청의 시작 주소가 이 값과 같으면 연속이다.
+//
+// size 단위가 소스마다 다르다:
+//   - ftrace(ufs/ufscustom/block): 주소와 size 가 **같은 단위**라 그냥 더한다
+//     (ufs 는 둘 다 4KB LBA, block 은 둘 다 512B sector — 파서가 이미 정규화)
+//   - fsio(ufs/block): size 가 **bytes** 라 주소 단위로 올림 나눗셈해야 한다
+//     (파서 fsio_ufs.go / fsio_block.go 의 ceilDiv64 와 같은 계산)
+//
+// ⚠ 올림 나눗셈에 **`//` 를 쓴다.** DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이다.
+// 예: size=4096 이면 `(4096+4095)/4096` = 1.9998 이 그대로 남는다(`//` 면 1).
+// 그러면 끝주소가 정수가 아니게 되어
+// `addr = lag(end_addr)` 동등 비교가 **영원히 안 맞고** 연속이 항상 0% 로 나온다.
+// 에러가 아니라 그럴듯한 0 이라 알아채기 어렵다.
+func (c fsioCols) EndAddrExpr(lbaCol string) string {
+	switch {
+	case c.schema.isUFS && c.schema.isBlock:
+		// fsio 두 스키마가 섞인 경우 — 행마다 있는 쪽으로 간다.
+		return "CASE WHEN lba IS NOT NULL " +
+			"THEN CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) // 4096 " +
+			"ELSE CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) // 512 END"
+	case c.schema.isUFS:
+		return "CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) // 4096"
+	case c.schema.isBlock:
+		return "CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) // 512"
+	default:
+		return fmt.Sprintf("CAST(%s AS HUGEINT) + CAST(size AS HUGEINT)", lbaCol)
+	}
+}
+
+// ContiguityPartition — 주소 공간이 독립인 단위. PARTITION BY 에 덧붙일 컬럼 목록
+// (앞에 콤마 포함, 없으면 빈 문자열).
+//
+// ⚠ 이게 빠지면 **서로 다른 LU/디바이스의 요청이 거짓으로 이어져** 연속 비율이
+// 100% 쪽으로 부푼다. "훌륭한 워크로드" 처럼 보이는 가장 그럴듯한 오답이다.
+// 파서도 같은 이유로 페어링 키에 넣는다 (fsio_ufs.go lun, fsio_block.go dev).
+//
+// ⚠ ftrace UFS/ufscustom 은 **LU 컬럼이 스키마에 없어** 구분할 방법이 자체가 없다.
+// 소스의 한계지 이 기능의 한계가 아니다 — multi-LU 트레이스면 연속 비율이
+// 과대평가된다.
+func (c fsioCols) ContiguityPartition(present map[string]bool) []string {
+	if c.schema.isUFS && present["lun"] {
+		// 255 = LunUnknown. 미상끼리 이어지는 건 파서 동작(ev.LUN == prevLun)과 같다.
+		return []string{"COALESCE(lun, 255)"}
+	}
+	if present["devmajor"] && present["devminor"] {
+		return []string{"COALESCE(devmajor, 0)", "COALESCE(devminor, 0)"}
+	}
+	return nil
+}
+
+// SectorBytes — size 1 단위가 몇 바이트인가. 집계값을 bytes 로 환산할 때 쓴다.
+//
+//	fsio        : 1    (bpftrace 가 이미 bytes 로 준다)
+//	ftrace block: 512  (sector)
+//	ftrace ufs  : 4096 (4KB LBA)
+//
+// ⚠ 기존 stats.go 는 이 계수를 **cmd 문자열로 행마다** 골랐다. 방향으로 묶는 집계는
+// 그 방법을 못 쓰므로 스키마에서 한 번 정한다. ftrace 는 `sector` 컬럼 유무로 block 을
+// 가른다 — `fsio_agg.go` 의 isBlockLayer 와 같은 판정이다. (예전에 여기가 무조건
+// 4096 이라 ftrace block 바이트가 8배로 부푼 적이 있다.)
+func (c fsioCols) SectorBytes(hasSector bool) uint64 {
+	if c.schema.any() {
+		return 1
+	}
+	if hasSector {
+		return 512
+	}
+	return 4096
+}

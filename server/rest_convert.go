@@ -272,25 +272,44 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 			"dtoc":        latencyStatsToMap(m.GetDtoc()),
 		})
 	}
+	// 방향별 연속성. 없으면 빈 배열 — mgmt 와 같은 이유로 null 을 안 내보낸다.
+	//
+	// ⚠ 위 continuousCount/Ratio 와 **값이 다르다.** 저건 방향 구분 없이 직전 send
+	// 1개와만 비교하고, 이건 read 끼리/write 끼리 독립 체인이다. 화면에서 나란히
+	// 놓을 때는 라벨로 갈라야 한다.
+	dirCont := make([]map[string]any, 0, len(s.GetDirectionContiguity()))
+	for _, d := range s.GetDirectionContiguity() {
+		dirCont = append(dirCont, map[string]any{
+			"direction":            d.GetDirection(),
+			"contiguous":           d.GetContiguous(),
+			"count":                d.GetCount(),
+			"ratioWithinDirection": d.GetRatioWithinDirection(),
+			"ratioOfSends":         d.GetRatioOfSends(),
+			"totalBytes":           d.GetTotalBytes(),
+			"avgRequestBytes":      d.GetAvgRequestBytes(),
+		})
+	}
 	return map[string]any{
-		"totalEvents":       s.GetTotalEvents(),
-		"durationSeconds":   s.GetDurationSeconds(),
-		"mgmtStats":         mgmt,
-		"dtoc":              latencyStatsToMap(s.GetDtoc()),
-		"ctod":              latencyStatsToMap(s.GetCtod()),
-		"ctoc":              latencyStatsToMap(s.GetCtoc()),
-		"qd":                latencyStatsToMap(s.GetQd()),
-		"cmdStats":          cmdStats,
-		"latencyHistograms": hists,
-		"cmdSizeCounts":     sizes,
-		"continuousCount":   s.GetContinuousCount(),
-		"continuousRatio":   s.GetContinuousRatio(),
-		"alignedCount":      s.GetAlignedCount(),
-		"alignedRatio":      s.GetAlignedRatio(),
-		"readTotalBytes":    s.GetReadTotalBytes(),
-		"writeTotalBytes":   s.GetWriteTotalBytes(),
-		"discardTotalBytes": s.GetDiscardTotalBytes(),
-		"sendCount":         s.GetSendCount(),
+		"totalEvents":         s.GetTotalEvents(),
+		"durationSeconds":     s.GetDurationSeconds(),
+		"mgmtStats":           mgmt,
+		"dtoc":                latencyStatsToMap(s.GetDtoc()),
+		"ctod":                latencyStatsToMap(s.GetCtod()),
+		"ctoc":                latencyStatsToMap(s.GetCtoc()),
+		"qd":                  latencyStatsToMap(s.GetQd()),
+		"cmdStats":            cmdStats,
+		"latencyHistograms":   hists,
+		"cmdSizeCounts":       sizes,
+		"continuousCount":     s.GetContinuousCount(),
+		"continuousRatio":     s.GetContinuousRatio(),
+		"alignedCount":        s.GetAlignedCount(),
+		"alignedRatio":        s.GetAlignedRatio(),
+		"readTotalBytes":      s.GetReadTotalBytes(),
+		"writeTotalBytes":     s.GetWriteTotalBytes(),
+		"discardTotalBytes":   s.GetDiscardTotalBytes(),
+		"sendCount":           s.GetSendCount(),
+		"directionContiguity": dirCont,
+		"classifiedSendCount": s.GetClassifiedSendCount(),
 	}
 }
 

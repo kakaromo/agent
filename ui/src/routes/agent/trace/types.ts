@@ -130,6 +130,30 @@ export type StatsResponse = {
 	 * mgmt 를 **제외한** 데이터 IO 기준이다.
 	 */
 	mgmtStats?: StatsMgmt[];
+	/**
+	 * read/write × 주소 연속성. optional — 구버전 agent/portal 응답엔 이 키가 없다.
+	 * 필수로 두면 그런 응답에서 화면이 깨진다 (mgmtStats 와 같은 이유).
+	 */
+	directionContiguity?: StatsDirContiguity[];
+	/** discard/flush 를 뺀 분모. 위 항목들의 count 합과 같다. */
+	classifiedSendCount?: number;
+};
+
+/**
+ * read/write × 주소 연속성 한 칸. 판정은 **send 순서** 기준.
+ *
+ * ⚠ StatsResponse.continuousCount/Ratio 와 **값이 다르다.** 저건 방향 구분 없이
+ * 직전 요청 1개와만 비교해서 write 뒤의 read 는 LBA 가 이어져도 항상 false 다.
+ * 이쪽은 read 끼리, write 끼리 독립 체인으로 본다.
+ */
+export type StatsDirContiguity = {
+	direction: 'read' | 'write';
+	contiguous: boolean;
+	count: number;
+	ratioWithinDirection: number;
+	ratioOfSends: number;
+	totalBytes: number;
+	avgRequestBytes: number;
 };
 
 /**
