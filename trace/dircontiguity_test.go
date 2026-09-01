@@ -255,3 +255,33 @@ func TestDirContiguitySkipsWhenNoTimeColumn(t *testing.T) {
 		t.Errorf("빈 결과여야 한다: %v, %d", got, n)
 	}
 }
+
+// **기존 통계**(sendCount / continuousRatio / cmdStats.sendCount)도 `Q` 를 세야 한다.
+//
+// 이건 이번 기능과 별개인 **기존 버그**다. stats.go 에 send 판정 문자열이 네 군데
+// 박혀 있었고 전부 `Q` 를 빠뜨려서, `Q` 로 기록된 트레이스는 sendCount 가 0 이었다.
+// 판정을 SendPredicate 하나로 모으면서 같이 고쳤다.
+func TestSendCountAcceptsQActionAlias(t *testing.T) {
+	lines := []string{}
+	for i, sec := range []int{0, 8, 16} {
+		lines = append(lines, fmt.Sprintf(
+			"810.00%04d\tBLK\t100\t100\t0\tapp\tvfs_read\tQ\text4\t8\t0\t555\t4096\t%d\t/d\t0x0000000000000001\trwbs=R",
+			i, sec))
+	}
+	dir := writeFsioLines(t, lines, "fsio_block")
+
+	s, err := ComputeStats([]*TraceJobInfo{{Dir: dir, TraceType: "fsio_block"}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.GetSendCount(); got != 3 {
+		t.Errorf("sendCount = %d, want 3 — `Q` 가 send 로 안 세지면 0 이 된다", got)
+	}
+	var cmdSend int64
+	for _, c := range s.GetCmdStats() {
+		cmdSend += c.GetSendCount()
+	}
+	if cmdSend != 3 {
+		t.Errorf("cmdStats sendCount 합 = %d, want 3", cmdSend)
+	}
+}

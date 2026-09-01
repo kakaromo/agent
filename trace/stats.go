@@ -318,8 +318,11 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	}
 
 	// 7. Continuity stats — only from send/issue events (address continuity is send-side only)
-	// UFS: action='send_req', Block: action='block_rq_issue'
-	sendFilter := addCondition(where, "action IN ('send_req', 'block_rq_issue')")
+	//
+	// ⚠ 판정은 fsio_cols.go 의 SendPredicate 하나로 모았다. 예전엔 여기 문자열이
+	// 박혀 있었는데 `Q`(block_rq_issue 별칭)를 빠뜨려서, `Q` 로 기록된 트레이스는
+	// sendCount/continuousRatio 가 **전부 0** 이 됐다. 에러가 아니라 0 이다.
+	sendFilter := addCondition(where, cols.SendPredicate(hasColumns(db, glob, "action")["action"]))
 	q = fmt.Sprintf(`SELECT
 		count(*),
 		count(*) FILTER (WHERE continuous = true),
@@ -432,6 +435,8 @@ func queryLatencyStats(db *sql.DB, glob, where, col string) (*pb.LatencyStats, e
 func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 	// Detect cmd column: opcode (ufs) or io_type (block)
 	cmdCol := detectCmdColumn(db, glob)
+	// send 판정은 fsio_cols.go 가 정본 — `Q` 별칭을 빠뜨리면 send_count 가 0 이 된다.
+	sendPred := newFsioCols(db, glob).SendPredicate(hasColumns(db, glob, "action")["action"])
 
 	// ⚠ latency 3종은 **모든 지표에** `> 0` 가드를 건다 (min 만이 아니라).
 	//
@@ -479,10 +484,10 @@ func queryCmdStats(db *sql.DB, glob, where string) ([]*pb.CmdStats, error) {
 		count(ctod) FILTER (WHERE ctod > 0),
 		count(ctoc) FILTER (WHERE ctoc > 0),
 		count(qd),
-		COALESCE(sum(CAST(size AS BIGINT)) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as total_size,
+		COALESCE(sum(CAST(size AS BIGINT)) FILTER (WHERE `+sendPred+`), 0) as total_size,
 		count(*) FILTER (WHERE continuous = true) as cont_count,
-		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')), 0) as cont_ratio,
-		count(*) FILTER (WHERE action IN ('send_req', 'block_rq_issue')) as send_count
+		count(*) FILTER (WHERE continuous = true) * 100.0 / NULLIF(count(*) FILTER (WHERE `+sendPred+`), 0) as cont_ratio,
+		count(*) FILTER (WHERE `+sendPred+`) as send_count
 	FROM read_parquet(%s) %s GROUP BY %s ORDER BY cnt DESC`,
 		cmdCol, glob, where, cmdCol)
 
