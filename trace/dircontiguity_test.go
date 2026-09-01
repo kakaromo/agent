@@ -198,8 +198,9 @@ func TestDirContiguityPartitionsByLun(t *testing.T) {
 
 // fsio 는 size 가 bytes 라 끝주소에 올림 나눗셈이 들어간다. 그 나눗셈이 정수여야 한다.
 //
-// ⚠ DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이다. `(4096+4095)/4096` 이 2 가
-// 아니라 1.9997 이 되어 끝주소가 소수가 되고, `addr = lag(end_addr)` 동등 비교가
+// ⚠ DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이다. size=4096 이면
+// `(4096+4095)/4096` 이 1.9998 로 남아(`//` 면 1) 끝주소가 정수가 아니게 되고,
+// `addr = lag(end_addr)` 동등 비교가
 // **영원히 안 맞아 연속이 항상 0%** 로 나온다. 에러가 아니라 그럴듯한 0 이다.
 // 정수 나눗셈은 `//` 다.
 func TestDirContiguityFsioUsesIntegerCeilDiv(t *testing.T) {
@@ -217,5 +218,40 @@ func TestDirContiguityFsioUsesIntegerCeilDiv(t *testing.T) {
 	e := m["read/cont"]
 	if e == nil || e.GetCount() != 2 {
 		t.Fatalf("read/cont = %v, want 2건 — 끝주소가 소수라 동등 비교가 안 맞으면 0 이 된다", e)
+	}
+}
+
+// fsio_block 은 `Q` 를 block_rq_issue 의 별칭으로 쓴다 (파서가 둘 다 받고 원문을
+// 그대로 저장한다). send predicate 가 이걸 빠뜨리면 **에러 없이 화면이 통째로 빈다** —
+// send 0건, 항목 0개. 조회 자체는 성공하므로 아무도 못 알아챈다.
+func TestDirContiguityAcceptsQActionAlias(t *testing.T) {
+	lines := []string{}
+	for i, sec := range []int{0, 8, 16} { // 4096B = 8 sector 라 이어진다
+		lines = append(lines, fmt.Sprintf(
+			"800.00%04d\tBLK\t100\t100\t0\tapp\tvfs_read\tQ\text4\t8\t0\t555\t4096\t%d\t/d\t0x0000000000000001\trwbs=R",
+			i, sec))
+	}
+	dir := writeFsioLines(t, lines, "fsio_block")
+
+	s := statsOf(t, dir, "fsio_block")
+	if got := s.GetClassifiedSendCount(); got != 3 {
+		t.Errorf("classified = %d, want 3 — `Q` 를 send 로 안 세면 화면이 빈다", got)
+	}
+	m := dcOf(s)
+	if e := m["read/cont"]; e == nil || e.GetCount() != 2 {
+		t.Errorf("read/cont = %v, want 2건", e)
+	}
+}
+
+// 시간 컬럼이 없으면(detectTimeColumn 이 "" 을 돌려주는 계약) 깨진 SQL 을 만들지 말고
+// 조용히 건너뛴다. 정렬 축이 없으면 연속성 판정 자체가 성립하지 않는다.
+func TestDirContiguitySkipsWhenNoTimeColumn(t *testing.T) {
+	got, n, err := queryDirContiguity(nil, "'x'", "", fsioCols{}, "lba", "opcode", "",
+		map[string]bool{"action": true})
+	if err != nil {
+		t.Fatalf("에러가 아니라 조용히 건너뛰어야 한다: %v", err)
+	}
+	if got != nil || n != 0 {
+		t.Errorf("빈 결과여야 한다: %v, %d", got, n)
 	}
 }

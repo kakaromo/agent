@@ -191,7 +191,17 @@ func (c fsioCols) rawLbaExpr(lbaExpr, prefix string) string {
 // ⚠ `fsio_agg.go` 의 `lower(cmd) LIKE 'r%'` 를 재사용하면 안 된다 — ftrace UFS 의
 // cmd 는 `0x28`/`0x2a` 라 r%/w% 어느 쪽에도 안 걸려 read/write 가 전부 0 이 된다.
 func (c fsioCols) DirExpr(cmdExpr string) string {
-	if c.schema.any() {
+	return c.DirExprWith(cmdExpr, true)
+}
+
+// DirExprWith — hasRWFlags 로 `is_read`/`is_write` 컬럼 존재를 명시한다.
+//
+// ⚠ 스키마 판정(`schema.any()`)은 `is_mgmt`/`mgmt_name`/`rwbs` 로 하는데 여기서
+// 참조하는 건 `is_read`/`is_write` 라 **탐지 컬럼과 참조 컬럼이 다르다.** 지금은
+// 두 producer(Go/Rust) 모두 함께 내보내지만, 한쪽만 있는 parquet 이 들어오면
+// 쿼리가 통째로 터진다. 호출부가 확인해 넘길 수 있게 열어 둔다.
+func (c fsioCols) DirExprWith(cmdExpr string, hasRWFlags bool) string {
+	if c.schema.any() && hasRWFlags {
 		// fsio 는 파서가 구워둔 불리언이 가장 정확하다 — io_flags 비트를 이미 푼
 		// 결과라 is_discard/is_flush 와 어긋날 수 없다.
 		//
@@ -234,7 +244,21 @@ func (c fsioCols) SendPredicate(hasAction bool) string {
 	if !hasAction {
 		return "TRUE"
 	}
-	return "action IN ('send_req', 'block_rq_issue')"
+	// ⚠ `Q` 는 block_rq_issue 의 별칭이다. 파서가 둘 다 받고(block.go:96,
+	// fsio_block.go:64) 원문을 그대로 parquet 에 넣으므로(fsio_line.go:263
+	// `rawAction`) 여기서도 둘 다 봐야 한다. 빠뜨리면 `Q` 로 기록된 트레이스는
+	// send 가 0 건이 되어 **에러 없이 화면이 통째로 빈다.**
+	return "action IN ('send_req', 'block_rq_issue', 'Q')"
+}
+
+// CompletePredicate — 이 행이 완료(complete) 인가. SendPredicate 의 짝.
+//
+// `C` 는 block_rq_complete 의 별칭이다 (SendPredicate 의 `Q` 와 같은 이유).
+func (c fsioCols) CompletePredicate(hasAction bool) string {
+	if !hasAction {
+		return "TRUE"
+	}
+	return "action IN ('complete_rsp', 'block_rq_complete', 'C')"
 }
 
 // EndAddrExpr — 이 요청의 끝 주소. 다음 요청의 시작 주소가 이 값과 같으면 연속이다.
@@ -245,8 +269,9 @@ func (c fsioCols) SendPredicate(hasAction bool) string {
 //   - fsio(ufs/block): size 가 **bytes** 라 주소 단위로 올림 나눗셈해야 한다
 //     (파서 fsio_ufs.go / fsio_block.go 의 ceilDiv64 와 같은 계산)
 //
-// ⚠ 올림 나눗셈에 **`//` 를 쓴다.** DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이라
-// (4096+4095)/4096 이 2 가 아니라 1.9997 이 된다. 그러면 끝주소가 소수가 되어
+// ⚠ 올림 나눗셈에 **`//` 를 쓴다.** DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이다.
+// 예: size=4096 이면 `(4096+4095)/4096` = 1.9998 이 그대로 남는다(`//` 면 1).
+// 그러면 끝주소가 정수가 아니게 되어
 // `addr = lag(end_addr)` 동등 비교가 **영원히 안 맞고** 연속이 항상 0% 로 나온다.
 // 에러가 아니라 그럴듯한 0 이라 알아채기 어렵다.
 func (c fsioCols) EndAddrExpr(lbaCol string) string {

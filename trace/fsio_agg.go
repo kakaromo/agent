@@ -280,7 +280,8 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 	}
 
 	present := hasColumns(db, glob,
-		"comm", "pid", "tid", "syscall", "fs", "name", "ino", "io_flags", "lun", "devmajor", "devminor")
+		"comm", "pid", "tid", "syscall", "fs", "name", "ino", "io_flags", "lun", "devmajor", "devminor",
+		"is_read", "is_write")
 
 	topN := int(req.GetTopN())
 	if topN <= 0 {
@@ -296,7 +297,9 @@ func ComputeAttribution(infos []*TraceJobInfo, req *pb.GetIoAttributionRequest) 
 	// ftrace 잡은 **항상 폴백을 탄다.** 그런데 ftrace UFS 의 cmd 는 `0x28`/`0x2a` 라
 	// r%/w% 어느 쪽에도 안 걸려서 **ftrace UFS 의 read/write 바이트가 전부 0** 이었다.
 	// 에러가 아니라 0 이라 아무도 못 알아챈다.
-	dirExpr := cols.DirExpr(cmdCol)
+	// is_read/is_write 존재를 명시해 넘긴다 — 없으면 opcode/rwbs 폴백을 탄다.
+	// (ComputeAttribution 은 쿼리 실패 시 응답 전체를 죽이므로 여기선 더 보수적으로.)
+	dirExpr := cols.DirExprWith(cmdCol, present["is_read"] && present["is_write"])
 	readPred := fmt.Sprintf("(%s) = 'read'", dirExpr)
 	writePred := fmt.Sprintf("(%s) = 'write'", dirExpr)
 

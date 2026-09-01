@@ -343,7 +343,7 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	// lba/sector 로 갈리는데 **단위가 다르고**(4KB vs 512B), COALESCE 로 합치면
 	// 끝주소 계산에서 단위가 조용히 섞인다. 빈 값이면 화면이 "—" 로 렌더한다.
 	dirPresent := hasColumns(db, glob, "action", "line_number", "lun", "devmajor", "devminor",
-		"lba", "sector")
+		"lba", "sector", "is_read", "is_write")
 	if !(dirPresent["lba"] && dirPresent["sector"]) {
 		dirStats, classified, derr := queryDirContiguity(db, glob, where, cols,
 			lbaCol, cmdCol, timeCol, dirPresent)
@@ -1225,8 +1225,14 @@ func addCondition(where, cond string) string {
 func queryDirContiguity(db *sql.DB, glob, where string, cols fsioCols,
 	lbaCol, cmdCol, timeCol string, present map[string]bool,
 ) ([]*pb.DirectionContiguityStats, int64, error) {
-	dirExpr := cols.DirExpr(cmdCol)
+	dirExpr := cols.DirExprWith(cmdCol, present["is_read"] && present["is_write"])
 	if dirExpr == "NULL" {
+		return nil, 0, nil
+	}
+	// detectTimeColumn 은 time/start_time 이 **둘 다 없으면 빈 문자열**을 돌려준다
+	// (aggregate.go 도 같은 계약으로 분기한다). 그대로 끼워 넣으면 `, AS ord_t` 라는
+	// 깨진 SQL 이 된다. 정렬 축이 없으면 연속성 판정 자체가 성립하지 않으므로 건너뛴다.
+	if timeCol == "" {
 		return nil, 0, nil
 	}
 	sendW := addCondition(where, cols.SendPredicate(present["action"]))

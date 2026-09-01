@@ -335,7 +335,7 @@
 					Classified {stats.classifiedSendCount.toLocaleString()} of
 					{stats.sendCount.toLocaleString()} sends —
 					{(stats.sendCount - stats.classifiedSendCount).toLocaleString()} reqs are
-					discard/flush (neither read nor write)
+					neither read nor write (discard/flush/control-plane)
 				</div>
 			{/if}
 		</div>
