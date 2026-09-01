@@ -273,15 +273,6 @@
 				</span>
 			</div>
 
-			<div
-				class="mb-1.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-500"
-			>
-				위 <span class="font-semibold">Continuous {stats.continuousRatio.toFixed(1)}%</span> 는
-				방향 구분 없이 직전 요청 1개와만 비교한 값입니다. 아래는 read/write 를
-				<span class="font-semibold">독립 체인</span>으로 본 값이라 더 높게 나옵니다 —
-				둘 다 맞고, 묻는 질문이 다릅니다.
-			</div>
-
 			<div class="grid grid-cols-2 gap-2">
 				{#each dirRows as r (r.dir)}
 					{@const pct = r.cont?.ratioWithinDirection ?? 0}
