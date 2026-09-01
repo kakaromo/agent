@@ -192,9 +192,23 @@ func (c fsioCols) rawLbaExpr(lbaExpr, prefix string) string {
 // cmd 는 `0x28`/`0x2a` 라 r%/w% 어느 쪽에도 안 걸려 read/write 가 전부 0 이 된다.
 func (c fsioCols) DirExpr(cmdExpr string) string {
 	if c.schema.any() {
-		// fsio 는 파서가 구워둔 불리언이 가장 정확하다.
+		// fsio 는 파서가 구워둔 불리언이 가장 정확하다 — io_flags 비트를 이미 푼
+		// 결과라 is_discard/is_flush 와 어긋날 수 없다.
+		//
+		// ⚠ 단, 불리언이 **둘 다 false 일 수 있다.** producer 가 io_flags 를 안 준
+		// 경우(구버전 bpftrace, UFS_TAG_CTX miss)가 그렇다. 그때 그냥 포기하면
+		// 데이터가 멀쩡히 있는데도 집계가 통째로 빈다. opcode/rwbs 로 폴백한다.
+		fb := ""
+		if cmdExpr != "" {
+			l := fmt.Sprintf("lower(CAST(%s AS VARCHAR))", cmdExpr)
+			fb = fmt.Sprintf(
+				" WHEN %s IN ('0x28','0x88') THEN 'read'"+
+					" WHEN %s IN ('0x2a','0x8a') THEN 'write'"+
+					" WHEN upper(left(%s, 1)) = 'R' THEN 'read'"+
+					" WHEN upper(left(%s, 1)) = 'W' THEN 'write'", l, l, l, l)
+		}
 		return "CASE WHEN COALESCE(is_read, FALSE) THEN 'read' " +
-			"WHEN COALESCE(is_write, FALSE) THEN 'write' END"
+			"WHEN COALESCE(is_write, FALSE) THEN 'write'" + fb + " END"
 	}
 	if cmdExpr == "" {
 		return "NULL"
@@ -231,18 +245,21 @@ func (c fsioCols) SendPredicate(hasAction bool) string {
 //   - fsio(ufs/block): size 가 **bytes** 라 주소 단위로 올림 나눗셈해야 한다
 //     (파서 fsio_ufs.go / fsio_block.go 의 ceilDiv64 와 같은 계산)
 //
-// 정수 나눗셈이 버림이므로 (x+n-1)/n 이 올림이다.
+// ⚠ 올림 나눗셈에 **`//` 를 쓴다.** DuckDB 의 `/` 는 정수끼리도 **부동소수 나눗셈**이라
+// (4096+4095)/4096 이 2 가 아니라 1.9997 이 된다. 그러면 끝주소가 소수가 되어
+// `addr = lag(end_addr)` 동등 비교가 **영원히 안 맞고** 연속이 항상 0% 로 나온다.
+// 에러가 아니라 그럴듯한 0 이라 알아채기 어렵다.
 func (c fsioCols) EndAddrExpr(lbaCol string) string {
 	switch {
 	case c.schema.isUFS && c.schema.isBlock:
 		// fsio 두 스키마가 섞인 경우 — 행마다 있는 쪽으로 간다.
 		return "CASE WHEN lba IS NOT NULL " +
-			"THEN CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) / 4096 " +
-			"ELSE CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) / 512 END"
+			"THEN CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) // 4096 " +
+			"ELSE CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) // 512 END"
 	case c.schema.isUFS:
-		return "CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) / 4096"
+		return "CAST(lba AS HUGEINT) + (CAST(size AS HUGEINT) + 4095) // 4096"
 	case c.schema.isBlock:
-		return "CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) / 512"
+		return "CAST(sector AS HUGEINT) + (CAST(size AS HUGEINT) + 511) // 512"
 	default:
 		return fmt.Sprintf("CAST(%s AS HUGEINT) + CAST(size AS HUGEINT)", lbaCol)
 	}
@@ -258,15 +275,15 @@ func (c fsioCols) EndAddrExpr(lbaCol string) string {
 // ⚠ ftrace UFS/ufscustom 은 **LU 컬럼이 스키마에 없어** 구분할 방법이 자체가 없다.
 // 소스의 한계지 이 기능의 한계가 아니다 — multi-LU 트레이스면 연속 비율이
 // 과대평가된다.
-func (c fsioCols) ContiguityPartition(present map[string]bool) string {
+func (c fsioCols) ContiguityPartition(present map[string]bool) []string {
 	if c.schema.isUFS && present["lun"] {
 		// 255 = LunUnknown. 미상끼리 이어지는 건 파서 동작(ev.LUN == prevLun)과 같다.
-		return ", COALESCE(lun, 255)"
+		return []string{"COALESCE(lun, 255)"}
 	}
 	if present["devmajor"] && present["devminor"] {
-		return ", COALESCE(devmajor, 0), COALESCE(devminor, 0)"
+		return []string{"COALESCE(devmajor, 0)", "COALESCE(devminor, 0)"}
 	}
-	return ""
+	return nil
 }
 
 // SectorBytes — size 1 단위가 몇 바이트인가. 집계값을 bytes 로 환산할 때 쓴다.

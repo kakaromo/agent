@@ -459,6 +459,37 @@ message TraceStats {
   int64 send_count = 17;           // send/issue 이벤트 수 (연속성 분모)
   // UFS management 이벤트 집계 (fsio_ufs 전용, mgmt 행이 없으면 빈 배열).
   repeated MgmtStats mgmt_stats = 18;
+
+  // read/write × 주소 연속성 분해. 판정은 **send 순서** 기준.
+  //
+  // ⚠ 위 continuous_count/ratio(필드 10/11)와 **값이 다르다.** 저건 방향 구분 없이
+  // 직전 send 1개와만 비교해서, write 뒤의 read 는 LBA 가 이어져도 항상 false 다.
+  // 이쪽은 read 끼리, write 끼리 **독립 체인**으로 본다. 두 수치를 같은 화면에
+  // 놓을 때는 반드시 라벨로 갈라야 한다 — 안 그러면 "왜 연속성 숫자가 두 개고
+  // 다르냐" 가 된다.
+  repeated DirectionContiguityStats direction_contiguity = 19;
+
+  // discard/flush 는 read 도 write 도 아니라 위 항목들에서 빠진다. 그래서 항목들의
+  // count 합이 send_count 보다 작다. 화면이 "M건 중 N건 분류됨" 을 말할 수 있게
+  // 분모를 함께 낸다 — 안 내면 그 차이가 버그로 보인다.
+  int64 classified_send_count = 20;
+}
+
+// read/write × contiguous/discontiguous 한 칸.
+//
+// 최대 4행(read/write × cont/discont)이라 repeated 비용이 없고, 방향이 늘어나도
+// 스키마가 안 바뀐다.
+message DirectionContiguityStats {
+  string direction = 1;              // "read" | "write"
+  bool contiguous = 2;
+  int64 count = 3;                   // 이 칸의 send 수
+  // 이 방향 안에서의 비중(%). **실제로 묻는 질문**이 이거다 — "내 read 중 몇 %가 순차인가".
+  double ratio_within_direction = 4;
+  // 분류된 send 전체 대비 비중(%). 4항목 합이 100 이라 스택 막대로 그릴 수 있다.
+  // 분모를 하나만 내면 화면에서 누군가 반드시 틀린 쪽으로 나눈다.
+  double ratio_of_sends = 5;
+  uint64 total_bytes = 6;            // 단위 환산 후 bytes
+  double avg_request_bytes = 7;
 }
 
 // UFS management 이벤트(Query/TM UPIU, UIC) 집계.

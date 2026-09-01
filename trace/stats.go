@@ -334,6 +334,28 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 	FROM read_parquet(%s) %s`, glob, sendFilter)
 	db.QueryRow(q).Scan(&stats.AlignedCount, &stats.AlignedRatio) // ignore error if column missing
 
+	// 7.5 방향(read/write) × 연속성 — 위 7번과 **다른 수치다.**
+	//
+	// 7번은 방향 구분 없이 직전 send 1개와만 비교하고, 이건 read 끼리/write 끼리
+	// 독립 체인으로 본다. 둘 다 맞고 묻는 질문이 다르다 (queryDirContiguity 주석 참고).
+	//
+	// ⚠ ufs 계열과 block 계열이 섞인 조회에서는 계산하지 않는다. 주소 컬럼이
+	// lba/sector 로 갈리는데 **단위가 다르고**(4KB vs 512B), COALESCE 로 합치면
+	// 끝주소 계산에서 단위가 조용히 섞인다. 빈 값이면 화면이 "—" 로 렌더한다.
+	dirPresent := hasColumns(db, glob, "action", "line_number", "lun", "devmajor", "devminor",
+		"lba", "sector")
+	if !(dirPresent["lba"] && dirPresent["sector"]) {
+		dirStats, classified, derr := queryDirContiguity(db, glob, where, cols,
+			lbaCol, cmdCol, timeCol, dirPresent)
+		if derr != nil {
+			// 집계 하나가 실패해도 나머지 통계는 살린다 — 화면 전체가 죽는 것보다 낫다.
+			slog.Warn("direction contiguity 집계 실패 (나머지 통계는 유지)", "err", derr)
+		} else {
+			stats.DirectionContiguity = dirStats
+			stats.ClassifiedSendCount = classified
+		}
+	}
+
 	return stats, nil
 }
 
@@ -1176,4 +1198,143 @@ func addCondition(where, cond string) string {
 		return "WHERE " + cond
 	}
 	return where + " AND " + cond
+}
+
+// queryDirContiguity — read/write × 주소 연속성 (send 순서 기준).
+//
+// # 왜 parquet 의 continuous 컬럼을 안 쓰나
+//
+// 그 컬럼은 **방향 구분 없이 직전 send 1개**와만 비교한다. read/write 가 인터리빙되면
+// read 스트림 자체는 완벽히 순차인데도 중간의 write 때문에 끊긴 것으로 집계된다:
+//
+//	send 순서:  R(0,+8)  W(100,+8)  R(8,+8)  W(108,+8)
+//	  continuous 컬럼 : false false false false  → read 0%,  write 0%   (거짓)
+//	  방향별 체인      : false false TRUE  TRUE   → read 50%, write 50%  (참)
+//
+// 여기서는 LAG 로 **방향마다 독립 체인**을 만든다. 조회 시 계산이라 **기존 잡을
+// 재파싱 없이** 그대로 볼 수 있다 — 파서에 컬럼을 추가했으면 이미 수집한 잡이 전부
+// 0 으로 나왔을 것이다 (fsio_block 의 continuous 가 그래서 UI 에 우회가 남아 있다).
+//
+// # 조용히 틀리기 쉬운 지점
+//
+//   - PARTITION BY 에 LU/device 가 빠지면 서로 다른 주소공간이 거짓으로 이어져
+//     연속 비율이 100% 쪽으로 부푼다
+//   - LAG 의 NULL(각 체인 첫 행)을 COALESCE 안 하면 count(*) FILTER 가 그 행을
+//     **양쪽 다 건너뛰어** 네 칸 합이 send 수에 못 미친다
+//   - ORDER BY 에 line_number tiebreak 이 없으면 동시각에서 결과가 실행마다 바뀐다
+func queryDirContiguity(db *sql.DB, glob, where string, cols fsioCols,
+	lbaCol, cmdCol, timeCol string, present map[string]bool,
+) ([]*pb.DirectionContiguityStats, int64, error) {
+	dirExpr := cols.DirExpr(cmdCol)
+	if dirExpr == "NULL" {
+		return nil, 0, nil
+	}
+	sendW := addCondition(where, cols.SendPredicate(present["action"]))
+	part := cols.ContiguityPartition(present)
+
+	// 정렬 2차 키 — ftrace 타임스탬프는 µs 해상도라 동시각이 실제로 나온다.
+	// CTE 안에서는 출력 별칭을 본다. line_number 는 그대로 통과시킨다.
+	ord := "ord_t"
+	if present["line_number"] {
+		ord = "ord_t, line_number"
+	}
+
+	q := fmt.Sprintf(`
+WITH sends AS (
+  SELECT %s AS dir,
+         CAST(%s AS HUGEINT) AS addr,
+         CAST(size AS HUGEINT) AS sz,
+         %s AS end_addr,
+         %s AS ord_t%s%s
+  FROM read_parquet(%s) %s
+),
+d AS (SELECT * FROM sends WHERE dir IS NOT NULL),
+w AS (
+  SELECT dir, sz,
+         COALESCE(addr = lag(end_addr) OVER (PARTITION BY dir%s ORDER BY %s), FALSE) AS cont
+  FROM d
+)
+SELECT dir, cont, count(*),
+       count(*) * 100.0 / NULLIF(SUM(count(*)) OVER (PARTITION BY dir), 0),
+       count(*) * 100.0 / NULLIF(SUM(count(*)) OVER (), 0),
+       COALESCE(SUM(sz), 0), AVG(sz)
+FROM w GROUP BY dir, cont ORDER BY dir, cont`,
+		dirExpr, lbaCol, cols.EndAddrExpr(lbaCol), timeCol,
+		partSelect(part), lnSelect(present["line_number"]), glob, sendW,
+		partAlias(part), ord)
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	// size → bytes 환산. 방향으로 묶는 집계라 cmd 문자열로 행마다 고르는 기존 방식을
+	// 못 쓴다 — 스키마에서 한 번 정한다.
+	unit := cols.SectorBytes(present["sector"])
+
+	var out []*pb.DirectionContiguityStats
+	var classified int64
+	for rows.Next() {
+		var dir string
+		var cont bool
+		var cnt int64
+		var rWithin, rOfSends, totalRaw, avgRaw sql.NullFloat64
+		if err := rows.Scan(&dir, &cont, &cnt, &rWithin, &rOfSends, &totalRaw, &avgRaw); err != nil {
+			return nil, 0, err
+		}
+		e := &pb.DirectionContiguityStats{
+			Direction:  dir,
+			Contiguous: cont,
+			Count:      cnt,
+		}
+		if rWithin.Valid {
+			e.RatioWithinDirection = rWithin.Float64
+		}
+		if rOfSends.Valid {
+			e.RatioOfSends = rOfSends.Float64
+		}
+		if totalRaw.Valid {
+			e.TotalBytes = uint64(totalRaw.Float64) * unit
+		}
+		if avgRaw.Valid {
+			e.AvgRequestBytes = avgRaw.Float64 * float64(unit)
+		}
+		out = append(out, e)
+		classified += cnt
+	}
+	return out, classified, rows.Err()
+}
+
+// lnSelect — line_number 를 CTE 로 통과시킨다 (정렬 tiebreak 용).
+func lnSelect(has bool) string {
+	if has {
+		return ", line_number"
+	}
+	return ""
+}
+
+// partAlias — CTE 안에서 쓸 파티션 별칭 목록 (", p0, p1").
+//
+// 윈도우 함수는 `sends` CTE 의 **출력 별칭**을 봐야 한다. 원본 식을 그대로 두면
+// COALESCE(lun,255) 같은 게 바깥 스코프에서 안 풀린다.
+func partAlias(parts []string) string {
+	var b strings.Builder
+	for i := range parts {
+		fmt.Fprintf(&b, ", p%d", i)
+	}
+	return b.String()
+}
+
+// partSelect — 파티션 식을 SELECT 목록에 별칭과 함께 싣는다.
+//
+// ⚠ 예전엔 문자열을 ", " 로 잘랐는데 `COALESCE(lun, 255)` **안의 콤마까지** 잘려서
+// `COALESCE(lun AS p0, 255) AS p1` 이라는 깨진 SQL 이 나왔다. 쿼리가 실패하면
+// 집계가 조용히 비어서 테스트가 통과해 버린다 — 슬라이스로 받는다.
+func partSelect(parts []string) string {
+	var b strings.Builder
+	for i, p := range parts {
+		fmt.Fprintf(&b, ", %s AS p%d", p, i)
+	}
+	return b.String()
 }

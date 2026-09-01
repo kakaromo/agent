@@ -193,3 +193,21 @@ func TestAttributionSplitsReadWriteForFtraceUFS(t *testing.T) {
 	}
 	t.Logf("read=%d write=%d bytes", readB, writeB)
 }
+
+// writeFsioLines — bpftrace TSV 줄들을 parquet 으로.
+func writeFsioLines(t *testing.T, lines []string, traceType string) string {
+	t.Helper()
+	d := t.TempDir()
+	lf := filepath.Join(d, "trace.log")
+	data := ""
+	for _, l := range lines {
+		data += l + "\n"
+	}
+	if err := os.WriteFile(lf, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(lf, d, traceType, nil); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
