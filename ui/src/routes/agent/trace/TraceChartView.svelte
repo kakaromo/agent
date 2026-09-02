@@ -16,6 +16,14 @@
 		ctod: number[];
 		action: string[];
 		cmd: string[];
+		// IO size — **parquet 원본 단위 그대로**(ftrace UFS=4KB 블록 수, ftrace Block=512B
+		// 섹터 수, fsio_*=bytes). KB 환산은 아래 sizeKb 가 traceType 을 보고 한다.
+		//
+		// optional 인 이유는 두 가지다. 하나는 size 컬럼이 없는 차트 응답 호환,
+		// 다른 하나가 더 중요하다 — **단위가 섞인 잡(UFS+Block 동시 수집)에서는
+		// 호출부가 이 필드를 아예 안 넘겨** Size 차트를 숨긴다. 4096 배수와 512 배수를
+		// 한 축에 올리면 에러 없이 그럴듯하게 틀린 그래프가 나오기 때문이다.
+		size?: number[];
 		// bpftrace fsio_* (fsio_ufs / fsio_block) 전용 io_flags u64 비트마스크. 다른 type 은 0.
 		// f2fs hint 비트가 2^53 을 넘어 bigint 로 보존 (number 다운캐스트 금지).
 		ioFlags?: BigUint64Array | bigint[];
@@ -297,6 +305,7 @@
 	};
 	const CHART_ITEMS: ChartItem[] = [
 		{ key: 'lba', label: 'LBA', yLabel: 'LBA', group: 'common' },
+		{ key: 'size', label: 'Size', yLabel: 'Size (KB)', group: 'common' },
 		{ key: 'qd', label: 'Queue Depth', yLabel: 'QD', group: 'common' },
 		{ key: 'cpu', label: 'CPU', yLabel: 'CPU', group: 'common' },
 		{ key: 'ctod', label: 'CtoD Latency', yLabel: 'CtoD (ms)', group: 'send' },
@@ -309,6 +318,106 @@
 
 	// latency 계열은 0 제외 (zero-valued rows 시각화 배제)
 	const LATENCY_KEYS = new Set(['dtoc', 'ctoc', 'ctod', 'dtoc_mgmt']);
+
+	// ── size → KB ────────────────────────────────────────────────────────
+	//
+	// parquet 의 `size` 는 trace_type 마다 **단위가 다르다**. Go 쪽 fsioCols.SectorBytes
+	// (trace/fsio_cols.go) 와 같은 규칙이다:
+	//
+	//   ftrace ufs   : 4096 B  (1 = 4KB LBA 한 칸)
+	//   ftrace block : 512 B   (1 = 섹터 한 칸)
+	//   fsio_*       : 1 B     (bpftrace 가 이미 bytes 로 준다)
+	//
+	// ⚠ **주소 단위와 헷갈리면 안 된다.** fsio_block 의 lba/sector 는 block 과 똑같이
+	// 512B 단위지만, 같은 fsio_block 의 `size` 는 이미 bytes 라 계수가 1 이다.
+	// (Go 의 AddrUnitBytes vs SectorBytes 가 갈리는 지점이 정확히 여기다.)
+	// 주소 쪽 계수를 여기 가져다 쓰면 fsio size 가 512배로 부푼다 — 에러 없이.
+	const SIZE_UNIT_BYTES = $derived(
+		traceType === 'fsio_ufs' || traceType === 'fsio_block'
+			? 1
+			: traceType === 'block'
+				? 512
+				: 4096
+	);
+
+	// log 축에서 빠지는 size=0 이벤트 수 (flush 등). 0 이면 배지를 안 띄운다.
+	const zeroSizeCount = $derived.by(() => {
+		const src = series.size;
+		if (!src) return 0;
+		let n = 0;
+		for (let i = 0; i < src.length; i++) if (!(src[i] > 0)) n++;
+		return n;
+	});
+
+	/**
+	 * Size 차트 y 축 스케일. 'auto' 면 데이터 폭을 보고 정한다.
+	 *
+	 * log 는 공짜가 아니다 — 64KB 와 128KB 의 차이가 눈에 잘 안 들어와
+	 * "이 구간은 write 가 두 배로 커졌다" 같은 관찰을 놓치게 된다.
+	 * 그래서 **필요할 때만** 쓴다.
+	 *
+	 * 판정 기준은 p99 대비 max 의 비율이다. discard(UNMAP)가 섞이면 이 비율이
+	 * 수백 배로 뛰고(실측 217배) 선형 축은 99% 를 바닥에 깔아버린다. 반대로
+	 * discard 가 없으면 8배 수준이라 선형이 더 잘 읽힌다.
+	 */
+	let sizeScaleMode = $state<'auto' | 'log' | 'linear'>('auto');
+
+	// p99 대비 max 가 이 배수를 넘으면 log 로 간다. 32배면 선형 축에서 p99 이하가
+	// 아래 3% 안에 깔린다 — 그 지점을 경계로 잡았다.
+	const SIZE_LOG_THRESHOLD = 32;
+
+	/** 데이터가 log 를 필요로 하는가 (max / p99). */
+	const sizeNeedsLog = $derived.by(() => {
+		const src = sizeKb;
+		if (!src || src.length === 0) return false;
+		const pos = [];
+		for (let i = 0; i < src.length; i++) if (src[i] > 0) pos.push(src[i]);
+		if (pos.length < 10) return false;
+		pos.sort((a, b) => a - b);
+		const p99 = pos[Math.floor((pos.length - 1) * 0.99)];
+		const max = pos[pos.length - 1];
+		return p99 > 0 && max / p99 > SIZE_LOG_THRESHOLD;
+	});
+
+	const sizeUseLog = $derived(
+		sizeScaleMode === 'auto' ? sizeNeedsLog : sizeScaleMode === 'log'
+	);
+
+	/**
+	 * Size 차트 y 축 범위 — 데이터를 감싸는 2의 거듭제곱 경계.
+	 *
+	 * log 축에 min/max 를 안 주면 ECharts 가 여유를 크게 잡아 점이 한쪽에 몰린다.
+	 * IO 크기는 4/8/16... 이라 2의 거듭제곱으로 맞춰야 눈금이 실제 값과 겹친다.
+	 */
+	const sizeDomain = $derived.by(() => {
+		const src = sizeKb;
+		if (!src || src.length === 0) return { min: 1, max: 1024 };
+		let lo = Infinity;
+		let hi = -Infinity;
+		for (let i = 0; i < src.length; i++) {
+			const v = src[i];
+			if (!(v > 0)) continue; // log 축에 0 은 못 올린다
+			if (v < lo) lo = v;
+			if (v > hi) hi = v;
+		}
+		if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: 1, max: 1024 };
+		const floor2 = (v: number) => Math.pow(2, Math.floor(Math.log2(v)));
+		const ceil2 = (v: number) => Math.pow(2, Math.ceil(Math.log2(v)));
+		const min = floor2(lo);
+		const max = ceil2(hi);
+		return { min, max: max > min ? max : min * 2 };
+	});
+
+	// size 배열을 KB 로 환산해 캐시한다. 원본을 그대로 그리면 같은 4KB IO 가
+	// trace_type 에 따라 1 / 8 / 4096 으로 찍혀 서로 비교가 안 된다.
+	const sizeKb = $derived.by<number[] | null>(() => {
+		const src = series.size;
+		if (!src) return null;
+		const k = SIZE_UNIT_BYTES / 1024;
+		const out = new Array<number>(src.length);
+		for (let i = 0; i < src.length; i++) out[i] = src[i] * k;
+		return out;
+	});
 
 	// Action 탭: send / complete / all — 이벤트 필터링
 	// UFSCUSTOM 은 모든 이벤트가 완료 상태 + CPU 없음 → Action 탭/CPU 차트 숨김
@@ -330,6 +439,12 @@
 		// block 계층에는 해당 이벤트 자체가 없으므로 차트를 내보내지 않는다.
 		if (traceType !== 'fsio_ufs') {
 			items = items.filter((c) => c.key !== 'dtoc_mgmt');
+		}
+		// size 는 호출부가 안 넘길 수 있다 — size 컬럼 없는 차트 응답,
+		// 그리고 **단위가 섞인 잡(UFS+Block 동시 수집)**. 후자를 그리면 4096 배수와
+		// 512 배수가 한 축에 섞여 조용히 틀린 그래프가 되므로 아예 내보내지 않는다.
+		if (!series.size) {
+			items = items.filter((c) => c.key !== 'size');
 		}
 		return items;
 	});
@@ -520,11 +635,20 @@
 	});
 
 	function buildSeries(yKey: keyof Series | 'dtoc_mgmt') {
-		const excludeZero = LATENCY_KEYS.has(yKey as string);
+		// ⚠ size 도 0 을 뺀다 — 이유가 latency 와 **다르다.** latency 0 은 "측정 안 됨"
+		// 이라 의미가 없어서 빼지만, size 0 은 flush 처럼 **실재하는 이벤트**다.
+		// 그런데 log 축에 0 은 올라가지 않는다 (ECharts 가 조용히 버린다).
+		// 버리는 건 같지만 사용자가 모르면 안 되므로 아래 zeroSizeCount 로 표시한다.
+		const excludeZero =
+			LATENCY_KEYS.has(yKey as string) || (yKey === 'size' && sizeUseLog);
 		const time = series.time;
 		// dtoc_mgmt 는 가상 키 — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
 		const isMgmtChart = yKey === 'dtoc_mgmt';
-		const yArr = series[(isMgmtChart ? 'dtoc' : yKey) as keyof Series] as number[];
+		// size 만 원본 배열이 아니라 KB 환산본을 쓴다 (단위가 trace_type 마다 달라서).
+		const yArr =
+			yKey === 'size'
+				? (sizeKb ?? [])
+				: (series[(isMgmtChart ? 'dtoc' : yKey) as keyof Series] as number[]);
 
 		// CPU 차트 + LBA 뷰: x=time, y=LBA, 시리즈는 CPU 번호별
 		if (yKey === 'cpu' && cpuColorMode === 'lba') {
@@ -648,6 +772,45 @@
 		if (key === 'cpu' && !isCpuLba) {
 			yAxisConfig = { type: 'value', scale: false, min: 0, max: 8, axisLabel: { fontSize: 10 } };
 		}
+		// size 는 **log 축**이다. discard(UNMAP)는 한 번에 수십 MB 를 지우는데 그런 행이
+		// 전체의 0.2% 뿐이라, 선형 축이면 그 몇 점이 축을 혼자 늘려 나머지 99%(p99 =
+		// 128KB)가 바닥에 깔려 아무것도 안 보인다. 실측: max 27,728KB / p99 128KB.
+		// log 면 4KB~27MB 가 12.8 옥타브로 고르게 퍼져 small write 뭉치와 대형 discard 를
+		// 한 화면에서 같이 읽을 수 있다.
+		if (key === 'size' && !sizeUseLog) {
+			// 선형 — 폭이 좁을 땐 이쪽이 더 잘 읽힌다 (2배 차이가 2배로 보인다).
+			yAxisConfig = {
+				type: 'value',
+				scale: true,
+				axisLabel: {
+					fontSize: 10,
+					formatter: (v: number) =>
+						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
+				}
+			};
+		} else if (key === 'size') {
+			// ⚠ logBase 를 2 로 주면 ECharts 가 눈금을 1 / 1,024 / 1,048,576 처럼
+			// 2^10 간격으로만 찍는다. 실제 데이터(4~27,728KB)에는 눈금이 3개뿐이라
+			// 점이 아래쪽 1/3 에 뭉치고 축의 대부분이 빈 공간이 된다.
+			// 기본 base(10) 로 두면 4 / 16 / 64 / 256 ... 처럼 촘촘히 찍힌다.
+			//
+			// min/max 도 데이터에 맞춰 고정한다. 자동이면 위아래로 한참 넉넉하게
+			// 잡아 같은 낭비가 생긴다. 2의 거듭제곱 경계로 내림/올림해 눈금이
+			// IO 크기(4KB, 8KB, ...)와 자연스럽게 맞아떨어지게 한다.
+			yAxisConfig = {
+				type: 'log',
+				min: sizeDomain.min,
+				max: sizeDomain.max,
+				axisLabel: {
+					fontSize: 10,
+					// ⚠ ECharts 는 min/max 사이를 자기 방식으로 나누므로 10000 처럼
+					// 2의 거듭제곱이 아닌 눈금도 나온다. 그대로 나누면 "9.765625 MB"
+					// 같은 라벨이 찍힌다. 소수 두 자리에서 끊고 뒤 0 을 지운다.
+					formatter: (v: number) =>
+						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
+				}
+			};
+		}
 
 		// legend 폭은 라벨 길이에 따라 크게 다르다.
 		//   데이터 IO: "0x28" (4자)      → 90px 로 충분
@@ -699,6 +862,12 @@
 								? y.toLocaleString()
 								: String(y);
 						return `${p.seriesName}<br/>time: ${timeStr}<br/>LBA: ${lbaStr}`;
+					}
+					if (key === 'size' && typeof y === 'number' && Number.isFinite(y)) {
+						// KB 환산이 부동소수라 512B 섹터 IO 가 0.49999999999999994 로 나올 수
+						// 있다. 소수 세 자리까지만 남기고 뒤 0 은 지운다 (0.5 / 4 / 1024).
+						const kb = Number(y.toFixed(3));
+						return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${kb.toLocaleString()}`;
 					}
 					return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${y}`;
 				}
@@ -989,6 +1158,7 @@
 		void series;
 		void activeActionTab;
 		void cpuColorMode;
+		void sizeUseLog; // 스케일 전환 시 축 타입이 바뀌므로 다시 그려야 한다
 		ensureLegendSelected();
 		rebuildAll();
 	});
@@ -1192,6 +1362,39 @@
 					>
 						<div class="px-2 py-0.5 text-[10px] font-medium border-b bg-muted/40 flex items-center gap-2 shrink-0">
 							<span>{item.label}</span>
+							{#if item.key === 'size'}
+								<!-- 스케일 전환. 자동 판정을 쓰되 사용자가 덮어쓸 수 있게 한다 —
+								     log 는 2배 차이를 눌러 보이게 하므로 "선형으로 보고 싶다" 가
+								     정당한 요구다. -->
+								<div class="flex gap-0.5">
+									{#each [{ v: 'auto' as const, label: '자동' }, { v: 'linear' as const, label: '선형' }, { v: 'log' as const, label: 'log' }] as opt}
+										<button
+											class="px-1 py-0 rounded text-[9px] border transition-colors {sizeScaleMode === opt.v
+												? 'bg-primary text-primary-foreground border-primary'
+												: 'hover:bg-muted'}"
+											onclick={() => (sizeScaleMode = opt.v)}
+											title={opt.v === 'auto'
+												? '데이터 폭(max/p99)이 크면 log, 아니면 선형'
+												: opt.v === 'log'
+													? 'log 축 — discard 처럼 자릿수가 다른 값이 섞였을 때'
+													: '선형 축 — 2배 차이가 2배로 보인다'}
+										>{opt.label}</button>
+									{/each}
+								</div>
+								{#if sizeUseLog}
+									<!-- 축이 log 라는 걸 화면에 적어 둔다. 안 적으면 눈금 간격을
+									     선형으로 오해해 "큰 IO 가 별로 없네" 로 잘못 읽는다. -->
+									<span class="text-[9px] font-normal text-muted-foreground">log 축</span>
+									{#if zeroSizeCount > 0}
+										<!-- log 축은 0 을 못 그린다. 조용히 빠지면 flush 가 없었던 걸로
+										     보이므로 몇 건이 빠졌는지 반드시 표시한다. -->
+										<span
+											class="text-[9px] font-normal text-amber-600 dark:text-amber-500"
+											title="size=0 인 이벤트(flush 등)는 log 축에 표시할 수 없어 제외됐다. 선형 축으로 바꾸면 보인다."
+										>size=0 {zeroSizeCount.toLocaleString()}건 제외</span>
+									{/if}
+								{/if}
+							{/if}
 							<!-- 범례 접기 — mgmt 처럼 라벨이 길면 범례가 플롯 폭을 크게 잠식한다. -->
 							<button
 								class="ml-auto px-1.5 py-0 rounded text-[9px] border hover:bg-muted transition-colors"

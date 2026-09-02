@@ -725,6 +725,7 @@
 		const ctod = new Array<number>(n);
 		const action = new Array<string>(n);
 		const cmd = new Array<string>(n);
+		const size = new Array<number>(n);
 		for (let i = 0; i < n; i++) {
 			const e = ev[i];
 			time[i] = e.time;
@@ -736,8 +737,10 @@
 			ctod[i] = e.ctod;
 			action[i] = e.action;
 			cmd[i] = e.cmd;
+			size[i] = e.size;
 		}
-		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd };
+		// size 는 단위가 확정된 잡에서만 넘긴다 (both 면 undefined → Size 차트 숨김).
+		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd, size: sizeUnitKnown ? size : undefined };
 	});
 
 	/**
@@ -789,6 +792,38 @@
 		const t = activeTraceType;
 		if (t === 'fsio_ufs' || t === 'fsio_block' || t === 'block' || t === 'ufscustom') return t;
 		return 'ufs';
+	});
+
+	/**
+	 * size 를 KB 로 환산해도 되는 잡인가 — Size 차트를 내보낼지의 판단.
+	 *
+	 * ⚠ 판단 기준은 **실제 데이터**지 잡의 tool 값이 아니다.
+	 *
+	 * `tool` 은 사용자가 **요청한** 수집 종류라 `both` 여도 실제 산출물은 한쪽뿐인
+	 * 경우가 흔하다 (실측: 로컬 20개 잡 전부 tool=both/ufs 인데 parquet 은
+	 * `result_ufs.parquet` 하나뿐). tool 로 막으면 단위가 멀쩡히 확정된 잡에서까지
+	 * Size 차트가 사라진다.
+	 *
+	 * 그래서 이벤트를 직접 본다. block 계층 행은 action 이 `block_rq_*` 라
+	 * UFS 의 `send_req`/`complete_rsp` 와 확실히 구분된다. 두 계열이 **한 응답에
+	 * 실제로 섞여 있을 때만** size 를 넘기지 않는다 — size 1 단위가 UFS 는 4096B,
+	 * Block 은 512B 라 한 축에 올리면 8배 어긋난 점이 뒤섞이기 때문이다.
+	 *
+	 * ⚠ size 단위는 **주소 단위와 다르다.** fsio_block 의 lba/sector 는 block 과
+	 * 똑같이 512B 단위지만, fsio 의 size 는 이미 bytes 다 (환산 계수 1).
+	 * 환산 자체는 TraceChartView 가 traceType 을 보고 한다.
+	 */
+	const sizeUnitKnown = $derived.by(() => {
+		const ev = rawResult?.events;
+		if (!ev || ev.length === 0) return true;
+		let ufsLike = false;
+		let blockLike = false;
+		for (const e of ev) {
+			if ((e.action ?? '').startsWith('block_rq')) blockLike = true;
+			else ufsLike = true;
+			if (ufsLike && blockLike) return false; // 두 계층이 실제로 섞였다
+		}
+		return true;
 	});
 
 	/**
