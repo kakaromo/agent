@@ -831,23 +831,36 @@
 				}
 			};
 		} else if (isSizeKey) {
-			// ⚠ logBase 를 2 로 주면 ECharts 가 눈금을 1 / 1,024 / 1,048,576 처럼
-			// 2^10 간격으로만 찍는다. 실제 데이터(4~27,728KB)에는 눈금이 3개뿐이라
-			// 점이 아래쪽 1/3 에 뭉치고 축의 대부분이 빈 공간이 된다.
-			// 기본 base(10) 로 두면 4 / 16 / 64 / 256 ... 처럼 촘촘히 찍힌다.
+			// ⚠ 눈금을 ECharts 기본값에 맡기면 안 된다. base 10 이면 10 / 100 / 1000 으로
+			// 찍히는데, 데이터 상한이 1024KB(=1MB)라 맨 위 라벨이 "1000 KB" 가 되고
+			// 정작 제일 큰 1MB IO 들이 라벨 없는 축 끝에 붙는다 — "1000KB 가 최대인가?"
+			// 로 오해하게 된다.
 			//
-			// min/max 도 데이터에 맞춰 고정한다. 자동이면 위아래로 한참 넉넉하게
-			// 잡아 같은 낭비가 생긴다. 2의 거듭제곱 경계로 내림/올림해 눈금이
-			// IO 크기(4KB, 8KB, ...)와 자연스럽게 맞아떨어지게 한다.
+			// IO 크기는 4/8/16/... 2의 거듭제곱이니 축도 그렇게 간다.
+			// logBase 2 + interval N 은 **log 공간의 간격**이라 N=1 이면 한 칸이 2배다
+			// (LogScale.getTicks 가 log 공간에서 눈금을 뽑고 base^val 로 되돌린다).
+			//
+			// 간격은 옥타브 수로 정한다 — 넓은 범위에서 1옥타브씩 찍으면 라벨이 겹친다.
+			// 이때 상한이 눈금에 안 걸리면 맨 위가 다시 라벨을 잃으므로, 상한까지
+			// 딱 나눠떨어지는 간격만 고른다.
+			const octaves = Math.round(Math.log2(sizeDomain.max) - Math.log2(sizeDomain.min));
+			let tickStep = 1;
+			for (const cand of [1, 2, 3, 4]) {
+				if (octaves % cand === 0 && octaves / cand <= 8) {
+					tickStep = cand;
+					break;
+				}
+			}
 			yAxisConfig = {
 				type: 'log',
+				logBase: 2,
+				interval: tickStep,
 				min: sizeDomain.min,
 				max: sizeDomain.max,
 				axisLabel: {
 					fontSize: 10,
-					// ⚠ ECharts 는 min/max 사이를 자기 방식으로 나누므로 10000 처럼
-					// 2의 거듭제곱이 아닌 눈금도 나온다. 그대로 나누면 "9.765625 MB"
-					// 같은 라벨이 찍힌다. 소수 두 자리에서 끊고 뒤 0 을 지운다.
+					// 2의 거듭제곱이라 소수는 안 나오지만, 방어적으로 정리해 둔다
+					// (예전에 base 10 일 때 "9.765625 MB" 가 찍힌 적이 있다).
 					formatter: (v: number) =>
 						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
 				}
