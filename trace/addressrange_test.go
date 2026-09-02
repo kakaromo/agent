@@ -181,6 +181,41 @@ func TestAddressRangeSkippedOnMixedSchema(t *testing.T) {
 	}
 }
 
+// ⭐ fsio 끼리 섞인 조회도 막힌다 (fsio_ufs + fsio_block).
+//
+// ⚠ ftrace 혼합(위 테스트)과 **다른 경로**다. checkMixedFamily 는 fsio↔ftrace 만
+// 막고 fsio 끼리는 허용하는데, fsio_ufs 는 `lba`(4KB) 를 fsio_block 은
+// `sector`(512B) 를 쓴다. 가드가 컬럼 이름 기준이라 이쪽도 함께 걸리는데,
+// 그게 우연이 아니라 의도임을 고정한다.
+func TestAddressRangeSkippedOnMixedFsioSchema(t *testing.T) {
+	ufsDir := writeFsioParquet(t, "fsio_ufs")
+
+	blockDir := t.TempDir()
+	lf := filepath.Join(blockDir, "trace.log")
+	data := "12345.678920\tBLK\t4521\t4521\t3\tmysqld\tvfs_write\tblock_rq_issue\text4\t8\t32\t983241\t16384\t8192000\t/data/x\t0x0000010040002102\trwbs=WS\n"
+	if err := os.WriteFile(lf, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(lf, blockDir, "fsio_block", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := ComputeStats([]*TraceJobInfo{
+		{Dir: ufsDir, TraceType: "fsio_ufs"},
+		{Dir: blockDir, TraceType: "fsio_block"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(s.GetAddressRange()); n != 0 {
+		t.Errorf("fsio 혼합에서 address_range 가 %d행 나왔다 — lba(4KB)와 sector(512B)가 섞인다", n)
+	}
+	// 픽스처가 실제로 두 스키마를 합쳐 읽었는지 — 아니면 위 단언이 무의미하다.
+	if s.GetTotalEvents() == 0 {
+		t.Fatal("total_events = 0 — 혼합 조회가 아예 실패했다 (테스트가 무의미)")
+	}
+}
+
 // ⭐ mgmt 행이 min 을 0 으로 끌어내리지 않는가.
 //
 // ⚠ 함정: fsio_ufs 의 Query/UIC 행은 parquet 에서 lba 가 **NULL 이 아니라 0** 이다
