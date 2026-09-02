@@ -8,7 +8,8 @@
 		StatsCmd,
 		StatsHistogram,
 		StatsMgmt,
-		StatsDirContiguity
+		StatsDirContiguity,
+		StatsAddressRange
 	} from './types.js';
 
 	interface Props {
@@ -163,6 +164,20 @@
 	const DONUT_R = 30;
 	const DONUT_C = 2 * Math.PI * DONUT_R;
 
+	// ── 주소(LBA/sector) 범위 ──
+	//
+	// 차트 y축은 자동 스케일이고 툴팁은 점 하나만 보여줘서, 이 표가 없으면
+	// "이 워크로드가 주소 공간의 어느 대역을 건드렸나" 를 답할 수단이 없다.
+	//
+	// ⚠ 값은 **주소 단위**지 바이트가 아니다. unitBytes(UFS 4096 / Block 512 /
+	// fsio 1)를 곱해야 바이트가 된다. 안 곱하면 UFS 와 Block 이 8배 어긋난다.
+	const addrRange = $derived<StatsAddressRange[]>(stats.addressRange ?? []);
+	const addrRows = $derived(
+		(['all', 'read', 'write'] as const)
+			.map((dir) => addrRange.find((a) => a.direction === dir))
+			.filter((a): a is StatsAddressRange => a != null)
+	);
+
 	/** 표 행 — 방향 머리행 + cont./discont. 두 하위행. */
 	const dirTableRows = $derived(
 		dirRows.flatMap((r) => {
@@ -262,6 +277,44 @@
 			<div class="text-sm font-semibold">{fmtBytes(stats.discardTotalBytes)}</div>
 		</div>
 	</div>
+
+	<!-- Address Range (all/read/write) -->
+	{#if addrRows.length > 0}
+		<div>
+			<div class="flex items-baseline gap-2 mb-1">
+				<h3 class="text-xs font-semibold">Address Range</h3>
+				<span class="text-[9px] text-muted-foreground">
+					by send order · mgmt rows excluded
+				</span>
+			</div>
+			<DataTable
+				data={addrRows.map((a) => ({
+					k: a.direction,
+					label: a.direction,
+					min: a.minAddr.toLocaleString(),
+					max: a.maxAddr.toLocaleString(),
+					span: a.span.toLocaleString(),
+					size: fmtBytes(a.span * (a.unitBytes || 1)),
+					reqs: a.count.toLocaleString()
+				}))}
+				columns={[
+					{ accessorKey: 'label', header: 'Direction' },
+					{ accessorKey: 'min', header: 'Min' },
+					{ accessorKey: 'max', header: 'Max' },
+					{ accessorKey: 'span', header: 'Span' },
+					{ accessorKey: 'size', header: 'Range size' },
+					{ accessorKey: 'reqs', header: 'Reqs' }
+				]}
+				showPagination={false}
+				enableCellCopy={true}
+				getRowId={(r: any) => `ar-${r.k}`}
+			/>
+			<div class="mt-1 text-[9px] text-muted-foreground">
+				1 addr unit = {(addrRows[0].unitBytes || 1).toLocaleString()} B.
+				“all” reqs can exceed read+write — discard/flush have an address but no direction.
+			</div>
+		</div>
+	{/if}
 
 	<!-- Address Continuity (read/write × contiguous) -->
 	{#if dirRows.length > 0}

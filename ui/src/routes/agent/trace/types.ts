@@ -137,6 +137,29 @@ export type StatsResponse = {
 	directionContiguity?: StatsDirContiguity[];
 	/** discard/flush 를 뺀 분모. 위 항목들의 count 합과 같다. */
 	classifiedSendCount?: number;
+	/**
+	 * 주소(LBA/sector) 범위 — all / read / write. optional 인 이유는 mgmtStats 와 같다
+	 * (혼합 조회·구버전·archived 응답엔 없다). 없으면 화면이 "—" 를 그린다.
+	 */
+	addressRange?: StatsAddressRange[];
+};
+
+/**
+ * 주소 범위 한 행.
+ *
+ * ⚠ 값은 **주소 단위**다. 바이트로 보려면 `unitBytes` 를 곱해야 한다
+ * (UFS 4096 / Block 512 / fsio 1).
+ *
+ * ⚠ all 의 count 는 read+write 합보다 **클 수 있다** — discard/flush 는 방향이
+ * 없지만 주소는 있어서 all 에만 들어간다.
+ */
+export type StatsAddressRange = {
+	direction: 'all' | 'read' | 'write';
+	minAddr: number;
+	maxAddr: number;
+	span: number;
+	count: number;
+	unitBytes: number;
 };
 
 /**

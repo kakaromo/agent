@@ -740,6 +740,31 @@
 		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd };
 	});
 
+	/**
+	 * 차트 위에 띄울 주소 범위 — 방향별로 뽑아둔다.
+	 *
+	 * ⚠ **서버가 준 값을 그대로 쓴다.** chartSeries.lba 로 계산하면 안 된다:
+	 * raw 이벤트는 50만 행을 넘으면 샘플링되고 LIMIT 로 시간축 뒤쪽이 잘려
+	 * 극단값이 사라진다. 게다가 mgmt 행 lba 는 0 이라 min 이 0 으로 오염된다.
+	 * 둘 다 에러 없이 그럴듯하게 틀리는 값이다.
+	 *
+	 * ⚠ statsResult 는 필터를 걸면 같은 필터로 재조회되므로(applyFilter →
+	 * loadStats(f)) 차트와 모수가 어긋나지 않는다.
+	 */
+	const addrRange = $derived.by(() => {
+		const list = statsResult?.addressRange;
+		if (!list || list.length === 0) return null;
+		const by = (d: string) => list.find((e) => e.direction === d) ?? null;
+		const all = by('all');
+		if (!all) return null;
+		return { all, read: by('read'), write: by('write') };
+	});
+
+	/** 주소 단위 → 바이트. unitBytes 를 빼먹으면 UFS/Block 이 8배 어긋난다. */
+	function addrBytes(span: number, unitBytes: number): string {
+		return fmtBytes(span * (unitBytes || 1));
+	}
+
 	/** TraceChartView 상단 meta 바(총/샘플 건수). agent 응답 값 그대로. */
 	const chartMeta = $derived(
 		rawResult
@@ -1584,6 +1609,34 @@
 						     되어 탭이 조용히 빈다. -->
 						{#if zoomRange}
 							<div class="text-[9px] text-muted-foreground mb-1">· 선택 구간만</div>
+						{/if}
+						<!-- 주소 범위 — LBA 차트의 y축은 자동 스케일이고 툴팁은 점 하나만
+						     보여줘서, 이 줄이 없으면 "어느 대역을 건드렸나" 를 화면에서
+						     알 수 없다. 필터 패널의 LBA min/max 에 넣을 값의 기준이기도 하다.
+
+						     ⚠ 값은 **서버 전체 집계**다. 차트의 점은 샘플링될 수 있어
+						     여기서 계산하면 큰 트레이스에서 조용히 틀린다. -->
+						{#if addrRange}
+							<div class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] {captionMuted}">
+								<span class="font-mono tabular-nums">
+									LBA <b class="font-medium text-foreground"
+										>{addrRange.all.minAddr.toLocaleString()} – {addrRange.all.maxAddr.toLocaleString()}</b
+									>
+									· span {addrRange.all.span.toLocaleString()}
+									({addrBytes(addrRange.all.span, addrRange.all.unitBytes)})
+								</span>
+								{#each [{ e: addrRange.read, label: 'read' }, { e: addrRange.write, label: 'write' }] as d}
+									{#if d.e}
+										<span class="font-mono tabular-nums">
+											{d.label}
+											<b class="font-medium text-foreground"
+												>{d.e.minAddr.toLocaleString()} – {d.e.maxAddr.toLocaleString()}</b
+											>
+											· {d.e.count.toLocaleString()} reqs
+										</span>
+									{/if}
+								{/each}
+							</div>
 						{/if}
 						<TraceChartView
 							series={chartSeries}

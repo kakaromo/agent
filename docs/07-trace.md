@@ -138,6 +138,7 @@ mixed schema (UFS + Block 동시) 는 DuckDB `union_by_name=true` 로 합쳐 읽
 - **continuousCount/Ratio**, **alignedCount/Ratio**
 - **readTotalBytes / writeTotalBytes / discardTotalBytes**, **sendCount**
 - **directionContiguity**: read/write × 연속/비연속 (아래) + **classifiedSendCount**
+- **addressRange**: 주소(LBA/sector) 범위 all/read/write (아래)
 
 filter 가 있으면 DuckDB WHERE 절로 적용.
 
@@ -170,6 +171,29 @@ send 순서:  R(0,+1) W(100,+1) R(1,+1) W(101,+1)
   multi-LU 트레이스면 과대평가된다 (소스의 한계).
 - ufs 계열과 block 계열이 섞인 조회에서는 계산하지 않는다 (주소 단위가 4KB vs 512B 로
   달라 섞이면 조용히 틀린다). 빈 배열로 나가고 화면은 "—" 로 렌더.
+
+### addressRange — 주소(LBA/sector) 범위
+
+"이 워크로드가 주소 공간의 **어느 대역**을 건드렸나" 에 답한다. 차트의 y축은 자동
+스케일이고 툴팁은 점 하나만 보여줘서, 이 값 없이는 화면에서 알 수 없었다.
+필터 패널의 `LBA min`/`LBA max` 에 넣을 값의 기준이기도 하다.
+
+`direction` 이 `all` / `read` / `write` 인 행이 각각 하나씩. 항목당:
+`minAddr`, `maxAddr`, `span`(=max-min), `count`(모수, reqs), `unitBytes`.
+
+- ⚠ **값은 주소 단위지 바이트가 아니다.** 바이트로 보려면 `unitBytes` 를 곱한다
+  (UFS 4096 / Block 512 / fsio 1). 안 곱하고 숫자만 비교하면 UFS 와 Block 이
+  8배 어긋난다. 그래서 단위를 응답에 함께 싣는다.
+- ⚠ **`all` 의 count 는 read+write 합보다 클 수 있다.** discard/flush 는 방향이
+  없지만 주소는 있어서 `all` 에만 들어간다. 버그가 아니다.
+- **클라이언트가 raw 이벤트로 계산하면 안 된다.** raw 는 50만 행을 넘으면 샘플링되고
+  (`sampler.go`) `LIMIT` 로 시간축 뒤쪽이 잘려 극단값이 사라진다. 게다가 mgmt 행의
+  lba 는 parquet 에서 **NULL 이 아니라 0** 이라 min 이 0 으로 오염된다. 둘 다 에러 없이
+  그럴듯하게 틀리는 값이라 서버 전체 집계(`queryAddressRange`)로만 낸다.
+  mgmt 를 빼주는 건 `SendPredicate` 다 (mgmt action 은 send 목록에 없다).
+- **조회 시 계산하므로 기존 잡도 재파싱 없이** 그대로 보인다.
+- directionContiguity 와 같은 이유로 **ufs/block 혼합 조회에서는 내지 않는다**
+  (빈 배열 → 화면 "—").
 
 ## raw events (샘플링)
 

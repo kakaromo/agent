@@ -532,6 +532,31 @@ export interface TraceStats {
 	sendCount: number;
 	/** UFS management 이벤트 집계 (fsio_ufs 전용, 없으면 빈 배열). */
 	mgmtStats: MgmtStatsItem[];
+	/**
+	 * 주소(LBA/sector) 범위 — all / read / write.
+	 *
+	 * optional 인 이유 — 구버전 agent 와 archived(Rust) 경로는 이 키를 안 보낸다.
+	 * 그때는 화면이 "—" 를 그려야 한다. **0 으로 채우면 안 된다**: 0 은 "0번지"
+	 * 라는 틀린 사실이 된다.
+	 */
+	addressRange?: AddressRangeItem[];
+}
+
+/**
+ * 주소 범위 한 행.
+ *
+ * ⚠ 값은 **주소 단위**지 바이트가 아니다. `unitBytes` 를 곱해야 바이트가 된다
+ * (UFS 4096 / Block 512 / fsio 1). 이걸 빼고 숫자만 비교하면 UFS 와 Block 이
+ * 8배 어긋난다.
+ */
+export interface AddressRangeItem {
+	direction: 'all' | 'read' | 'write';
+	minAddr: number;
+	maxAddr: number;
+	span: number;
+	/** 이 행의 모수(reqs). send 기준. */
+	count: number;
+	unitBytes: number;
 }
 
 /**

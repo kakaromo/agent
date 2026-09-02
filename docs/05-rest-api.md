@@ -297,7 +297,13 @@ ftrace 중지 + adb 종료 + COLLECTING 상태로 전이 후 즉시 리턴. parq
        "ratioWithinDirection":72.2,"ratioOfSends":44.9,
        "totalBytes":120750080,"avgRequestBytes":67232.8}
     ],
-    "classifiedSendCount": 4000
+    "classifiedSendCount": 4000,
+    "addressRange": [
+      {"direction":"all","minAddr":0,"maxAddr":122138624,"span":122138624,
+       "count":1220317,"unitBytes":4096},
+      {"direction":"read","minAddr":1048576,"maxAddr":122138624,"span":121090048,
+       "count":418204,"unitBytes":4096}
+    ]
   }
 }
 ```
