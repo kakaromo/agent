@@ -10,6 +10,7 @@
 	let {
 		ref = $bindable(null),
 		class: className,
+		overlayClass,
 		portalProps,
 		children,
 		showCloseButton = true,
@@ -18,11 +19,14 @@
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DialogPortal>>;
 		children: Snippet;
 		showCloseButton?: boolean;
+		// 중첩 다이얼로그(예: ConfirmDialog on Dialog)에서 overlay z-index 를 올려
+		// 부모 위로 겹쳐 보이게 하기 위한 클래스 오버라이드.
+		overlayClass?: string;
 	} = $props();
 </script>
 
 <DialogPortal {...portalProps}>
-	<Dialog.Overlay />
+	<Dialog.Overlay class={overlayClass} />
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"

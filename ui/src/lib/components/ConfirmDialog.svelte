@@ -49,7 +49,9 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(v) => { if (!v) handleCancel(); }}>
-	<Dialog.Content class="sm:max-w-sm" showCloseButton={false}>
+	<!-- z-[60]: ConfirmDialog 는 다른 Dialog/Sheet(z-50) 위에서 열리는 경우가 많아
+	     항상 그 위로 겹쳐 보이도록 content/overlay z-index 를 올린다. -->
+	<Dialog.Content class="sm:max-w-sm z-[60]" overlayClass="z-[60]" showCloseButton={false}>
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2 text-sm">
 				{#if variant === 'destructive'}
