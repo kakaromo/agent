@@ -3,7 +3,7 @@
 이 폴더의 `.svelte` / `cmdColors.ts` 는 **portal 레포에서 복사해 온 사본**이다.
 
 - 원본: `~/project/portal/frontend/src/routes/trace/`
-- 복사 시점 portal 커밋: **`31fd347`** (2026-09-02)
+- 복사 시점 portal 커밋: **`fbf33a1`** (2026-09-02)
 
 ## 기준은 원본이다
 

@@ -3,7 +3,7 @@
 	import * as echarts from 'echarts';
 	import { onDestroy, onMount } from 'svelte';
 	import type { ChartMeta } from './types.js';
-	import { createCmdColorAssigner, isMgmtCmd, isHiddenInChart } from './cmdColors.js';
+	import { createCmdColorAssigner, isMgmtCmd, isHiddenInChart, getCmdGroup } from './cmdColors.js';
 	import BoxSelectIcon from '@lucide/svelte/icons/box-select';
 
 	type Series = {
@@ -306,6 +306,11 @@
 	const CHART_ITEMS: ChartItem[] = [
 		{ key: 'lba', label: 'LBA', yLabel: 'LBA', group: 'common' },
 		{ key: 'size', label: 'Size', yLabel: 'Size (KB)', group: 'common' },
+		// discard(UNMAP/TRIM) 전용 Size. 데이터 IO 와 크기대가 달라 같은 축에 두면
+		// 한쪽이 안 보인다 — dtoc_mgmt 를 분리한 것과 같은 이유다.
+		// 실측: read/write 는 1MB 에서 끝나는데 discard 는 27MB 까지 가서, 14행(0.2%)이
+		// 축을 27배 늘려 read/write 를 아래 4% 안에 깔아버렸다.
+		{ key: 'size_discard', label: 'Size (discard)', yLabel: 'Size (KB)', group: 'common' },
 		{ key: 'qd', label: 'Queue Depth', yLabel: 'QD', group: 'common' },
 		{ key: 'cpu', label: 'CPU', yLabel: 'CPU', group: 'common' },
 		{ key: 'ctod', label: 'CtoD Latency', yLabel: 'CtoD (ms)', group: 'send' },
@@ -356,27 +361,61 @@
 	 * "이 구간은 write 가 두 배로 커졌다" 같은 관찰을 놓치게 된다.
 	 * 그래서 **필요할 때만** 쓴다.
 	 *
-	 * 판정 기준은 p99 대비 max 의 비율이다. discard(UNMAP)가 섞이면 이 비율이
-	 * 수백 배로 뛰고(실측 217배) 선형 축은 99% 를 바닥에 깔아버린다. 반대로
-	 * discard 가 없으면 8배 수준이라 선형이 더 잘 읽힌다.
+	 * 판정 기준은 **중앙값 대비 max** 다 (아래 SIZE_LOG_THRESHOLD 주석 참고).
+	 * discard 는 별도 차트로 빠지므로 이 판정에는 들어오지 않는다.
 	 */
 	let sizeScaleMode = $state<'auto' | 'log' | 'linear'>('auto');
 
-	// p99 대비 max 가 이 배수를 넘으면 log 로 간다. 32배면 선형 축에서 p99 이하가
-	// 아래 3% 안에 깔린다 — 그 지점을 경계로 잡았다.
-	const SIZE_LOG_THRESHOLD = 32;
+	// **중앙값** 대비 max 가 이 배수를 넘으면 log 로 간다.
+	//
+	// ⚠ p99 가 아니라 p50 이다. p99 는 "이상치가 얼마나 튀나" 를 재는데, 정작 문제는
+	// **본체가 읽히느냐**다. 실측(discard 제외): max/p99 = 8배라 선형으로 가는데,
+	// 정작 최빈값 4KB(43%)와 두 번째 봉우리 128KB(16%)가 선형 축에선 0% / 12% 높이로
+	// 붙어버려 두 모드를 구분할 수 없다. log 면 0% / 63% 로 갈라진다.
+	// 같은 데이터의 max/p50 은 128배 — 이 지표가 "본체가 눌리는가" 를 제대로 잡는다.
+	//
+	// 16배면 선형 축에서 중앙값이 아래 6% 안에 깔린다 — 그 지점을 경계로 잡았다.
+	const SIZE_LOG_THRESHOLD = 16;
 
-	/** 데이터가 log 를 필요로 하는가 (max / p99). */
-	const sizeNeedsLog = $derived.by(() => {
+	/**
+	 * Size 계열 차트의 값 분포. discard 차트와 데이터 IO 차트는 **모집단이 다르므로**
+	 * 축 범위를 각자 계산한다 — 한쪽 기준을 공유하면 분리한 의미가 없다.
+	 */
+	function sizeStatsFor(discard: boolean) {
 		const src = sizeKb;
-		if (!src || src.length === 0) return false;
-		const pos = [];
-		for (let i = 0; i < src.length; i++) if (src[i] > 0) pos.push(src[i]);
-		if (pos.length < 10) return false;
+		const cmdArr = series.cmd;
+		if (!src || src.length === 0) return null;
+		const pos: number[] = [];
+		for (let i = 0; i < src.length; i++) {
+			const v = src[i];
+			if (!(v > 0)) continue; // log 축에 0 은 못 올린다
+			if ((getCmdGroup(cmdArr[i] || '') === 'discard') !== discard) continue;
+			pos.push(v);
+		}
+		if (pos.length === 0) return null;
 		pos.sort((a, b) => a - b);
-		const p99 = pos[Math.floor((pos.length - 1) * 0.99)];
-		const max = pos[pos.length - 1];
-		return p99 > 0 && max / p99 > SIZE_LOG_THRESHOLD;
+		return {
+			min: pos[0],
+			max: pos[pos.length - 1],
+			p50: pos[Math.floor((pos.length - 1) * 0.5)],
+			n: pos.length
+		};
+	}
+
+	const sizeStats = $derived.by(() => sizeStatsFor(false));
+	const sizeDiscardStats = $derived.by(() => sizeStatsFor(true));
+
+	/**
+	 * 데이터가 log 를 필요로 하는가 (max / p99).
+	 *
+	 * ⚠ **데이터 IO(discard 제외) 기준**으로 판정한다. discard 는 원래 자릿수가 커서
+	 * 늘 log 가 나오는데, 그걸로 read/write 축까지 정하면 discard 를 별도 차트로
+	 * 분리한 의미가 사라진다.
+	 */
+	const sizeNeedsLog = $derived.by(() => {
+		const st = sizeStats;
+		if (!st || st.n < 10 || !(st.p50 > 0)) return false;
+		return st.max / st.p50 > SIZE_LOG_THRESHOLD;
 	});
 
 	const sizeUseLog = $derived(
@@ -389,24 +428,14 @@
 	 * log 축에 min/max 를 안 주면 ECharts 가 여유를 크게 잡아 점이 한쪽에 몰린다.
 	 * IO 크기는 4/8/16... 이라 2의 거듭제곱으로 맞춰야 눈금이 실제 값과 겹친다.
 	 */
-	const sizeDomain = $derived.by(() => {
-		const src = sizeKb;
-		if (!src || src.length === 0) return { min: 1, max: 1024 };
-		let lo = Infinity;
-		let hi = -Infinity;
-		for (let i = 0; i < src.length; i++) {
-			const v = src[i];
-			if (!(v > 0)) continue; // log 축에 0 은 못 올린다
-			if (v < lo) lo = v;
-			if (v > hi) hi = v;
-		}
-		if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: 1, max: 1024 };
+	function sizeDomainOf(st: { min: number; max: number } | null) {
+		if (!st) return { min: 1, max: 1024 };
 		const floor2 = (v: number) => Math.pow(2, Math.floor(Math.log2(v)));
 		const ceil2 = (v: number) => Math.pow(2, Math.ceil(Math.log2(v)));
-		const min = floor2(lo);
-		const max = ceil2(hi);
+		const min = floor2(st.min);
+		const max = ceil2(st.max);
 		return { min, max: max > min ? max : min * 2 };
-	});
+	}
 
 	// size 배열을 KB 로 환산해 캐시한다. 원본을 그대로 그리면 같은 4KB IO 가
 	// trace_type 에 따라 1 / 8 / 4096 으로 찍혀 서로 비교가 안 된다.
@@ -444,7 +473,11 @@
 		// 그리고 **단위가 섞인 잡(UFS+Block 동시 수집)**. 후자를 그리면 4096 배수와
 		// 512 배수가 한 축에 섞여 조용히 틀린 그래프가 되므로 아예 내보내지 않는다.
 		if (!series.size) {
-			items = items.filter((c) => c.key !== 'size');
+			items = items.filter((c) => c.key !== 'size' && c.key !== 'size_discard');
+		}
+		// discard 가 한 건도 없으면 빈 차트를 내보내지 않는다 (fsio/일부 잡은 없다).
+		if (!sizeDiscardStats) {
+			items = items.filter((c) => c.key !== 'size_discard');
 		}
 		return items;
 	});
@@ -634,21 +667,23 @@
 		return { cmdIndices, cpuIndices };
 	});
 
-	function buildSeries(yKey: keyof Series | 'dtoc_mgmt') {
+	function buildSeries(yKey: keyof Series | 'dtoc_mgmt' | 'size_discard') {
 		// ⚠ size 도 0 을 뺀다 — 이유가 latency 와 **다르다.** latency 0 은 "측정 안 됨"
 		// 이라 의미가 없어서 빼지만, size 0 은 flush 처럼 **실재하는 이벤트**다.
 		// 그런데 log 축에 0 은 올라가지 않는다 (ECharts 가 조용히 버린다).
 		// 버리는 건 같지만 사용자가 모르면 안 되므로 아래 zeroSizeCount 로 표시한다.
+		const isSizeChart = yKey === 'size' || yKey === 'size_discard';
 		const excludeZero =
-			LATENCY_KEYS.has(yKey as string) || (yKey === 'size' && sizeUseLog);
+			LATENCY_KEYS.has(yKey as string) || (isSizeChart && sizeUseLog);
 		const time = series.time;
 		// dtoc_mgmt 는 가상 키 — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
 		const isMgmtChart = yKey === 'dtoc_mgmt';
+		// size_discard 도 가상 키 — y 는 size 를 그대로 쓰고 cmd 로 discard 만 고른다.
+		const isDiscardChart = yKey === 'size_discard';
 		// size 만 원본 배열이 아니라 KB 환산본을 쓴다 (단위가 trace_type 마다 달라서).
-		const yArr =
-			yKey === 'size'
-				? (sizeKb ?? [])
-				: (series[(isMgmtChart ? 'dtoc' : yKey) as keyof Series] as number[]);
+		const yArr = isSizeChart
+			? (sizeKb ?? [])
+			: (series[(isMgmtChart ? 'dtoc' : yKey) as keyof Series] as number[]);
 
 		// CPU 차트 + LBA 뷰: x=time, y=LBA, 시리즈는 CPU 번호별
 		if (yKey === 'cpu' && cpuColorMode === 'lba') {
@@ -687,6 +722,9 @@
 			// mgmt 전용 차트에는 mgmt 만, 나머지 차트에는 데이터 IO 만.
 			// (섞으면 지연 크기대가 달라 한쪽이 안 보인다 — 차트를 나눈 이유)
 			if (isMgmtChart !== mgmt) continue;
+			// Size 차트는 discard 를 갈라 그린다. 한 축에 두면 27MB discard 가 축을
+			// 늘려 1MB 이하인 read/write 가 바닥에 깔린다 (실측 read/write max = 1MB).
+			if (isSizeChart && (getCmdGroup(cmd) === 'discard') !== isDiscardChart) continue;
 			// 응답 UPIU 는 send 와 짝이라 차트에서만 감춘다 (통계/Raw 에는 남음).
 			if (isHiddenInChart(cmd)) continue;
 			const indices = indexGroups.cmdIndices.get(cmd)!;
@@ -756,7 +794,7 @@
 	});
 
 	function buildOption(key: string, label: string, yLabel: string) {
-		const seriesList = buildSeries(key as keyof Series | 'dtoc_mgmt');
+		const seriesList = buildSeries(key as keyof Series | 'dtoc_mgmt' | 'size_discard');
 		const isCpuLba = key === 'cpu' && cpuColorMode === 'lba';
 		const legendNames = seriesList.map((s) => s.name);
 
@@ -777,7 +815,11 @@
 		// 128KB)가 바닥에 깔려 아무것도 안 보인다. 실측: max 27,728KB / p99 128KB.
 		// log 면 4KB~27MB 가 12.8 옥타브로 고르게 퍼져 small write 뭉치와 대형 discard 를
 		// 한 화면에서 같이 읽을 수 있다.
-		if (key === 'size' && !sizeUseLog) {
+		const isSizeKey = key === 'size' || key === 'size_discard';
+		const sizeDomain = isSizeKey
+			? sizeDomainOf(key === 'size_discard' ? sizeDiscardStats : sizeStats)
+			: { min: 1, max: 1024 };
+		if (isSizeKey && !sizeUseLog) {
 			// 선형 — 폭이 좁을 땐 이쪽이 더 잘 읽힌다 (2배 차이가 2배로 보인다).
 			yAxisConfig = {
 				type: 'value',
@@ -788,7 +830,7 @@
 						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
 				}
 			};
-		} else if (key === 'size') {
+		} else if (isSizeKey) {
 			// ⚠ logBase 를 2 로 주면 ECharts 가 눈금을 1 / 1,024 / 1,048,576 처럼
 			// 2^10 간격으로만 찍는다. 실제 데이터(4~27,728KB)에는 눈금이 3개뿐이라
 			// 점이 아래쪽 1/3 에 뭉치고 축의 대부분이 빈 공간이 된다.
@@ -863,7 +905,7 @@
 								: String(y);
 						return `${p.seriesName}<br/>time: ${timeStr}<br/>LBA: ${lbaStr}`;
 					}
-					if (key === 'size' && typeof y === 'number' && Number.isFinite(y)) {
+					if (isSizeKey && typeof y === 'number' && Number.isFinite(y)) {
 						// KB 환산이 부동소수라 512B 섹터 IO 가 0.49999999999999994 로 나올 수
 						// 있다. 소수 세 자리까지만 남기고 뒤 0 은 지운다 (0.5 / 4 / 1024).
 						const kb = Number(y.toFixed(3));
@@ -1362,7 +1404,7 @@
 					>
 						<div class="px-2 py-0.5 text-[10px] font-medium border-b bg-muted/40 flex items-center gap-2 shrink-0">
 							<span>{item.label}</span>
-							{#if item.key === 'size'}
+							{#if item.key === 'size' || item.key === 'size_discard'}
 								<!-- 스케일 전환. 자동 판정을 쓰되 사용자가 덮어쓸 수 있게 한다 —
 								     log 는 2배 차이를 눌러 보이게 하므로 "선형으로 보고 싶다" 가
 								     정당한 요구다. -->
