@@ -536,8 +536,8 @@ export interface TraceStats {
 	 * 주소(LBA/sector) 범위 — all / read / write.
 	 *
 	 * optional 인 이유 — 구버전 agent 와 archived(Rust) 경로는 이 키를 안 보낸다.
-	 * 그때는 화면이 "—" 를 그려야 한다. **0 으로 채우면 안 된다**: 0 은 "0번지"
-	 * 라는 틀린 사실이 된다.
+	 * 그때는 화면이 이 줄을 **아예 안 그린다**. **0 으로 채우면 안 된다**: 0 은
+	 * "0번지를 건드렸다" 는 틀린 사실이 된다.
 	 */
 	addressRange?: AddressRangeItem[];
 }

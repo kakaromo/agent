@@ -139,7 +139,7 @@ export type StatsResponse = {
 	classifiedSendCount?: number;
 	/**
 	 * 주소(LBA/sector) 범위 — all / read / write. optional 인 이유는 mgmtStats 와 같다
-	 * (혼합 조회·구버전·archived 응답엔 없다). 없으면 화면이 "—" 를 그린다.
+	 * (혼합 조회·구버전·archived 응답엔 없다). 없으면 화면이 표를 안 그린다.
 	 */
 	addressRange?: StatsAddressRange[];
 };
