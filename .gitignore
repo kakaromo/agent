@@ -32,3 +32,8 @@ ui/node_modules/
 ui/build/*
 !ui/build/.gitkeep
 ui/.svelte-kit/
+
+# 다른 AI 도구의 로컬 설정 — 이 저장소의 산출물이 아니라 각자 환경에 딸린 파일이다.
+# (CLAUDE.md 는 프로젝트 규약이라 추적하지만, 이쪽은 개인 도구 설정이라 제외)
+.codex/
+AGENTS.md
