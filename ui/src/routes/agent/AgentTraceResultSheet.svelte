@@ -20,7 +20,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats, exportTraceRawCSV } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -974,6 +974,37 @@
 		return latencyRangesText.split(',').map(s => Number(s.trim())).filter(n => !isNaN(n) && n > 0);
 	}
 
+	let exportingCsv = $state(false);
+	let exportError = $state('');
+
+	/**
+	 * Raw 이벤트를 CSV 로 내려받는다.
+	 *
+	 * ⚠ 화면 표와 **범위가 다르다.** 표는 50만 건 초과 시 샘플링된 것이고(그 표본은
+	 * 시간 버킷별 min/max 를 일부러 끼워 넣어 극단값 쪽으로 치우쳐 있다), CSV 는
+	 * 서버가 parquet 을 직접 읽은 **전체 행**이다. 내보내기는 받는 쪽이 다시 집계하는
+	 * 용도라 샘플을 주면 평균·합계가 그럴듯하게 틀린다.
+	 *
+	 * 서버측 필터(appliedFilter)는 그대로 적용되지만, **표에서만 거른 것**
+	 * (컬럼 필터 · Send/Complete 탭 · 줌 구간)은 CSV 에 반영되지 않는다 —
+	 * 그건 클라이언트에만 있는 상태라 서버가 모른다. 아래 안내에 적어 둔다.
+	 */
+	async function handleExportCsv() {
+		if (serverId == null || activeJobIds.length === 0 || exportingCsv) return;
+		exportingCsv = true;
+		exportError = '';
+		try {
+			await exportTraceRawCSV(serverId, {
+				jobIds: activeJobIds,
+				filter: Object.keys(appliedFilter).length > 0 ? appliedFilter : undefined
+			});
+		} catch (e) {
+			exportError = e instanceof Error ? e.message : String(e);
+		} finally {
+			exportingCsv = false;
+		}
+	}
+
 	async function loadRawData(filter?: TraceFilter) {
 		if (serverId == null || activeJobIds.length === 0) return;
 		loadingRaw = true;
@@ -1643,7 +1674,21 @@
 							<div class="text-[9px] text-muted-foreground">
 								셀 클릭/드래그 · Ctrl+A 전체 · Ctrl+C 복사
 							</div>
+							<button
+								onclick={handleExportCsv}
+								disabled={exportingCsv}
+								class="px-2 py-0.5 rounded border text-[9px] hover:bg-muted
+									disabled:opacity-50 disabled:cursor-wait whitespace-nowrap"
+								title="서버에서 전체 행을 CSV 로 받습니다 (샘플링 안 됨). 표의 컬럼 필터·Send/Complete·줌 구간은 반영되지 않습니다."
+							>
+								{exportingCsv ? '내보내는 중…' : 'CSV 내보내기'}
+							</button>
 						</div>
+						{#if exportError}
+							<div class="mb-1 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
+								CSV 내보내기 실패: {exportError}
+							</div>
+						{/if}
 						{#if columnFilters.length > 0}
 							<!-- 적용된 필터를 칩으로 노출. 헤더 아이콘만으로는 가로 스크롤
 							     밖의 필터를 놓쳐 "행이 왜 이것뿐이지" 로 이어진다. -->

@@ -315,6 +315,63 @@ async function downloadFromApi(path: string, fallbackFilename: string): Promise<
 	URL.revokeObjectURL(url);
 }
 
+/**
+ * POST 로 파일을 받아 다운로드. downloadFromApi 의 POST 판.
+ *
+ * raw CSV 는 필터를 body 로 보내야 해서 GET 을 못 쓴다 (필터에 파일명·프로세스명이
+ * 들어가 URL 길이·인코딩 문제가 생긴다).
+ */
+async function downloadPostFromApi(
+	path: string,
+	body: unknown,
+	fallbackFilename: string
+): Promise<void> {
+	const res = await fetch(`/api${path}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+	if (!res.ok) {
+		// 서버가 스트리밍 시작 전에 실패하면 JSON 에러가 온다.
+		let msg = `export 실패 (${res.status})`;
+		try {
+			const j = await res.json();
+			if (j?.error) msg = j.error;
+		} catch {
+			/* 본문이 JSON 이 아니면 상태 코드만 */
+		}
+		throw new Error(msg);
+	}
+	let filename = fallbackFilename;
+	const cd = res.headers.get('Content-Disposition') || '';
+	const m = cd.match(/filename="?([^"]+)"?/);
+	if (m) filename = decodeURIComponent(m[1]);
+	const blob = await res.blob();
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+/**
+ * Raw 이벤트를 CSV 로 내려받는다.
+ *
+ * ⚠ getTraceRawData(화면 표)와 **데이터 범위가 다르다.** 표는 50만 건이 넘으면
+ * 샘플링된 것을 보여주는데(그 표본은 시간 버킷별 min/max 를 일부러 끼워 넣어
+ * 극단값 쪽으로 치우쳐 있다), CSV 는 서버가 parquet 을 직접 읽어 **전체 행**을 준다.
+ * 내보내기는 받는 쪽이 다시 집계하는 용도라 샘플을 주면 안 되기 때문이다.
+ */
+export function exportTraceRawCSV(
+	serverId: number,
+	data: { jobIds: string[]; filter?: TraceFilter }
+): Promise<void> {
+	return downloadPostFromApi(`/agent/trace/raw.csv?serverId=${serverId}`, data, 'trace-raw.csv');
+}
+
 export function exportScenarioTemplate(id: number): Promise<void> {
 	return downloadFromApi(`/agent/scenario-templates/${id}/export`, 'scenario.scenario.json');
 }

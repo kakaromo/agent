@@ -314,6 +314,10 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			case "raw":
 				handleTraceRaw(w, r, agent)
 				return
+			case "raw.csv":
+				// ⚠ /raw 와 데이터 범위가 다르다 — 이쪽은 샘플링을 우회한 **전체** 행이다.
+				handleTraceRawCSV(w, r, agent)
+				return
 			case "attribution":
 				handleTraceAttribution(w, r, agent)
 				return
