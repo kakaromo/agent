@@ -1137,7 +1137,9 @@
 			console.error('Trace stats error:', e);
 			toast.error('통계 조회 실패');
 		}
-		finally { loadingStats = false; }
+		// loadRawData 와 같은 이유로 최신 요청만 로딩 상태를 내린다 — 오래된 응답이
+		// 내리면 아직 도는 조회가 끝난 것처럼 보여, 스피너 없이 옛 수치가 남는다.
+		finally { if (gen === statsGen) loadingStats = false; }
 	}
 
 	function applyFilter() {
@@ -1157,13 +1159,18 @@
 		filterComm = []; filterName = []; filterSyscall = []; filterFs = [];
 		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
 		filterIoFlagsAny = '';
-		appliedFilter = {};
 		// ⚠ statsResult 를 null 로 두고 재조회를 안 하면 Statistics 탭이 통째로
 		// 빈 화면("조회 버튼을 눌러주세요")이 된다. 필터를 **푼** 것이지 볼 게
-		// 없어진 게 아니므로, 필터 없이 다시 불러 전체 기준 수치를 보여준다.
-		// applyFilter 와 같은 짝(raw + stats)으로 맞춘다.
-		loadRawData();
-		loadStats();
+		// 없어진 게 아니므로 다시 부른다. applyFilter 와 같은 짝(raw + stats).
+		//
+		// ⚠ 인자 없이 부르면 안 된다 — buildFilter() 는 zoomRange(구간 선택)를
+		// 시간 범위로 접어 넣는다. 구간이 선택된 채로 초기화하면 배너는
+		// "선택한 구간만" 인데 수치는 전 구간이 되어 서로 어긋난다. 초기화가
+		// 푸는 건 **입력창 필터**지 구간 선택이 아니다.
+		const f = buildFilter();
+		appliedFilter = f ?? {};
+		loadRawData(f);
+		loadStats(f);
 	}
 
 	function handleBrushSelected(ranges: { timeMin: number; timeMax: number; yMin: number; yMax: number; chartKey?: string }) {

@@ -330,3 +330,29 @@ func (c fsioCols) SectorBytes(hasSector bool) uint64 {
 	}
 	return 4096
 }
+
+// AddrUnitBytes — **주소** 1 단위가 몇 바이트인가.
+//
+//	fsio_ufs / ftrace ufs : 4096 (4KB LBA)
+//	fsio_block / ftrace block: 512 (sector)
+//
+// ⚠ SectorBytes 와 **다르다.** 저건 `size` 1 단위의 바이트라 fsio 에서 1 이다
+// (bpftrace 가 size 를 이미 bytes 로 준다). 하지만 **주소는 그렇지 않다** —
+// fsio 도 lba 는 4KB, sector 는 512B 단위다. EndAddrExpr 이 그 증거로,
+// fsio 에서도 `lba + (size+4095)//4096` 처럼 size 를 주소 단위로 환산해 더한다.
+//
+// 여기를 SectorBytes 로 때우면 fsio 주소 범위가 **4096배(또는 512배) 작게** 나온다.
+// 에러가 아니라 그럴듯한 숫자라 화면에서 못 알아본다.
+func (c fsioCols) AddrUnitBytes(hasSector bool) uint64 {
+	switch {
+	case c.schema.isUFS:
+		return 4096
+	case c.schema.isBlock:
+		return 512
+	}
+	// ftrace — sector 컬럼 유무로 block 을 가른다 (SectorBytes 와 같은 판정).
+	if hasSector {
+		return 512
+	}
+	return 4096
+}

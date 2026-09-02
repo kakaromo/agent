@@ -1399,9 +1399,12 @@ ORDER BY dir`,
 	}
 	defer rows.Close()
 
-	// 주소 1단위의 바이트. 방향으로 묶는 집계라 cmd 문자열로 행마다 고를 수 없어
-	// 스키마에서 한 번 정한다 (queryDirContiguity 와 같은 이유).
-	unit := cols.SectorBytes(present["sector"])
+	// 주소 1단위의 바이트.
+	//
+	// ⚠ **SectorBytes 가 아니다.** 저건 `size` 1 단위의 바이트라 fsio 에서 1 을
+	// 돌려준다(bpftrace 가 size 를 bytes 로 준다). 주소는 fsio 에서도 4KB/512B
+	// 단위라, 저걸 쓰면 fsio 범위가 4096배 작게 나온다 — 실측 3.91 GB 가 0.98 MB 로.
+	unit := cols.AddrUnitBytes(present["sector"])
 
 	var out []*pb.AddressRangeStats
 	for rows.Next() {

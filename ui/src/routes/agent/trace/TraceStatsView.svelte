@@ -172,10 +172,18 @@
 	// ⚠ 값은 **주소 단위**지 바이트가 아니다. unitBytes(UFS 4096 / Block 512 /
 	// fsio 1)를 곱해야 바이트가 된다. 안 곱하면 UFS 와 Block 이 8배 어긋난다.
 	const addrRange = $derived<StatsAddressRange[]>(stats.addressRange ?? []);
+	//
+	// ⚠ unitBytes 가 없는 행은 **버린다.** archived 경로는 다른 서비스가 주고
+	// `as unknown as` 로 캐스팅돼 들어와서 이 필드가 없을 수 있는데, 그때
+	// `|| 1` 로 때우면 "1 addr unit = 1 B" 라고 **단정해서 틀린 사실**을 쓰고
+	// Range size 도 4096배 작게 나온다. 표를 안 그리는 쪽이 맞다.
 	const addrRows = $derived(
 		(['all', 'read', 'write'] as const)
 			.map((dir) => addrRange.find((a) => a.direction === dir))
-			.filter((a): a is StatsAddressRange => a != null)
+			.filter(
+				(a): a is StatsAddressRange =>
+					a != null && typeof a.unitBytes === 'number' && a.unitBytes > 0
+			)
 	);
 
 	/** 표 행 — 방향 머리행 + cont./discont. 두 하위행. */
@@ -294,7 +302,7 @@
 					min: a.minAddr.toLocaleString(),
 					max: a.maxAddr.toLocaleString(),
 					span: a.span.toLocaleString(),
-					size: fmtBytes(a.span * (a.unitBytes || 1)),
+					size: fmtBytes(a.span * a.unitBytes),
 					reqs: a.count.toLocaleString()
 				}))}
 				columns={[
@@ -310,7 +318,7 @@
 				getRowId={(r: any) => `ar-${r.k}`}
 			/>
 			<div class="mt-1 text-[9px] text-muted-foreground">
-				1 addr unit = {(addrRows[0].unitBytes || 1).toLocaleString()} B.
+				1 addr unit = {addrRows[0].unitBytes.toLocaleString()} B.
 				“all” reqs can exceed read+write — discard/flush have an address but no direction.
 			</div>
 		</div>

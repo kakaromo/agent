@@ -1,9 +1,12 @@
 package trace
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	pb "agent/pb"
+	"agent/trace/parser"
 )
 
 // 주소 범위(min/max/span) 집계의 회귀 테스트.
@@ -199,9 +202,11 @@ func TestAddressRangeExcludesMgmtZeroAddresses(t *testing.T) {
 		t.Errorf("min/max = %d/%d, want 1024000/2048000 — min 이 0 이면 mgmt(lba=0)가 샜다",
 			all.GetMinAddr(), all.GetMaxAddr())
 	}
-	// fsio 는 주소가 이미 바이트 단위라 환산 계수가 1 이다.
-	if got := all.GetUnitBytes(); got != 1 {
-		t.Errorf("unit_bytes = %d, want 1 (fsio)", got)
+	// ⚠ fsio 도 **주소는 4KB 단위**다. bytes 로 오는 건 `size` 지 주소가 아니다
+	// (EndAddrExpr 이 fsio_ufs 에서도 size 를 4096 으로 나눠 더하는 게 근거).
+	// 여기서 1 을 기대하면 화면이 범위를 4096배 작게 그리는 걸 고정해 버린다.
+	if got := all.GetUnitBytes(); got != 4096 {
+		t.Errorf("unit_bytes = %d, want 4096 (fsio_ufs 도 주소는 4KB 단위)", got)
 	}
 	// 방향 분해도 살아 있어야 한다 (is_read/is_write 불리언 경로).
 	if r := m["read"]; r == nil || r.GetMinAddr() != 2048000 {
@@ -209,6 +214,30 @@ func TestAddressRangeExcludesMgmtZeroAddresses(t *testing.T) {
 	}
 	if w := m["write"]; w == nil || w.GetMinAddr() != 1024000 {
 		t.Errorf("write 행 = %v, want min 1024000", w)
+	}
+}
+
+// ⭐ fsio_block 의 주소 단위는 512B 다.
+//
+// ⚠ 이 테스트의 존재 이유 — 처음 구현이 `SectorBytes` 를 썼는데 그건 **size** 1
+// 단위의 바이트라 fsio 에서 1 을 돌려준다. 주소에 그걸 쓰면 범위가 512~4096배
+// 작게 나온다(실측: 3.91 GB 가 0.98 MB 로). 에러가 아니라 그럴듯한 숫자라
+// 화면에서 못 알아본다. AddrUnitBytes 와 SectorBytes 를 다시 헷갈리면 여기서 잡힌다.
+func TestAddressRangeFsioBlockUnitIsSector(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "trace.log")
+	// fsio_block 한 줄 — 태그는 BLK 다(BLOCK 이 아니라). rwbs=WS, 16384 bytes.
+	line := "12345.678920\tBLK\t4521\t4521\t3\tmysqld\tvfs_write\tblock_rq_issue\text4\t8\t32\t983241\t16384\t8192000\t/data/ibdata1\t0x0000010040002102\trwbs=WS"
+	if err := os.WriteFile(logFile, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := parser.RunParquetOnly(logFile, dir, "fsio_block", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m := rangeOf(t, dir, "fsio_block")
+	if got := m["all"].GetUnitBytes(); got != 512 {
+		t.Errorf("unit_bytes = %d, want 512 — fsio 라고 1 을 쓰면 범위가 512배 작아진다", got)
 	}
 }
 
