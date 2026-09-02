@@ -988,6 +988,8 @@
 	 * 서버측 필터(appliedFilter)는 그대로 적용되지만, **표에서만 거른 것**
 	 * (컬럼 필터 · Send/Complete 탭 · 줌 구간)은 CSV 에 반영되지 않는다 —
 	 * 그건 클라이언트에만 있는 상태라 서버가 모른다. 아래 안내에 적어 둔다.
+	 *
+	 * Excel 한계(1,048,575행)를 넘으면 서버가 _1/_2 로 나눠 ZIP 으로 준다.
 	 */
 	async function handleExportCsv() {
 		if (serverId == null || activeJobIds.length === 0 || exportingCsv) return;
@@ -1679,7 +1681,7 @@
 								disabled={exportingCsv}
 								class="px-2 py-0.5 rounded border text-[9px] hover:bg-muted
 									disabled:opacity-50 disabled:cursor-wait whitespace-nowrap"
-								title="서버에서 전체 행을 CSV 로 받습니다 (샘플링 안 됨). 표의 컬럼 필터·Send/Complete·줌 구간은 반영되지 않습니다."
+								title="서버에서 전체 행을 CSV 로 받습니다 (샘플링 안 됨). 1,048,575행을 넘으면 _1/_2 로 나눠 ZIP 으로 받습니다. 표의 컬럼 필터·Send/Complete·줌 구간은 반영되지 않습니다."
 							>
 								{exportingCsv ? '내보내는 중…' : 'CSV 내보내기'}
 							</button>

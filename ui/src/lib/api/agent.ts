@@ -364,6 +364,10 @@ async function downloadPostFromApi(
  * 샘플링된 것을 보여주는데(그 표본은 시간 버킷별 min/max 를 일부러 끼워 넣어
  * 극단값 쪽으로 치우쳐 있다), CSV 는 서버가 parquet 을 직접 읽어 **전체 행**을 준다.
  * 내보내기는 받는 쪽이 다시 집계하는 용도라 샘플을 주면 안 되기 때문이다.
+ *
+ * Excel 시트 한계(1,048,575 데이터행)를 넘으면 서버가 `_1.csv`, `_2.csv` 로 나눠
+ * **ZIP 하나**로 준다 (파일명·Content-Type 은 서버가 정한다). 조각마다 첫 줄에
+ * 헤더가 들어가므로 두 번째 파일만 열어도 컬럼을 알 수 있다.
  */
 export function exportTraceRawCSV(
 	serverId: number,

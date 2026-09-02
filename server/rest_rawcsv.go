@@ -46,32 +46,53 @@ func handleTraceRawCSV(w http.ResponseWriter, r *http.Request, agent *DeviceAgen
 		return
 	}
 
-	// ⚠ 헤더는 **첫 바이트를 쓰기 전에** 정한다. 스트리밍을 시작한 뒤에는 상태 코드를
-	// 바꿀 수 없어서, 중간에 에러가 나면 잘린 CSV 가 200 으로 나간다. 그래서 쿼리
-	// 준비까지는 위에서 끝내고, 여기부터는 실패해도 로그로만 남긴다.
-	filename := rawCSVFilename(jobIDs)
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	// 브라우저가 진행률을 못 보여주더라도 스트리밍이 끊기지 않게.
+	// ⚠ 헤더는 **첫 바이트를 쓰기 전에** 정해야 한다. 스트리밍을 시작한 뒤에는 상태
+	// 코드도 Content-Type 도 못 바꾼다. 그런데 분할 여부(=ZIP 여부)는 다 써 봐야 아는
+	// 값이라, 먼저 행 수를 센다 — count(*) 는 parquet 메타만 읽어 싸다(95만 행 수 ms).
+	total, err := trace.CountRawRows(infos, filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	base := rawCSVBaseName(jobIDs)
+	split := total > trace.ExcelMaxDataRows
+
+	if split {
+		// Excel 시트 한계를 넘는다 → _1, _2 … 로 나눠 ZIP 하나로.
+		//
+		// 파일을 여러 번 다운로드하지 않는 이유 — 브라우저가 **연속 다운로드를
+		// 차단**할 수 있고, 그러면 사용자는 2번째부터 안 받아진 걸 모른 채 넘어간다.
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+base+".zip\"")
+	} else {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+base+".csv\"")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// 분할 정보를 헤더로도 알린다 — 프론트가 "N개 파일" 을 안내할 수 있게.
+	w.Header().Set("X-Total-Rows", fmt.Sprint(total))
 	w.WriteHeader(http.StatusOK)
 
-	n, err := trace.ExportRawCSV(w, infos, filter)
+	res, err := trace.ExportRawCSV(w, infos, filter, base, split)
 	if err != nil {
 		// 이미 200 + 일부 바이트를 보낸 뒤일 수 있다. 클라이언트에 에러를 알릴
 		// 방법이 없으므로 로그에 남긴다 — 파일이 잘린 채 저장될 수 있다.
 		slog.Error("raw CSV export 중단 — 파일이 잘린 채 저장될 수 있다",
-			"error", err, "written_rows", n, "job_ids", jobIDs)
+			"error", err, "written_rows", res.Rows, "job_ids", jobIDs)
 		return
 	}
-	slog.Info("raw CSV export 완료", "rows", n, "job_ids", jobIDs, "filename", filename)
+	slog.Info("raw CSV export 완료",
+		"rows", res.Rows, "files", res.FileCount, "zipped", res.Zipped,
+		"job_ids", jobIDs, "base", base)
 }
 
-// rawCSVFilename — 다운로드 파일명. jobId 가 하나면 그걸 쓰고, 여러 개면 개수를 적는다.
-func rawCSVFilename(jobIDs []string) string {
+// rawCSVBaseName — 확장자를 뺀 파일 이름. 분할 시 `<base>_1.csv` 로 쓰이고
+// ZIP 이름도 `<base>.zip` 이 된다.
+func rawCSVBaseName(jobIDs []string) string {
 	ts := time.Now().Format("20060102-150405")
 	if len(jobIDs) == 1 {
-		return fmt.Sprintf("trace-raw_%s_%s.csv", sanitizeFilename(jobIDs[0]), ts)
+		return fmt.Sprintf("trace-raw_%s_%s", sanitizeFilename(jobIDs[0]), ts)
 	}
-	return fmt.Sprintf("trace-raw_%djobs_%s.csv", len(jobIDs), ts)
+	return fmt.Sprintf("trace-raw_%djobs_%s", len(jobIDs), ts)
 }

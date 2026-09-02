@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/csv"
 	"fmt"
@@ -29,7 +30,7 @@ func TestExportRawCSVReturnsAllRows(t *testing.T) {
 	infos := []*TraceJobInfo{{Dir: dir, TraceType: "ufs"}}
 
 	var buf bytes.Buffer
-	n, err := ExportRawCSV(&buf, infos, nil)
+	res, err := ExportRawCSV(&buf, infos, nil, "t", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,16 +39,19 @@ func TestExportRawCSVReturnsAllRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != raw.GetTotalEvents() {
-		t.Errorf("CSV 행 = %d, totalEvents = %d — 전체를 내보내야 한다", n, raw.GetTotalEvents())
+	if res.Rows != raw.GetTotalEvents() {
+		t.Errorf("CSV 행 = %d, totalEvents = %d — 전체를 내보내야 한다", res.Rows, raw.GetTotalEvents())
+	}
+	if res.FileCount != 1 || res.Zipped {
+		t.Errorf("작은 데이터는 단일 CSV 여야 한다: %+v", res)
 	}
 
 	rec, err := csv.NewReader(&buf).ReadAll()
 	if err != nil {
 		t.Fatalf("CSV 파싱 실패: %v", err)
 	}
-	if got := int64(len(rec) - 1); got != n { // 헤더 제외
-		t.Errorf("파싱된 행 = %d, want %d", got, n)
+	if got := int64(len(rec) - 1); got != res.Rows { // 헤더 제외
+		t.Errorf("파싱된 행 = %d, want %d", got, res.Rows)
 	}
 	want := []string{"time", "lba", "qd", "cpu", "dtoc", "ctod", "ctoc", "cmd", "size", "continuous", "action"}
 	if strings.Join(rec[0], ",") != strings.Join(want, ",") {
@@ -64,13 +68,13 @@ func TestExportRawCSVAppliesFilter(t *testing.T) {
 	}, "ufs")
 
 	var buf bytes.Buffer
-	n, err := ExportRawCSV(&buf, []*TraceJobInfo{{Dir: dir, TraceType: "ufs"}},
-		&pb.TraceFilter{CmdList: []string{"0x28"}})
+	res, err := ExportRawCSV(&buf, []*TraceJobInfo{{Dir: dir, TraceType: "ufs"}},
+		&pb.TraceFilter{CmdList: []string{"0x28"}}, "t", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Errorf("행 = %d, want 2 (0x28 만) — 필터가 CSV 에 안 걸렸다", n)
+	if res.Rows != 2 {
+		t.Errorf("행 = %d, want 2 (0x28 만) — 필터가 CSV 에 안 걸렸다", res.Rows)
 	}
 }
 
@@ -85,7 +89,7 @@ func TestExportRawCSVKeepsNullEmptyNotZero(t *testing.T) {
 	dir := writeFsioLines(t, lines, "fsio_ufs")
 
 	var buf bytes.Buffer
-	if _, err := ExportRawCSV(&buf, []*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil); err != nil {
+	if _, err := ExportRawCSV(&buf, []*TraceJobInfo{{Dir: dir, TraceType: "fsio_ufs"}}, nil, "t", false); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := csv.NewReader(&buf).ReadAll()
@@ -110,5 +114,72 @@ func TestExportRawCSVKeepsNullEmptyNotZero(t *testing.T) {
 	}
 	if !found {
 		t.Skip("mgmt 행이 픽스처에서 안 나왔다 — 이 단언은 건너뛴다")
+	}
+}
+
+// 분할 — Excel 한계를 넘으면 _1, _2 … 로 나눠 ZIP 하나로 묶는다.
+//
+// ⚠ **조각마다 첫 줄에 헤더가 다시 들어가야 한다.** 두 번째 파일만 열었을 때
+// 컬럼을 모르면 그 파일은 혼자서는 쓸모가 없다.
+func TestExportRawCSVSplitsIntoZip(t *testing.T) {
+	// 100만 행 픽스처는 느려서 분할 임계만 낮춰 로직을 검증한다.
+	old := rowsPerFile
+	rowsPerFile = 20
+	defer func() { rowsPerFile = old }()
+
+	lines := []string{}
+	for i := 0; i < 50; i++ { // 50행 → 20/20/10 세 조각
+		lines = append(lines, ufsLine(fmt.Sprintf("100.%06d", i*100), fmt.Sprint(i%64),
+			fmt.Sprint(i*8), "0x28 (READ_10)"))
+	}
+	dir := writeFtraceParquet(t, lines, "ufs")
+
+	var buf bytes.Buffer
+	res, err := ExportRawCSV(&buf, []*TraceJobInfo{{Dir: dir, TraceType: "ufs"}}, nil, "raw", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FileCount != 3 {
+		t.Errorf("파일 %d개, want 3 (50행 / 20행씩)", res.FileCount)
+	}
+	if !res.Zipped {
+		t.Error("Zipped 여야 한다")
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("ZIP 이 아니다: %v", err)
+	}
+	if len(zr.File) != 3 {
+		t.Fatalf("ZIP 안 파일 %d개, want 3", len(zr.File))
+	}
+
+	var totalData int
+	for i, f := range zr.File {
+		want := fmt.Sprintf("raw_%d.csv", i+1)
+		if f.Name != want {
+			t.Errorf("파일명 %q, want %q", f.Name, want)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err := csv.NewReader(rc).ReadAll()
+		rc.Close()
+		if err != nil {
+			t.Fatalf("%s 파싱 실패: %v", f.Name, err)
+		}
+		// ⚠ 조각마다 헤더가 있어야 한다.
+		if rec[0][0] != "time" {
+			t.Errorf("%s 첫 줄이 헤더가 아니다: %v", f.Name, rec[0])
+		}
+		totalData += len(rec) - 1
+		if i < 2 && len(rec)-1 != 20 {
+			t.Errorf("%s 데이터 %d행, want 20", f.Name, len(rec)-1)
+		}
+	}
+	if int64(totalData) != res.Rows || totalData != 50 {
+		t.Errorf("조각 합 %d행, res.Rows=%d, want 50 — 분할에서 행이 새면 안 된다",
+			totalData, res.Rows)
 	}
 }
