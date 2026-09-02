@@ -740,7 +740,7 @@
 			size[i] = e.size;
 		}
 		// size 는 단위가 확정된 잡에서만 넘긴다 (both 면 undefined → Size 차트 숨김).
-		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd, size: sizeUnitKnown ? size : undefined };
+		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd, size: sizeTraceType ? size : undefined };
 	});
 
 	/**
@@ -795,7 +795,7 @@
 	});
 
 	/**
-	 * size 를 KB 로 환산해도 되는 잡인가 — Size 차트를 내보낼지의 판단.
+	 * size 단위를 정할 수 있는 잡인가 — 정할 수 있으면 그 **실효 trace_type** 을 준다.
 	 *
 	 * ⚠ 판단 기준은 **실제 데이터**지 잡의 tool 값이 아니다.
 	 *
@@ -804,26 +804,34 @@
 	 * `result_ufs.parquet` 하나뿐). tool 로 막으면 단위가 멀쩡히 확정된 잡에서까지
 	 * Size 차트가 사라진다.
 	 *
-	 * 그래서 이벤트를 직접 본다. block 계층 행은 action 이 `block_rq_*` 라
-	 * UFS 의 `send_req`/`complete_rsp` 와 확실히 구분된다. 두 계열이 **한 응답에
-	 * 실제로 섞여 있을 때만** size 를 넘기지 않는다 — size 1 단위가 UFS 는 4096B,
-	 * Block 은 512B 라 한 축에 올리면 8배 어긋난 점이 뒤섞이기 때문이다.
+	 * ⚠⚠ **boolean 으로는 부족하다.** `tool=both` 인데 산출물이 block 뿐인 잡이
+	 * 있으면, 위 chartTraceType 이 both 를 ufs 로 뭉개므로(그쪽은 fsio 패널 노출
+	 * 판정용이라 그래도 됐다) size 계수가 4096 으로 잡혀 **8배 부푼다** — 에러 없이.
+	 * 그래서 데이터에서 계층을 직접 읽어 ufs/block 중 무엇인지까지 돌려준다.
+	 *
+	 * block 계층 행은 action 이 `block_rq_*` 라 UFS 의 `send_req`/`complete_rsp` 와
+	 * 확실히 구분된다. 두 계열이 **실제로 섞여 있으면** null (= Size 차트 숨김) —
+	 * size 1 단위가 UFS 는 4096B, Block 은 512B 라 한 축에 올릴 수 없다.
 	 *
 	 * ⚠ size 단위는 **주소 단위와 다르다.** fsio_block 의 lba/sector 는 block 과
 	 * 똑같이 512B 단위지만, fsio 의 size 는 이미 bytes 다 (환산 계수 1).
-	 * 환산 자체는 TraceChartView 가 traceType 을 보고 한다.
+	 * 환산 자체는 TraceChartView 가 넘겨받은 traceType 을 보고 한다.
 	 */
-	const sizeUnitKnown = $derived.by(() => {
+	const sizeTraceType = $derived.by<'ufs' | 'block' | 'ufscustom' | 'fsio_ufs' | 'fsio_block' | null>(() => {
+		// fsio·ufscustom 은 tool 이 단일 계층으로 확정돼 있어 그대로 믿는다.
+		const t = activeTraceType;
+		if (t === 'fsio_ufs' || t === 'fsio_block' || t === 'ufscustom') return t;
+
 		const ev = rawResult?.events;
-		if (!ev || ev.length === 0) return true;
+		if (!ev || ev.length === 0) return chartTraceType;
 		let ufsLike = false;
 		let blockLike = false;
 		for (const e of ev) {
 			if ((e.action ?? '').startsWith('block_rq')) blockLike = true;
 			else ufsLike = true;
-			if (ufsLike && blockLike) return false; // 두 계층이 실제로 섞였다
+			if (ufsLike && blockLike) return null; // 두 계층이 실제로 섞였다
 		}
-		return true;
+		return blockLike ? 'block' : 'ufs';
 	});
 
 	/**
@@ -1703,6 +1711,7 @@
 							series={chartSeries}
 							meta={chartMeta}
 							traceType={chartTraceType}
+							sizeTraceType={sizeTraceType ?? undefined}
 							zoomed={!!zoomRange}
 							boundaries={allBoundaries}
 							hiddenBoundaries={hiddenBoundaryIdx}

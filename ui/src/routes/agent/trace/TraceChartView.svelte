@@ -43,6 +43,15 @@
 		series: Series;
 		meta: ChartMeta | null;
 		traceType: 'ufs' | 'block' | 'ufscustom' | 'fsio_ufs' | 'fsio_block';
+		/**
+		 * size 를 KB 로 환산할 때 쓸 trace_type. 미지정이면 traceType 을 쓴다.
+		 *
+		 * ⚠ 별도 prop 인 이유: 호출부의 traceType 은 "fsio 패널을 켤까" 같은 화면 구성
+		 * 판정용이라 `both` 를 ufs 로 뭉개는 경우가 있는데, size 계수는 그러면
+		 * block 데이터가 8배(4096/512) 부푼다 — 에러 없이. 단위가 걸린 값은
+		 * 데이터에서 확정한 타입으로 따로 받는다.
+		 */
+		sizeTraceType?: 'ufs' | 'block' | 'ufscustom' | 'fsio_ufs' | 'fsio_block';
 		zoomed: boolean;
 		onZoomChange: (start: number, end: number) => void;
 		onResetZoom: () => void;
@@ -69,6 +78,7 @@
 		series,
 		meta,
 		traceType,
+		sizeTraceType,
 		zoomed,
 		boundaries = [],
 		hiddenBoundaries = new Set<number>(),
@@ -337,22 +347,47 @@
 	// 512B 단위지만, 같은 fsio_block 의 `size` 는 이미 bytes 라 계수가 1 이다.
 	// (Go 의 AddrUnitBytes vs SectorBytes 가 갈리는 지점이 정확히 여기다.)
 	// 주소 쪽 계수를 여기 가져다 쓰면 fsio size 가 512배로 부푼다 — 에러 없이.
-	const SIZE_UNIT_BYTES = $derived(
-		traceType === 'fsio_ufs' || traceType === 'fsio_block'
-			? 1
-			: traceType === 'block'
-				? 512
-				: 4096
-	);
+	const SIZE_UNIT_BYTES = $derived.by(() => {
+		const t = sizeTraceType ?? traceType;
+		if (t === 'fsio_ufs' || t === 'fsio_block') return 1;
+		if (t === 'block') return 512;
+		return 4096;
+	});
 
-	// log 축에서 빠지는 size=0 이벤트 수 (flush 등). 0 이면 배지를 안 띄운다.
-	const zeroSizeCount = $derived.by(() => {
+	/**
+	 * log 축에서 빠지는 size=0 이벤트 수 (flush 등). 0 이면 배지를 안 띄운다.
+	 *
+	 * ⚠ **차트별로 센다.** 전체를 세면 discard 차트가 read/write 의 0 건수까지
+	 * "제외했다" 고 표시해 모집단이 어긋난다 (flush 는 discard 가 아니다).
+	 */
+	/**
+	 * Size 차트가 **실제로 그리는** 행 index 들.
+	 *
+	 * ⚠ `series.size` 를 통째로 훑으면 안 된다. buildSeries 는 action 탭·fsio
+	 * flag/syscall 필터(= indexGroups)와 mgmt·isHiddenInChart 를 이미 걸러내는데,
+	 * 그걸 무시하면 축 범위와 "제외 건수" 가 화면에 없는 행까지 반영한다.
+	 * 특히 fsio_ufs 의 UPIU/UIC mgmt 행은 size 가 0 이고 수가 많아 배지가 크게 부푼다.
+	 */
+	function sizeRowIndices(discard: boolean): number[] {
+		const out: number[] = [];
+		for (const [cmd, indices] of indexGroups.cmdIndices) {
+			if (isMgmtCmd(cmd)) continue; // mgmt 는 Size 차트에 안 그린다
+			if (isHiddenInChart(cmd)) continue;
+			if ((getCmdGroup(cmd) === 'discard') !== discard) continue;
+			for (const i of indices) out.push(i);
+		}
+		return out;
+	}
+
+	function zeroSizeCountFor(discard: boolean) {
 		const src = series.size;
 		if (!src) return 0;
 		let n = 0;
-		for (let i = 0; i < src.length; i++) if (!(src[i] > 0)) n++;
+		for (const i of sizeRowIndices(discard)) if (!(src[i] > 0)) n++;
 		return n;
-	});
+	}
+	const zeroSizeCount = $derived.by(() => zeroSizeCountFor(false));
+	const zeroSizeCountDiscard = $derived.by(() => zeroSizeCountFor(true));
 
 	/**
 	 * Size 차트 y 축 스케일. 'auto' 면 데이터 폭을 보고 정한다.
@@ -365,6 +400,18 @@
 	 * discard 는 별도 차트로 빠지므로 이 판정에는 들어오지 않는다.
 	 */
 	let sizeScaleMode = $state<'auto' | 'log' | 'linear'>('auto');
+
+	/**
+	 * size 라벨 — 1KB 미만은 B 로 내린다.
+	 *
+	 * fsio 는 size 가 bytes(계수 1)라 512B 같은 값이 0.5 KB 로 오고, 소수 두 자리로
+	 * 끊으면 그보다 작은 값들이 전부 "0 KB" 로 뭉개져 눈금 여러 개가 같은 라벨을 단다.
+	 */
+	function fmtSizeKb(v: number): string {
+		if (v >= 1024) return `${Number((v / 1024).toFixed(2))} MB`;
+		if (v >= 1) return `${Number(v.toFixed(2))} KB`;
+		return `${Number((v * 1024).toFixed(2))} B`;
+	}
 
 	// **중앙값** 대비 max 가 이 배수를 넘으면 log 로 간다.
 	//
@@ -383,13 +430,11 @@
 	 */
 	function sizeStatsFor(discard: boolean) {
 		const src = sizeKb;
-		const cmdArr = series.cmd;
 		if (!src || src.length === 0) return null;
 		const pos: number[] = [];
-		for (let i = 0; i < src.length; i++) {
+		for (const i of sizeRowIndices(discard)) {
 			const v = src[i];
 			if (!(v > 0)) continue; // log 축에 0 은 못 올린다
-			if ((getCmdGroup(cmdArr[i] || '') === 'discard') !== discard) continue;
 			pos.push(v);
 		}
 		if (pos.length === 0) return null;
@@ -412,15 +457,24 @@
 	 * 늘 log 가 나오는데, 그걸로 read/write 축까지 정하면 discard 를 별도 차트로
 	 * 분리한 의미가 사라진다.
 	 */
-	const sizeNeedsLog = $derived.by(() => {
-		const st = sizeStats;
+	function needsLog(st: { max: number; p50: number; n: number } | null) {
 		if (!st || st.n < 10 || !(st.p50 > 0)) return false;
 		return st.max / st.p50 > SIZE_LOG_THRESHOLD;
-	});
+	}
 
-	const sizeUseLog = $derived(
-		sizeScaleMode === 'auto' ? sizeNeedsLog : sizeScaleMode === 'log'
-	);
+	/**
+	 * 차트별 log 사용 여부.
+	 *
+	 * ⚠ 두 차트가 **각자 판정한다.** 모집단이 다르라고 나눈 차트인데 한쪽(데이터 IO)
+	 * 기준으로 둘 다 정하면, 자릿수가 넓어 log 가 꼭 필요한 discard 차트가 선형으로
+	 * 끌려간다. 수동 모드(선형/log)일 때만 두 차트가 같이 움직인다.
+	 */
+	function useLogFor(discard: boolean) {
+		if (sizeScaleMode !== 'auto') return sizeScaleMode === 'log';
+		return needsLog(discard ? sizeDiscardStats : sizeStats);
+	}
+	const sizeUseLog = $derived(useLogFor(false));
+	const sizeUseLogDiscard = $derived(useLogFor(true));
 
 	/**
 	 * Size 차트 y 축 범위 — 데이터를 감싸는 2의 거듭제곱 경계.
@@ -674,7 +728,8 @@
 		// 버리는 건 같지만 사용자가 모르면 안 되므로 아래 zeroSizeCount 로 표시한다.
 		const isSizeChart = yKey === 'size' || yKey === 'size_discard';
 		const excludeZero =
-			LATENCY_KEYS.has(yKey as string) || (isSizeChart && sizeUseLog);
+			LATENCY_KEYS.has(yKey as string) ||
+			(isSizeChart && (yKey === 'size_discard' ? sizeUseLogDiscard : sizeUseLog));
 		const time = series.time;
 		// dtoc_mgmt 는 가상 키 — y 값은 dtoc 를 그대로 쓰고 cmd 로 mgmt 만 골라낸다.
 		const isMgmtChart = yKey === 'dtoc_mgmt';
@@ -819,16 +874,13 @@
 		const sizeDomain = isSizeKey
 			? sizeDomainOf(key === 'size_discard' ? sizeDiscardStats : sizeStats)
 			: { min: 1, max: 1024 };
-		if (isSizeKey && !sizeUseLog) {
+		const useLogHere = key === 'size_discard' ? sizeUseLogDiscard : sizeUseLog;
+		if (isSizeKey && !useLogHere) {
 			// 선형 — 폭이 좁을 땐 이쪽이 더 잘 읽힌다 (2배 차이가 2배로 보인다).
 			yAxisConfig = {
 				type: 'value',
 				scale: true,
-				axisLabel: {
-					fontSize: 10,
-					formatter: (v: number) =>
-						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
-				}
+				axisLabel: { fontSize: 10, formatter: (v: number) => fmtSizeKb(v) }
 			};
 		} else if (isSizeKey) {
 			// ⚠ 눈금을 ECharts 기본값에 맡기면 안 된다. base 10 이면 10 / 100 / 1000 으로
@@ -844,7 +896,10 @@
 			// 이때 상한이 눈금에 안 걸리면 맨 위가 다시 라벨을 잃으므로, 상한까지
 			// 딱 나눠떨어지는 간격만 고른다.
 			const octaves = Math.round(Math.log2(sizeDomain.max) - Math.log2(sizeDomain.min));
-			let tickStep = 1;
+			// 상한까지 딱 나눠떨어지는 간격을 우선 쓰고(맨 위가 라벨을 잃지 않게),
+			// 소수 옥타브(11·13·17…)처럼 후보가 하나도 안 맞으면 라벨 수 기준으로
+			// 올림한다 — 폴백이 없으면 25 옥타브짜리 fsio 축에 라벨이 25개 찍힌다.
+			let tickStep = Math.max(1, Math.ceil(octaves / 8));
 			for (const cand of [1, 2, 3, 4]) {
 				if (octaves % cand === 0 && octaves / cand <= 8) {
 					tickStep = cand;
@@ -857,13 +912,7 @@
 				interval: tickStep,
 				min: sizeDomain.min,
 				max: sizeDomain.max,
-				axisLabel: {
-					fontSize: 10,
-					// 2의 거듭제곱이라 소수는 안 나오지만, 방어적으로 정리해 둔다
-					// (예전에 base 10 일 때 "9.765625 MB" 가 찍힌 적이 있다).
-					formatter: (v: number) =>
-						v >= 1024 ? `${Number((v / 1024).toFixed(2))} MB` : `${Number(v.toFixed(2))} KB`
-				}
+				axisLabel: { fontSize: 10, formatter: (v: number) => fmtSizeKb(v) }
 			};
 		}
 
@@ -920,9 +969,8 @@
 					}
 					if (isSizeKey && typeof y === 'number' && Number.isFinite(y)) {
 						// KB 환산이 부동소수라 512B 섹터 IO 가 0.49999999999999994 로 나올 수
-						// 있다. 소수 세 자리까지만 남기고 뒤 0 은 지운다 (0.5 / 4 / 1024).
-						const kb = Number(y.toFixed(3));
-						return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${kb.toLocaleString()}`;
+						// 있다. 축 라벨과 같은 포맷터로 정리한다 (1KB 미만은 B).
+						return `${p.seriesName}<br/>time: ${timeStr}<br/>Size: ${fmtSizeKb(y)}`;
 					}
 					return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${y}`;
 				}
@@ -1214,6 +1262,7 @@
 		void activeActionTab;
 		void cpuColorMode;
 		void sizeUseLog; // 스케일 전환 시 축 타입이 바뀌므로 다시 그려야 한다
+		void sizeUseLogDiscard;
 		ensureLegendSelected();
 		rebuildAll();
 	});
@@ -1429,24 +1478,28 @@
 												: 'hover:bg-muted'}"
 											onclick={() => (sizeScaleMode = opt.v)}
 											title={opt.v === 'auto'
-												? '데이터 폭(max/p99)이 크면 log, 아니면 선형'
+												? '중앙값 대비 max(max/p50)가 크면 log, 아니면 선형'
 												: opt.v === 'log'
 													? 'log 축 — discard 처럼 자릿수가 다른 값이 섞였을 때'
 													: '선형 축 — 2배 차이가 2배로 보인다'}
 										>{opt.label}</button>
 									{/each}
 								</div>
-								{#if sizeUseLog}
+								{@const useLogThis =
+									item.key === 'size_discard' ? sizeUseLogDiscard : sizeUseLog}
+								{#if useLogThis}
 									<!-- 축이 log 라는 걸 화면에 적어 둔다. 안 적으면 눈금 간격을
 									     선형으로 오해해 "큰 IO 가 별로 없네" 로 잘못 읽는다. -->
 									<span class="text-[9px] font-normal text-muted-foreground">log 축</span>
-									{#if zeroSizeCount > 0}
+									{@const zeroN =
+										item.key === 'size_discard' ? zeroSizeCountDiscard : zeroSizeCount}
+									{#if zeroN > 0}
 										<!-- log 축은 0 을 못 그린다. 조용히 빠지면 flush 가 없었던 걸로
 										     보이므로 몇 건이 빠졌는지 반드시 표시한다. -->
 										<span
 											class="text-[9px] font-normal text-amber-600 dark:text-amber-500"
 											title="size=0 인 이벤트(flush 등)는 log 축에 표시할 수 없어 제외됐다. 선형 축으로 바꾸면 보인다."
-										>size=0 {zeroSizeCount.toLocaleString()}건 제외</span>
+										>size=0 {zeroN.toLocaleString()}건 제외</span>
 									{/if}
 								{/if}
 							{/if}
