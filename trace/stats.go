@@ -369,6 +369,18 @@ func ComputeStats(infos []*TraceJobInfo, filter *pb.TraceFilter, customRanges []
 			stats.DirectionContiguity = dirStats
 			stats.ClassifiedSendCount = classified
 		}
+
+		// 7.6 주소 범위 — 워크로드가 건드린 LBA 대역.
+		//
+		// 혼합 조회 가드를 7.5 와 **공유한다** (같은 if). lba 와 sector 가 둘 다 있으면
+		// detectLbaColumn 이 COALESCE(lba, sector) 를 돌려주는데, 그러면 4KB 단위와
+		// 512B 단위 주소가 한 min/max 에 섞여 조용히 틀린 범위가 나온다.
+		rng, rerr := queryAddressRange(db, glob, where, cols, lbaCol, cmdCol, dirPresent)
+		if rerr != nil {
+			slog.Warn("address range 집계 실패 (나머지 통계는 유지)", "err", rerr)
+		} else {
+			stats.AddressRange = rng
+		}
 	}
 
 	return stats, nil
@@ -1327,6 +1339,97 @@ FROM w GROUP BY dir, cont ORDER BY dir, cont`,
 		classified += cnt
 	}
 	return out, classified, rows.Err()
+}
+
+// queryAddressRange — 주소(LBA/sector) 의 min/max/span 을 전체·read·write 로 낸다.
+//
+// "이 워크로드가 주소 공간의 어느 대역을 건드렸나" 에 답한다. 차트 y축은 자동
+// 스케일이라 이 수치를 화면 어디에서도 알 수 없었다.
+//
+// send 행만 본다 — complete 는 같은 요청을 한 번 더 세는 것이라 범위에 새 정보가
+// 없고, 모수(count)만 두 배로 부풀린다.
+//
+// ⚠ 정렬이 필요 없는 집계라 timeCol 을 안 받는다. queryDirContiguity 가 timeCol==""
+// 에서 포기하는 것과 달리, 여기는 time 컬럼이 없는 ufscustom 에서도 정상 산출된다.
+func queryAddressRange(db *sql.DB, glob, where string, cols fsioCols,
+	lbaCol, cmdCol string, present map[string]bool,
+) ([]*pb.AddressRangeStats, error) {
+	sendW := addCondition(where, cols.SendPredicate(present["action"]))
+	dirExpr := cols.DirExprWith(cmdCol, present["is_read"] && present["is_write"])
+
+	// 전체 행과 방향별 행을 각각 낸다.
+	//
+	// GROUPING SETS 를 안 쓰는 이유 — dir 이 NULL 인 행이 두 종류(방향 판정 실패 /
+	// 전체 집계)가 되어 구분하려면 GROUPING() 을 또 봐야 한다. 방향 판정 실패 행을
+	// 거른 `d` CTE 와 거르지 않은 `sends` 를 UNION 하는 쪽이 읽기 쉽고,
+	// queryDirContiguity 의 `d` CTE 와 모양이 같다.
+	//
+	// ⚠ 전체 행은 방향 필터 **없이** sends 전체에서 구한다. discard/flush 는 read 도
+	// write 도 아니지만 주소는 있어서 전체 범위에는 들어가야 한다. 그래서
+	// 전체 count >= read+write count 가 정상이다.
+	dirSel := "NULL"
+	if dirExpr != "NULL" {
+		dirSel = dirExpr
+	}
+	q := fmt.Sprintf(`
+WITH sends AS (
+  SELECT %s AS dir, CAST(%s AS HUGEINT) AS addr
+  FROM read_parquet(%s) %s
+),
+-- ⚠ mgmt 행을 빼주는 건 위의 SendPredicate 다 (mgmt action 은 upiu_query_req /
+-- uic_send 라 send 목록에 없다). ComputeStats 의 ExcludeMgmt 도 같은 행을 거르지만
+-- **둘 중 하나만 있어도 통과**하므로, SendPredicate 를 지우면 조용히 새어 들어온다.
+--
+-- 그게 왜 치명적이냐 — parquet 의 mgmt 행 lba 는 NULL 이 아니라 **0** 이다
+-- (rawLbaExpr 의 NULL 화는 Raw Data/차트 경로 전용이라 여기엔 안 걸린다). 그래서
+-- 새어 들어오면 min 이 0 이 되고 "0번지부터 썼다" 는 틀린 사실이 화면에 뜬다.
+-- 실측으로 확인: SendPredicate 를 빼면 min 1024000 → 0.
+--
+-- 아래 NULL 가드는 그와 별개로 주소 컬럼 자체가 NULL 인 행(스키마 누락)용이다.
+a AS (SELECT * FROM sends WHERE addr IS NOT NULL)
+SELECT 'all' AS dir, min(addr), max(addr), count(*) FROM a
+UNION ALL
+SELECT dir, min(addr), max(addr), count(*) FROM a WHERE dir IS NOT NULL GROUP BY dir
+ORDER BY dir`,
+		dirSel, lbaCol, glob, sendW)
+
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// 주소 1단위의 바이트.
+	//
+	// ⚠ **SectorBytes 가 아니다.** 저건 `size` 1 단위의 바이트라 fsio 에서 1 을
+	// 돌려준다(bpftrace 가 size 를 bytes 로 준다). 주소는 fsio 에서도 4KB/512B
+	// 단위라, 저걸 쓰면 fsio 범위가 4096배 작게 나온다 — 실측 3.91 GB 가 0.98 MB 로.
+	unit := cols.AddrUnitBytes(present["sector"])
+
+	var out []*pb.AddressRangeStats
+	for rows.Next() {
+		var dir string
+		var minA, maxA sql.NullFloat64
+		var cnt int64
+		if err := rows.Scan(&dir, &minA, &maxA, &cnt); err != nil {
+			return nil, err
+		}
+		// 주소가 하나도 없는 방향은 행을 내지 않는다 — min/max 가 NULL 인데 0 으로
+		// 채우면 "0번지를 건드렸다" 는 틀린 사실이 된다.
+		if !minA.Valid || !maxA.Valid || cnt == 0 {
+			continue
+		}
+		lo, hi := uint64(minA.Float64), uint64(maxA.Float64)
+		out = append(out, &pb.AddressRangeStats{
+			Direction: dir,
+			MinAddr:   lo,
+			MaxAddr:   hi,
+			Span:      hi - lo,
+			Count:     cnt,
+			UnitBytes: unit,
+		})
+	}
+	return out, rows.Err()
 }
 
 // lnSelect — line_number 를 CTE 로 통과시킨다 (정렬 tiebreak 용).

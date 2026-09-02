@@ -289,6 +289,21 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 			"avgRequestBytes":      d.GetAvgRequestBytes(),
 		})
 	}
+	// 주소 범위(all/read/write). 없으면 빈 배열 — dirCont 와 같은 이유로 null 을
+	// 안 내보낸다. 혼합 조회(lba+sector)나 구버전 응답에서 비는데, 화면은 그때
+	// **블록 자체를 안 그린다**(0 으로 채우면 "0번지를 건드렸다" 는 틀린 사실이
+	// 되고, "—" 만 남기면 뭘 기다리는 건지 알 수 없다).
+	addrRange := make([]map[string]any, 0, len(s.GetAddressRange()))
+	for _, a := range s.GetAddressRange() {
+		addrRange = append(addrRange, map[string]any{
+			"direction": a.GetDirection(),
+			"minAddr":   a.GetMinAddr(),
+			"maxAddr":   a.GetMaxAddr(),
+			"span":      a.GetSpan(),
+			"count":     a.GetCount(),
+			"unitBytes": a.GetUnitBytes(),
+		})
+	}
 	return map[string]any{
 		"totalEvents":         s.GetTotalEvents(),
 		"durationSeconds":     s.GetDurationSeconds(),
@@ -310,6 +325,7 @@ func traceStatsToMap(s *pb.TraceStats) map[string]any {
 		"sendCount":           s.GetSendCount(),
 		"directionContiguity": dirCont,
 		"classifiedSendCount": s.GetClassifiedSendCount(),
+		"addressRange":        addrRange,
 	}
 }
 

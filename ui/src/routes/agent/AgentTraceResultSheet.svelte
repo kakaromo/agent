@@ -740,6 +740,31 @@
 		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd };
 	});
 
+	/**
+	 * 차트 위에 띄울 주소 범위 — 방향별로 뽑아둔다.
+	 *
+	 * ⚠ **서버가 준 값을 그대로 쓴다.** chartSeries.lba 로 계산하면 안 된다:
+	 * raw 이벤트는 50만 행을 넘으면 샘플링되고 LIMIT 로 시간축 뒤쪽이 잘려
+	 * 극단값이 사라진다. 게다가 mgmt 행 lba 는 0 이라 min 이 0 으로 오염된다.
+	 * 둘 다 에러 없이 그럴듯하게 틀리는 값이다.
+	 *
+	 * ⚠ statsResult 는 필터를 걸면 같은 필터로 재조회되므로(applyFilter →
+	 * loadStats(f)) 차트와 모수가 어긋나지 않는다.
+	 */
+	const addrRange = $derived.by(() => {
+		const list = statsResult?.addressRange;
+		if (!list || list.length === 0) return null;
+		const by = (d: string) => list.find((e) => e.direction === d) ?? null;
+		const all = by('all');
+		if (!all) return null;
+		return { all, read: by('read'), write: by('write') };
+	});
+
+	/** 주소 단위 → 바이트. unitBytes 를 빼먹으면 UFS/Block 이 8배 어긋난다. */
+	function addrBytes(span: number, unitBytes: number): string {
+		return fmtBytes(span * (unitBytes || 1));
+	}
+
 	/** TraceChartView 상단 meta 바(총/샘플 건수). agent 응답 값 그대로. */
 	const chartMeta = $derived(
 		rawResult
@@ -1007,16 +1032,31 @@
 		}
 	}
 
+	// 응답 순서 뒤바뀜 방지용 세대 카운터 (statsGen 과 같은 이유).
+	//
+	// ⚠ loadStats 만 막아선 부족하다. 같은 두 경로가 loadRawData 도 동시에 부르는데
+	// (열림 effect = 필터 없음, 구간/필터 = 조건 있음), 여기엔 가드가 없어서 **늦게
+	// 도착한 좁은 응답이 넓은 응답을 덮어썼다.** 화면에는 Raw Data 가 빈 표로 보이고
+	// 에러는 안 난다 — 조회가 실패한 게 아니라 순서가 뒤집힌 것이라서.
+	let rawGen = 0;
+
 	async function loadRawData(filter?: TraceFilter) {
 		if (serverId == null || activeJobIds.length === 0) return;
+		const gen = ++rawGen;
 		loadingRaw = true;
 		try {
-			rawResult = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			const res = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			if (gen !== rawGen) return; // 더 최신 요청이 있다 — 이 응답은 버린다
+			rawResult = res;
 			// 단독 trace 실행(AgentTraceForm)에는 mappings 가 없다 — 서버가 알려준
 			// trace_type 이 fsio UI 노출과 컬럼 세트 결정의 유일한 출처다.
 			if (rawResult?.traceType) fallbackTraceType = rawResult.traceType;
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
-		finally { loadingRaw = false; }
+		finally {
+			// 최신 요청만 로딩 상태를 내린다 — 오래된 응답이 내리면 아직 도는 조회가
+			// 끝난 것처럼 보인다.
+			if (gen === rawGen) loadingRaw = false;
+		}
 	}
 
 	// ── 시계 정합 상태 ──
@@ -1097,7 +1137,9 @@
 			console.error('Trace stats error:', e);
 			toast.error('통계 조회 실패');
 		}
-		finally { loadingStats = false; }
+		// loadRawData 와 같은 이유로 최신 요청만 로딩 상태를 내린다 — 오래된 응답이
+		// 내리면 아직 도는 조회가 끝난 것처럼 보여, 스피너 없이 옛 수치가 남는다.
+		finally { if (gen === statsGen) loadingStats = false; }
 	}
 
 	function applyFilter() {
@@ -1117,9 +1159,18 @@
 		filterComm = []; filterName = []; filterSyscall = []; filterFs = [];
 		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
 		filterIoFlagsAny = '';
-		appliedFilter = {};
-		statsResult = null;
-		loadRawData();
+		// ⚠ statsResult 를 null 로 두고 재조회를 안 하면 Statistics 탭이 통째로
+		// 빈 화면("조회 버튼을 눌러주세요")이 된다. 필터를 **푼** 것이지 볼 게
+		// 없어진 게 아니므로 다시 부른다. applyFilter 와 같은 짝(raw + stats).
+		//
+		// ⚠ 인자 없이 부르면 안 된다 — buildFilter() 는 zoomRange(구간 선택)를
+		// 시간 범위로 접어 넣는다. 구간이 선택된 채로 초기화하면 배너는
+		// "선택한 구간만" 인데 수치는 전 구간이 되어 서로 어긋난다. 초기화가
+		// 푸는 건 **입력창 필터**지 구간 선택이 아니다.
+		const f = buildFilter();
+		appliedFilter = f ?? {};
+		loadRawData(f);
+		loadStats(f);
 	}
 
 	function handleBrushSelected(ranges: { timeMin: number; timeMax: number; yMin: number; yMax: number; chartKey?: string }) {
@@ -1584,6 +1635,34 @@
 						     되어 탭이 조용히 빈다. -->
 						{#if zoomRange}
 							<div class="text-[9px] text-muted-foreground mb-1">· 선택 구간만</div>
+						{/if}
+						<!-- 주소 범위 — LBA 차트의 y축은 자동 스케일이고 툴팁은 점 하나만
+						     보여줘서, 이 줄이 없으면 "어느 대역을 건드렸나" 를 화면에서
+						     알 수 없다. 필터 패널의 LBA min/max 에 넣을 값의 기준이기도 하다.
+
+						     ⚠ 값은 **서버 전체 집계**다. 차트의 점은 샘플링될 수 있어
+						     여기서 계산하면 큰 트레이스에서 조용히 틀린다. -->
+						{#if addrRange}
+							<div class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] {captionMuted}">
+								<span class="font-mono tabular-nums">
+									LBA <b class="font-medium text-foreground"
+										>{addrRange.all.minAddr.toLocaleString()} – {addrRange.all.maxAddr.toLocaleString()}</b
+									>
+									· span {addrRange.all.span.toLocaleString()}
+									({addrBytes(addrRange.all.span, addrRange.all.unitBytes)})
+								</span>
+								{#each [{ e: addrRange.read, label: 'read' }, { e: addrRange.write, label: 'write' }] as d}
+									{#if d.e}
+										<span class="font-mono tabular-nums">
+											{d.label}
+											<b class="font-medium text-foreground"
+												>{d.e.minAddr.toLocaleString()} – {d.e.maxAddr.toLocaleString()}</b
+											>
+											· {d.e.count.toLocaleString()} reqs
+										</span>
+									{/if}
+								{/each}
+							</div>
 						{/if}
 						<TraceChartView
 							series={chartSeries}
