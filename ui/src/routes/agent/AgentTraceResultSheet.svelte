@@ -1032,16 +1032,31 @@
 		}
 	}
 
+	// 응답 순서 뒤바뀜 방지용 세대 카운터 (statsGen 과 같은 이유).
+	//
+	// ⚠ loadStats 만 막아선 부족하다. 같은 두 경로가 loadRawData 도 동시에 부르는데
+	// (열림 effect = 필터 없음, 구간/필터 = 조건 있음), 여기엔 가드가 없어서 **늦게
+	// 도착한 좁은 응답이 넓은 응답을 덮어썼다.** 화면에는 Raw Data 가 빈 표로 보이고
+	// 에러는 안 난다 — 조회가 실패한 게 아니라 순서가 뒤집힌 것이라서.
+	let rawGen = 0;
+
 	async function loadRawData(filter?: TraceFilter) {
 		if (serverId == null || activeJobIds.length === 0) return;
+		const gen = ++rawGen;
 		loadingRaw = true;
 		try {
-			rawResult = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			const res = await getTraceRawData(serverId, { jobIds: activeJobIds, filter });
+			if (gen !== rawGen) return; // 더 최신 요청이 있다 — 이 응답은 버린다
+			rawResult = res;
 			// 단독 trace 실행(AgentTraceForm)에는 mappings 가 없다 — 서버가 알려준
 			// trace_type 이 fsio UI 노출과 컬럼 세트 결정의 유일한 출처다.
 			if (rawResult?.traceType) fallbackTraceType = rawResult.traceType;
 		} catch (e) { console.error('Trace raw error:', e); toast.error('Raw data 조회 실패'); }
-		finally { loadingRaw = false; }
+		finally {
+			// 최신 요청만 로딩 상태를 내린다 — 오래된 응답이 내리면 아직 도는 조회가
+			// 끝난 것처럼 보인다.
+			if (gen === rawGen) loadingRaw = false;
+		}
 	}
 
 	// ── 시계 정합 상태 ──
@@ -1143,8 +1158,12 @@
 		filterPid = []; filterIno = []; filterLun = []; filterDev = [];
 		filterIoFlagsAny = '';
 		appliedFilter = {};
-		statsResult = null;
+		// ⚠ statsResult 를 null 로 두고 재조회를 안 하면 Statistics 탭이 통째로
+		// 빈 화면("조회 버튼을 눌러주세요")이 된다. 필터를 **푼** 것이지 볼 게
+		// 없어진 게 아니므로, 필터 없이 다시 불러 전체 기준 수치를 보여준다.
+		// applyFilter 와 같은 짝(raw + stats)으로 맞춘다.
 		loadRawData();
+		loadStats();
 	}
 
 	function handleBrushSelected(ranges: { timeMin: number; timeMax: number; yMin: number; yMax: number; chartKey?: string }) {
