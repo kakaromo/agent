@@ -725,6 +725,7 @@
 		const ctod = new Array<number>(n);
 		const action = new Array<string>(n);
 		const cmd = new Array<string>(n);
+		const size = new Array<number>(n);
 		for (let i = 0; i < n; i++) {
 			const e = ev[i];
 			time[i] = e.time;
@@ -736,8 +737,10 @@
 			ctod[i] = e.ctod;
 			action[i] = e.action;
 			cmd[i] = e.cmd;
+			size[i] = e.size;
 		}
-		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd };
+		// size 는 단위가 확정된 잡에서만 넘긴다 (both 면 undefined → Size 차트 숨김).
+		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd, size: sizeTraceType ? size : undefined };
 	});
 
 	/**
@@ -789,6 +792,46 @@
 		const t = activeTraceType;
 		if (t === 'fsio_ufs' || t === 'fsio_block' || t === 'block' || t === 'ufscustom') return t;
 		return 'ufs';
+	});
+
+	/**
+	 * size 단위를 정할 수 있는 잡인가 — 정할 수 있으면 그 **실효 trace_type** 을 준다.
+	 *
+	 * ⚠ 판단 기준은 **실제 데이터**지 잡의 tool 값이 아니다.
+	 *
+	 * `tool` 은 사용자가 **요청한** 수집 종류라 `both` 여도 실제 산출물은 한쪽뿐인
+	 * 경우가 흔하다 (실측: 로컬 20개 잡 전부 tool=both/ufs 인데 parquet 은
+	 * `result_ufs.parquet` 하나뿐). tool 로 막으면 단위가 멀쩡히 확정된 잡에서까지
+	 * Size 차트가 사라진다.
+	 *
+	 * ⚠⚠ **boolean 으로는 부족하다.** `tool=both` 인데 산출물이 block 뿐인 잡이
+	 * 있으면, 위 chartTraceType 이 both 를 ufs 로 뭉개므로(그쪽은 fsio 패널 노출
+	 * 판정용이라 그래도 됐다) size 계수가 4096 으로 잡혀 **8배 부푼다** — 에러 없이.
+	 * 그래서 데이터에서 계층을 직접 읽어 ufs/block 중 무엇인지까지 돌려준다.
+	 *
+	 * block 계층 행은 action 이 `block_rq_*` 라 UFS 의 `send_req`/`complete_rsp` 와
+	 * 확실히 구분된다. 두 계열이 **실제로 섞여 있으면** null (= Size 차트 숨김) —
+	 * size 1 단위가 UFS 는 4096B, Block 은 512B 라 한 축에 올릴 수 없다.
+	 *
+	 * ⚠ size 단위는 **주소 단위와 다르다.** fsio_block 의 lba/sector 는 block 과
+	 * 똑같이 512B 단위지만, fsio 의 size 는 이미 bytes 다 (환산 계수 1).
+	 * 환산 자체는 TraceChartView 가 넘겨받은 traceType 을 보고 한다.
+	 */
+	const sizeTraceType = $derived.by<'ufs' | 'block' | 'ufscustom' | 'fsio_ufs' | 'fsio_block' | null>(() => {
+		// fsio·ufscustom 은 tool 이 단일 계층으로 확정돼 있어 그대로 믿는다.
+		const t = activeTraceType;
+		if (t === 'fsio_ufs' || t === 'fsio_block' || t === 'ufscustom') return t;
+
+		const ev = rawResult?.events;
+		if (!ev || ev.length === 0) return chartTraceType;
+		let ufsLike = false;
+		let blockLike = false;
+		for (const e of ev) {
+			if ((e.action ?? '').startsWith('block_rq')) blockLike = true;
+			else ufsLike = true;
+			if (ufsLike && blockLike) return null; // 두 계층이 실제로 섞였다
+		}
+		return blockLike ? 'block' : 'ufs';
 	});
 
 	/**
@@ -1668,6 +1711,7 @@
 							series={chartSeries}
 							meta={chartMeta}
 							traceType={chartTraceType}
+							sizeTraceType={sizeTraceType ?? undefined}
 							zoomed={!!zoomRange}
 							boundaries={allBoundaries}
 							hiddenBoundaries={hiddenBoundaryIdx}
