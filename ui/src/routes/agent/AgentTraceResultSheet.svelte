@@ -726,6 +726,9 @@
 		const action = new Array<string>(n);
 		const cmd = new Array<string>(n);
 		const size = new Array<number>(n);
+		// fsio 파일명 — tooltip 용. ftrace 잡은 undefined 라 빈 문자열로 채워진다.
+		const name = new Array<string>(n);
+		let hasName = false;
 		for (let i = 0; i < n; i++) {
 			const e = ev[i];
 			time[i] = e.time;
@@ -738,9 +741,18 @@
 			action[i] = e.action;
 			cmd[i] = e.cmd;
 			size[i] = e.size;
+			const nm = e.name ?? '';
+			name[i] = nm;
+			if (nm !== '') hasName = true;
 		}
 		// size 는 단위가 확정된 잡에서만 넘긴다 (both 면 undefined → Size 차트 숨김).
-		return { time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd, size: sizeTraceType ? size : undefined };
+		// name 은 한 건이라도 값이 있을 때만 넘긴다 — 전부 빈 문자열인 ftrace 잡에
+		// 배열을 넘기면 tooltip 쪽에서 매번 헛돈다 (표시는 fmtName 이 막지만).
+		return {
+			time, lba, qd, cpu, dtoc, ctoc, ctod, action, cmd,
+			size: sizeTraceType ? size : undefined,
+			name: hasName ? name : undefined
+		};
 	});
 
 	/**

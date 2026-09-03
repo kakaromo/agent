@@ -29,6 +29,12 @@
 		ioFlags?: BigUint64Array | bigint[];
 		// fsio_* 전용 syscall 문자열(vfs_write/vfs_read/"-" 등). 다른 type 은 빈 문자열.
 		syscall?: string[];
+		// fsio_* 전용 파일명 — 풀패스 / "ino:N" / "(라벨)". 뒤 둘은 파일명 부재의 표현이다.
+		//
+		// ⚠ 차트 Arrow 응답(chart_schema 12컬럼)엔 아직 name 이 없어서 /trace 화면에선
+		// undefined 다. agent 는 raw 이벤트로 series 를 만들어 값이 들어온다.
+		// 값이 있으면 tooltip 에 뜨고, 없으면 조용히 빠진다 — 양쪽 다 안 깨진다.
+		name?: string[];
 	};
 
 	export interface BrushRange {
@@ -413,6 +419,26 @@
 		return `${Number((v * 1024).toFixed(2))} B`;
 	}
 
+	/**
+	 * tooltip 에 쓸 fsio 파일명.
+	 *
+	 * ⚠ 빈 문자열뿐 아니라 `-` 도 버린다 — bpftrace 가 "값 없음" 을 그렇게 준다
+	 * (syscall 의 `-` 와 같은 규약). 그대로 두면 `name: -` 라는 빈 줄이 늘 붙는다.
+	 * `ino:N` / `(라벨)` 은 **버리지 않는다**: 파일명을 못 얻은 것이지 정보가 없는 게
+	 * 아니라서, 어느 inode 였는지가 귀속 판단에 쓰인다.
+	 *
+	 * 긴 풀패스는 **앞을** 줄인다 — 파일명이 뒤에 있어 뒤를 자르면 정작 볼 게 사라진다.
+	 * HTML 문자열로 들어가므로 escape 는 필수다 (경로에 & < > 가 들어갈 수 있다).
+	 */
+	function fmtName(raw: unknown): string {
+		if (typeof raw !== 'string') return '';
+		const s = raw.trim();
+		if (s === '' || s === '-') return '';
+		const MAX = 60;
+		const cut = s.length > MAX ? `…${s.slice(-(MAX - 1))}` : s;
+		return cut.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
 	// **중앙값** 대비 max 가 이 배수를 넘으면 log 로 간다.
 	//
 	// ⚠ p99 가 아니라 p50 이다. p99 는 "이상치가 얼마나 튀나" 를 재는데, 정작 문제는
@@ -747,11 +773,13 @@
 			const sortedCpus = [...indexGroups.cpuIndices.keys()].sort((a, b) => a - b);
 			for (const cpu of sortedCpus) {
 				const indices = indexGroups.cpuIndices.get(cpu)!;
-				const data: [number, number][] = new Array(indices.length);
+				// 3번째 원소 = fsio 파일명 (아래 cmd 루프와 같은 이유 — 값으로 넣는다).
+				const nameArr = series.name;
+				const data: [number, number, string?][] = new Array(indices.length);
 				let w = 0;
 				for (let k = 0; k < indices.length; k++) {
 					const i = indices[k];
-					data[w++] = [time[i], lbaArr[i]];
+					data[w++] = nameArr ? [time[i], lbaArr[i], nameArr[i]] : [time[i], lbaArr[i]];
 				}
 				data.length = w;
 				out.push({
@@ -783,14 +811,22 @@
 			// 응답 UPIU 는 send 와 짝이라 차트에서만 감춘다 (통계/Raw 에는 남음).
 			if (isHiddenInChart(cmd)) continue;
 			const indices = indexGroups.cmdIndices.get(cmd)!;
-			const data: [number, number][] = new Array(indices.length);
+			// 3번째 원소 = fsio 파일명. ECharts 는 축에 안 쓰는 뒤 원소를 그대로 보존해
+			// tooltip formatter 의 p.value[2] 로 돌려준다 (large 모드에서도 유지된다 —
+			// 렌더러가 쓰는 typed array 와 별개로 raw item 을 들고 있다).
+			//
+			// ⚠ 여기서 인덱스가 아니라 **값**을 넣는 이유: 아래 루프는 non-finite /
+			// excludeZero 행을 건너뛰므로 배열 위치 w 와 원본 인덱스 i 가 어긋난다.
+			// 나중에 i 로 되찾으려 하면 조용히 다른 행의 파일명이 붙는다.
+			const nameArr = series.name;
+			const data: [number, number, string?][] = new Array(indices.length);
 			let w = 0;
 			for (let k = 0; k < indices.length; k++) {
 				const i = indices[k];
 				const y = yArr[i];
 				if (!Number.isFinite(y)) continue;
 				if (excludeZero && y <= 0) continue;
-				data[w++] = [time[i], y];
+				data[w++] = nameArr ? [time[i], y, nameArr[i]] : [time[i], y];
 			}
 			data.length = w;
 			if (data.length === 0) continue;
@@ -960,19 +996,22 @@
 					const t = Number(v[0]);
 					const y = v[1];
 					const timeStr = Number.isFinite(t) ? `${t.toFixed(6)}s` : String(v[0]);
+					// fsio 파일명 — 값이 있을 때만 한 줄 덧붙인다 (ftrace 잡은 아예 없음).
+					const nameStr = fmtName(v[2]);
+					const nameLine = nameStr ? `<br/>name: ${nameStr}` : '';
 					if (isCpuLba) {
 						const lbaStr =
 							typeof y === 'number' && Number.isFinite(y)
 								? y.toLocaleString()
 								: String(y);
-						return `${p.seriesName}<br/>time: ${timeStr}<br/>LBA: ${lbaStr}`;
+						return `${p.seriesName}<br/>time: ${timeStr}<br/>LBA: ${lbaStr}${nameLine}`;
 					}
 					if (isSizeKey && typeof y === 'number' && Number.isFinite(y)) {
 						// KB 환산이 부동소수라 512B 섹터 IO 가 0.49999999999999994 로 나올 수
 						// 있다. 축 라벨과 같은 포맷터로 정리한다 (1KB 미만은 B).
-						return `${p.seriesName}<br/>time: ${timeStr}<br/>Size: ${fmtSizeKb(y)}`;
+						return `${p.seriesName}<br/>time: ${timeStr}<br/>Size: ${fmtSizeKb(y)}${nameLine}`;
 					}
-					return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${y}`;
+					return `${p.seriesName}<br/>time: ${timeStr}<br/>${yLabel}: ${y}${nameLine}`;
 				}
 			},
 			legend: {
