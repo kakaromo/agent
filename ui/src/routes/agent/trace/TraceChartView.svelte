@@ -31,9 +31,9 @@
 		syscall?: string[];
 		// fsio_* 전용 파일명 — 풀패스 / "ino:N" / "(라벨)". 뒤 둘은 파일명 부재의 표현이다.
 		//
-		// ⚠ 차트 Arrow 응답(chart_schema 12컬럼)엔 아직 name 이 없어서 /trace 화면에선
-		// undefined 다. agent 는 raw 이벤트로 series 를 만들어 값이 들어온다.
-		// 값이 있으면 tooltip 에 뜨고, 없으면 조용히 빠진다 — 양쪽 다 안 깨진다.
+		// /trace 는 chart_base 13번째 컬럼(fsio_*-v4), agent 는 raw 이벤트에서 채운다.
+		// ftrace 계열은 빈 문자열, 구버전 응답은 undefined — 둘 다 tooltip 에서 조용히
+		// 빠진다(fmtName 이 거른다). 값이 있을 때만 한 줄 붙는다.
 		name?: string[];
 	};
 
