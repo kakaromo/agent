@@ -229,13 +229,20 @@
 	{#if open}
 		<!-- 패널은 body 로 옮긴다(portal). 헤더가 정렬 <button> 안이라 그 안에 두면
 			 버튼 중첩이 되어 내부 버튼들의 클릭이 브라우저 DOM 재배치로 깨진다.
-			 위치는 트리거 좌표 기준으로 fixed 배치. -->
+			 위치는 트리거 좌표 기준으로 fixed 배치.
+
+			 ⚠ pointer-events-auto 는 장식이 아니다. 이 표가 Sheet/Dialog 안에서 열리면
+			 bits-ui 가 스크롤 락으로 **body 에 pointer-events:none** 을 건다
+			 (internal/body-scroll-lock). 패널은 body 직속이라 그걸 그대로 상속해
+			 클릭이 전부 통과해버린다 — 패널은 보이는데 입력도 적용도 안 되니
+			 사용자에겐 "필터가 안 열린다/안 먹는다" 로 보인다.
+			 실측: 상속 시 elementFromPoint 가 패널이 아니라 <html> 을 돌려준다. -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			{@attach portal}
 			data-colfilter-panel={column}
 			style="position: fixed; top: {panelTop}px; left: {panelLeft}px;"
-			class="z-50 w-60 rounded-md border bg-popover p-2 shadow-md text-[10px] font-normal"
+			class="pointer-events-auto z-50 w-60 rounded-md border bg-popover p-2 shadow-md text-[10px] font-normal"
 			onclick={(e) => e.stopPropagation()}
 			onkeydown={onKey}
 		>

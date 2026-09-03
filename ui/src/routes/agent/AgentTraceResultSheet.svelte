@@ -19,7 +19,7 @@
 	import { getCmdGroup } from './trace/cmdColors.js';
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats, exportTraceRawCSV } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -926,10 +926,22 @@
 
 	// job / trace type 이 바뀌면 필터를 버린다 — 컬럼 구성이 달라지면
 	// 남은 필터가 없는 컬럼을 가리켜 "행이 왜 0 이지" 가 된다.
+	//
+	// ⚠ 초기화는 반드시 untrack 안에서 한다. $effect 는 **본문에서 읽은 모든 것**을
+	// 의존성으로 잡으므로, columnFilters 를 읽으면서 쓰면 자기 자신이 트리거가 된다:
+	//   필터 적용 → columnFilters 변경 → 이 effect 재실행 → 즉시 [] 로 리셋
+	// 사용자에겐 "적용을 눌러도 아무 일도 안 일어난다" 로 보인다.
+	//
+	// activeJobIds 도 조심할 것 — $derived.by 가 .map() 으로 **매번 새 배열**을 만들어
+	// 내용이 같아도 identity 가 바뀐다. 그래서 값 비교(join)로 실제 변경만 잡는다.
+	let lastFilterScope = '';
 	$effect(() => {
-		void activeTraceType;
-		void activeJobIds;
-		if (columnFilters.length > 0) columnFilters = [];
+		const scope = `${activeTraceType ?? ''}|${activeJobIds.join(',')}`;
+		untrack(() => {
+			if (scope === lastFilterScope) return;
+			lastFilterScope = scope;
+			if (columnFilters.length > 0) columnFilters = [];
+		});
 	});
 
 	const rawTableType = $derived(activeTraceType ?? 'ufs');
