@@ -3,7 +3,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { toast } from 'svelte-sonner';
 	import { btnIcon } from '$lib/styles/common.js';
-	import { getJobStatus, deleteJob, fetchExecutions, deleteExecution, fetchExecutionStats, openLocalFolder, type JobExecutionRecord } from '$lib/api/agent.js';
+	import { getJobStatus, deleteJob, fetchExecutions, deleteExecution, fetchExecutionStats, openLocalFolder, updateJobName, type JobExecutionRecord } from '$lib/api/agent.js';
 	import type { JobRecord } from './types.js';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
@@ -18,6 +18,7 @@
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 
 	interface Props {
@@ -43,6 +44,40 @@
 
 	// DB 이력
 	let executions = $state<JobExecutionRecord[]>([]);
+
+	// ── Name 인라인 수정 ──
+	//
+	// 시작할 때 이름을 안 적었거나 잘못 적으면 나중에 어느 실행인지 알 수가 없다.
+	// 특히 trace 는 tool 이 전부 traceType 이라 행이 전부 똑같아 보인다.
+	let editingJobId = $state<string | null>(null);
+	let editingName = $state('');
+	let savingName = $state(false);
+
+	function startEditName(j: JobExecutionRecord) {
+		editingJobId = j.jobId;
+		editingName = j.jobName ?? '';
+	}
+	function cancelEditName() {
+		editingJobId = null;
+		editingName = '';
+	}
+	async function saveName(j: JobExecutionRecord) {
+		const next = editingName.trim();
+		if (next === (j.jobName ?? '')) return cancelEditName();  // 변경 없음 — 요청 낭비 안 한다
+		savingName = true;
+		try {
+			const res = await updateJobName(j.jobId, next);
+			// 목록 전체 refetch 대신 해당 행만 갱신 — 페이지/필터/선택 상태가 안 흔들린다.
+			executions = executions.map((e) =>
+				e.jobId === j.jobId ? { ...e, jobName: res.jobName || undefined } : e
+			);
+			cancelEditName();
+		} catch (e) {
+			toast.error('이름 저장 실패', { description: e instanceof Error ? e.message : String(e) });
+		} finally {
+			savingName = false;
+		}
+	}
 	let totalElements = $state(0);
 	let totalPages = $state(0);
 	let currentPage = $state(0);
@@ -400,7 +435,8 @@
 					</Table.Head>
 					<Table.Head>Job ID</Table.Head>
 					<Table.Head>Type</Table.Head>
-					<Table.Head>Tool/Name</Table.Head>
+					<Table.Head>Tool</Table.Head>
+					<Table.Head>Name</Table.Head>
 					<Table.Head>Server</Table.Head>
 					<Table.Head>Devices</Table.Head>
 					<Table.Head>State</Table.Head>
@@ -455,7 +491,50 @@
 								{/if}
 							</div>
 						</Table.Cell>
-						<Table.Cell class="text-[10px]">{j.tool ?? j.jobName ?? '-'}</Table.Cell>
+						<!-- Tool 과 Name 은 열을 나눈다. 예전엔 `tool ?? jobName` 한 칸이었는데,
+							 trace 는 tool 에 traceType(ufs/fsio_ufs…)이 **항상** 들어가서
+							 ?? 가 넘어가질 않아 사용자가 적은 Job Name 이 영영 안 보였다.
+							 (헤더는 Tool/Name 이라 둘 다 나오는 것처럼 보였다) -->
+						<Table.Cell class="text-[10px]">{j.tool ?? '—'}</Table.Cell>
+						<Table.Cell class="text-[10px] max-w-[200px]">
+							{#if editingJobId === j.jobId}
+								<!-- 행 클릭이 상세 시트를 열기 때문에 편집 중엔 전파를 끊는다. -->
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+									<!-- svelte-ignore a11y_autofocus -->
+									<input
+										bind:value={editingName}
+										autofocus
+										disabled={savingName}
+										placeholder="이름 없음"
+										class="w-full border rounded px-1.5 py-0.5 text-[10px] bg-background"
+										onkeydown={(e) => {
+											if (e.key === 'Enter') saveName(j);
+											else if (e.key === 'Escape') cancelEditName();
+										}}
+										onblur={() => saveName(j)}
+									/>
+									{#if savingName}
+										<LoaderIcon class="size-3 animate-spin shrink-0 text-muted-foreground" />
+									{/if}
+								</div>
+							{:else}
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
+								<div
+									class="group/name flex items-center gap-1"
+									onclick={(e) => { e.stopPropagation(); startEditName(j); }}
+									onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); startEditName(j); } }}
+									role="button"
+									tabindex="0"
+									title={j.jobName ? `${j.jobName} — 클릭해서 수정` : '클릭해서 이름 지정'}
+								>
+									<span class="truncate {j.jobName ? '' : 'text-muted-foreground/50'}">
+										{j.jobName ?? '—'}
+									</span>
+									<PencilIcon class="size-2.5 shrink-0 opacity-0 group-hover/name:opacity-60 transition-opacity" />
+								</div>
+							{/if}
+						</Table.Cell>
 						<Table.Cell class="text-[10px]">{j.serverName}</Table.Cell>
 						<Table.Cell class="text-[10px]">{parseDeviceCount(j.deviceIds)}</Table.Cell>
 						<Table.Cell>

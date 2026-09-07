@@ -140,6 +140,28 @@ func (db *DB) UpdateJobExecutionWorkloadNote(ctx context.Context, jobID, note st
 	return nil
 }
 
+// UpdateJobExecutionJobName — Result 표에서 잡 이름(Name)을 수정한다.
+//
+// 잡을 시작할 때 이름을 안 적었거나 잘못 적으면 나중에 어느 실행인지 구분할 방법이
+// 없어진다(특히 trace 는 tool 이 전부 traceType 이라 행이 다 똑같아 보인다).
+// 빈 문자열은 NULL 로 저장해 "이름 없음" 으로 되돌린다 — workload_note 와 같은 규약.
+//
+// ⚠ job_name 은 잡 시작 시 아티팩트 **폴더명**으로도 쓰이지만(artifacts/jobdir.go),
+// 그건 시작 시점에 이미 확정된 경로다. 여기서 이름을 바꿔도 기존 폴더는 그대로 두고
+// DB 표시값만 바꾼다 — 폴더까지 옮기면 이미 저장된 결과 경로가 끊긴다.
+func (db *DB) UpdateJobExecutionJobName(ctx context.Context, jobID, name string) error {
+	res, err := db.ExecContext(ctx, `UPDATE job_executions SET job_name=? WHERE job_id=?`,
+		nullableString(name), jobID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdateJobExecutionStepBoundaries — 잡 종료 시 스텝 구간 JSON 을 영속화.
 //
 // UpdateJobExecutionTraceJobs 와 같은 이유·같은 시점이다. 구간이 메모리 Job 에만

@@ -971,6 +971,11 @@ export function updateWorkloadNote(jobId: string, note: string): Promise<{ succe
 	return put(`/agent/executions/by-job-id/${encodeURIComponent(jobId)}/workload-note`, { note });
 }
 
+/** 잡 이름(Name) 수정. 빈 문자열이면 이름 없음으로 되돌린다. */
+export function updateJobName(jobId: string, name: string): Promise<{ success: boolean; jobName: string }> {
+	return put(`/agent/executions/by-job-id/${encodeURIComponent(jobId)}/job-name`, { name });
+}
+
 export function deleteExecution(id: number): Promise<{ success: boolean }> {
 	return del(`/agent/executions/${id}`);
 }

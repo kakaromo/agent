@@ -122,6 +122,43 @@ func registerExecutionRoutes(mux *http.ServeMux, db *sqlitedb.DB) {
 			return
 		}
 
+		// PUT /api/agent/executions/by-job-id/{jobId}/job-name
+		// body: {"name": "..."} — 빈 문자열이면 이름 없음(NULL)으로 되돌림.
+		//
+		// Result 표에서 바로 고칠 수 있어야 한다. 시작할 때 이름을 안 적으면 나중에
+		// 어느 실행인지 알 방법이 없는데, trace 는 tool 이 전부 traceType 이라
+		// 행이 전부 똑같아 보여 특히 심하다.
+		if len(parts) == 3 && parts[0] == "by-job-id" && parts[2] == "job-name" {
+			if r.Method != http.MethodPut {
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+				return
+			}
+			// 표에 그대로 렌더되는 값이라 길이를 막아 둔다 — 폴더명으로 쓰이는 필드와
+			// 같은 컬럼이기도 하다. 앞뒤 공백은 의미가 없어 정리한다.
+			name := strings.TrimSpace(body.Name)
+			if len([]rune(name)) > 200 {
+				writeError(w, http.StatusBadRequest, "name too long (max 200)")
+				return
+			}
+			if err := db.UpdateJobExecutionJobName(r.Context(), parts[1], name); err != nil {
+				if errors.Is(err, sqlitedb.ErrNotFound) {
+					writeError(w, http.StatusNotFound, "execution not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"success": true, "jobName": name})
+			return
+		}
+
 		// PUT /api/agent/executions/by-job-id/{jobId}/boundary-label
 		// body: {"stepIndex":N,"loopIndex":N,"repeatIndex":N,"labelOverride":"..."}
 		//
