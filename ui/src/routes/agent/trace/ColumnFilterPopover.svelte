@@ -49,9 +49,16 @@
 	let panelLeft = $state(0);
 	let op = $state<ColumnFilterOp>('IN');
 
-	/** 패널을 body 로 이동 (버튼 중첩 회피). 제거 시 원위치 정리는 노드 삭제로 충분. */
+	/**
+	 * 패널을 헤더의 정렬 button 밖으로 이동한다.
+	 *
+	 * Raw Data 는 focus trap 이 적용된 Sheet 안에 있다. 무조건 body 로 보내면 패널이
+	 * trap 바깥으로 빠져 입력을 클릭해도 포커스가 Sheet 로 회수되고, 결과적으로 글자가
+	 * 입력되지 않는다. 가장 가까운 Sheet content 로 옮겨 포커스 범위 안에 유지한다.
+	 */
 	function portal(node: HTMLElement) {
-		document.body.appendChild(node);
+		const owner = triggerEl?.closest<HTMLElement>('[data-slot="sheet-content"]');
+		(owner ?? document.body).appendChild(node);
 		return () => node.remove();
 	}
 
@@ -231,12 +238,8 @@
 			 버튼 중첩이 되어 내부 버튼들의 클릭이 브라우저 DOM 재배치로 깨진다.
 			 위치는 트리거 좌표 기준으로 fixed 배치.
 
-			 ⚠ pointer-events-auto 는 장식이 아니다. 이 표가 Sheet/Dialog 안에서 열리면
-			 bits-ui 가 스크롤 락으로 **body 에 pointer-events:none** 을 건다
-			 (internal/body-scroll-lock). 패널은 body 직속이라 그걸 그대로 상속해
-			 클릭이 전부 통과해버린다 — 패널은 보이는데 입력도 적용도 안 되니
-			 사용자에겐 "필터가 안 열린다/안 먹는다" 로 보인다.
-			 실측: 상속 시 elementFromPoint 가 패널이 아니라 <html> 을 돌려준다. -->
+			 패널은 Sheet content 안에 두어 focus trap 안에 유지한다. body fallback 에서도
+			 스크롤 락의 pointer-events:none 을 상쇄하도록 pointer-events-auto 는 유지한다. -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			{@attach portal}
