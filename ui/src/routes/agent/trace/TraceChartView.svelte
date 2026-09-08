@@ -680,6 +680,11 @@
 	}
 	let charts: Record<string, echarts.ECharts | null> = {};
 
+	// 사용자가 inside zoom 으로 고른 시간 범위. series/action/범례 변경으로 차트를
+	// 다시 그려도 이 값을 dataZoom 에 되넣어 이전 화면 범위를 유지한다.
+	let currentZoomRange = $state<{ start: number; end: number } | null>(null);
+	let suppressZoomSync = false;
+
 	// 여러 차트 간 legend 상태 동기화
 	let legendSelected = $state<Record<string, boolean>>({});
 
@@ -773,13 +778,13 @@
 			const sortedCpus = [...indexGroups.cpuIndices.keys()].sort((a, b) => a - b);
 			for (const cpu of sortedCpus) {
 				const indices = indexGroups.cpuIndices.get(cpu)!;
-				// 3번째 원소 = fsio 파일명 (아래 cmd 루프와 같은 이유 — 값으로 넣는다).
-				const nameArr = series.name;
-				const data: [number, number, string?][] = new Array(indices.length);
+				// rawIndex 를 점 자체에 보존한다. series 안의 dataIndex 는 필터 후 위치라
+				// 원본 name 배열의 index 로 사용할 수 없다.
+				const data: { value: [number, number]; rawIndex: number }[] = new Array(indices.length);
 				let w = 0;
 				for (let k = 0; k < indices.length; k++) {
 					const i = indices[k];
-					data[w++] = nameArr ? [time[i], lbaArr[i], nameArr[i]] : [time[i], lbaArr[i]];
+					data[w++] = { value: [time[i], lbaArr[i]], rawIndex: i };
 				}
 				data.length = w;
 				out.push({
@@ -811,22 +816,15 @@
 			// 응답 UPIU 는 send 와 짝이라 차트에서만 감춘다 (통계/Raw 에는 남음).
 			if (isHiddenInChart(cmd)) continue;
 			const indices = indexGroups.cmdIndices.get(cmd)!;
-			// 3번째 원소 = fsio 파일명. ECharts 는 축에 안 쓰는 뒤 원소를 그대로 보존해
-			// tooltip formatter 의 p.value[2] 로 돌려준다 (large 모드에서도 유지된다 —
-			// 렌더러가 쓰는 typed array 와 별개로 raw item 을 들고 있다).
-			//
-			// ⚠ 여기서 인덱스가 아니라 **값**을 넣는 이유: 아래 루프는 non-finite /
-			// excludeZero 행을 건너뛰므로 배열 위치 w 와 원본 인덱스 i 가 어긋난다.
-			// 나중에 i 로 되찾으려 하면 조용히 다른 행의 파일명이 붙는다.
-			const nameArr = series.name;
-			const data: [number, number, string?][] = new Array(indices.length);
+			// 필터로 배열 위치 w 와 원본 위치 i 가 달라지므로 원본 index 를 점에 명시한다.
+			const data: { value: [number, number]; rawIndex: number }[] = new Array(indices.length);
 			let w = 0;
 			for (let k = 0; k < indices.length; k++) {
 				const i = indices[k];
 				const y = yArr[i];
 				if (!Number.isFinite(y)) continue;
 				if (excludeZero && y <= 0) continue;
-				data[w++] = nameArr ? [time[i], y, nameArr[i]] : [time[i], y];
+				data[w++] = { value: [time[i], y], rawIndex: i };
 			}
 			data.length = w;
 			if (data.length === 0) continue;
@@ -996,8 +994,12 @@
 					const t = Number(v[0]);
 					const y = v[1];
 					const timeStr = Number.isFinite(t) ? `${t.toFixed(6)}s` : String(v[0]);
-					// fsio 파일명 — 값이 있을 때만 한 줄 덧붙인다 (ftrace 잡은 아예 없음).
-					const nameStr = fmtName(v[2]);
+					// ECharts의 large/progressive 모드에서 부가 차원 값이 점과 어긋날 수
+					// 있으므로, 점에 보존한 원본 행 index 로 name 을 조회한다.
+					const rawIndex = Number(p?.data?.rawIndex);
+					const nameStr = fmtName(
+						Number.isInteger(rawIndex) ? series.name?.[rawIndex] : undefined
+					);
 					const nameLine = nameStr ? `<br/>name: ${nameStr}` : '';
 					if (isCpuLba) {
 						const lbaStr =
@@ -1060,7 +1062,13 @@
 				axisLabel: { fontSize: 10 }
 			},
 			yAxis: yAxisConfig,
-			dataZoom: [{ type: 'inside' as const, xAxisIndex: 0 }],
+			dataZoom: [{
+				type: 'inside' as const,
+				xAxisIndex: 0,
+				...(currentZoomRange
+					? { startValue: currentZoomRange.start, endValue: currentZoomRange.end }
+					: {})
+			}],
 			series: [...seriesList, ...boundarySeries]
 		} as echarts.EChartsOption;
 	}
@@ -1096,14 +1104,44 @@
 	}
 
 	function attachZoomSync(lbaChart: echarts.ECharts) {
+		// visible chart 구성이 바뀌면 master 도 바뀔 수 있다. 예전 master handler 를
+		// 남겨두면 한 번의 gesture 가 중복 처리되므로 전부 떼고 현재 master 만 연결한다.
+		for (const c of Object.values(charts)) {
+			if (c && !c.isDisposed()) c.off('datazoom');
+		}
+		lbaChart.off('datazoom');
 		lbaChart.on('datazoom', () => {
+			if (suppressZoomSync) return;
 			const opt = lbaChart.getOption() as any;
 			const dz = opt?.dataZoom?.[0];
 			if (!dz) return;
 			if (typeof dz.startValue === 'number' && typeof dz.endValue === 'number') {
+				currentZoomRange = { start: dz.startValue, end: dz.endValue };
+				// master 차트에서 고른 범위를 나머지 차트에도 즉시 적용한다.
+				suppressZoomSync = true;
+				for (const c of Object.values(charts)) {
+					if (!c || c === lbaChart || c.isDisposed()) continue;
+					c.dispatchAction({
+						type: 'dataZoom',
+						startValue: currentZoomRange.start,
+						endValue: currentZoomRange.end
+					});
+				}
+				suppressZoomSync = false;
 				onZoomChange(dz.startValue, dz.endValue);
 			}
 		});
+	}
+
+	function resetZoom() {
+		currentZoomRange = null;
+		suppressZoomSync = true;
+		for (const c of Object.values(charts)) {
+			if (!c || c.isDisposed()) continue;
+			c.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+		}
+		suppressZoomSync = false;
+		onResetZoom();
 	}
 
 	function attachBrush(chart: echarts.ECharts, key: string) {
@@ -1362,8 +1400,8 @@
 				<span>total: {meta.totalEvents.toLocaleString()}</span>
 				<span>sampled: {meta.sampledEvents.toLocaleString()}</span>
 			{/if}
-			{#if zoomed}
-				<button class="underline text-primary" onclick={onResetZoom}>전체 범위로</button>
+			{#if zoomed || currentZoomRange}
+				<button class="underline text-primary" onclick={resetZoom}>전체 범위로</button>
 			{/if}
 			{#if isBpftraceFsio && (availableFlags.length > 0 || availableSyscalls.length > 0)}
 				{@const selectedCount =

@@ -33,6 +33,9 @@ func TestFsioOnlyLayerIncludesVFS(t *testing.T) {
 // TestBuildFsioCommandIncludeVFS — 실제 커맨드 문자열까지 확인한다.
 func TestBuildFsioCommandIncludeVFS(t *testing.T) {
 	got := buildFsioCommand("fsio_ufs", true)
+	if !strings.HasPrefix(got, "/dev/fsiotrace ") {
+		t.Errorf("fsiotrace 실행 경로가 /dev 가 아니다: %q", got)
+	}
 	if !strings.Contains(got, "--only ufs,vfs") {
 		t.Errorf("include_vfs=true 인데 vfs 가 빠졌다: %q", got)
 	}

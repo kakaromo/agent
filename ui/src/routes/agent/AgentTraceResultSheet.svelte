@@ -1742,7 +1742,10 @@
 							onZoomChange={(start, end) => {
 								filterStartTime = String(start);
 								filterEndTime = String(end);
-								applyFilter();
+								// 차트 데이터 자체를 시간 필터로 다시 받아오면 원래 범위를 잃어
+								// 다음 zoom out 때 전체로 초기화된다. 차트는 원본을 유지하고,
+								// 선택 범위가 필요한 서버 통계만 갱신한다.
+								loadStats(buildFilter());
 							}}
 							onResetZoom={handleResetZoom}
 							onBrushSelected={handleBrushSelected}

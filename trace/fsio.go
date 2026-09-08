@@ -26,8 +26,9 @@ import (
 const (
 	// fsiotraceBinary — tools/ 안의 로컬 바이너리 이름이자 기기에 push 될 이름.
 	fsiotraceBinary = "fsiotrace"
-	// fsiotraceRemotePath — 기기 측 경로. benchmark 도구들과 같은 위치.
-	fsiotraceRemotePath = "/data/local/tmp/" + fsiotraceBinary
+	// fsiotraceRemotePath — 기기 측 배포·실행 경로.
+	// fsiotrace 는 root 전용 eBPF 도구이므로 일반 benchmark 도구 경로가 아닌 /dev 에 둔다.
+	fsiotraceRemotePath = "/dev/" + fsiotraceBinary
 )
 
 // IsFsioTraceType — bpftrace 계열 trace_type 인가.
