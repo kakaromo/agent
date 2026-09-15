@@ -1254,23 +1254,17 @@
 
 	// Ctrl/Cmd + 드래그 = 사각 박스 영역 선택 (우클릭 메뉴와 동등 기능, 더 빠른 진입).
 	//
-	// 두 단계 트리거로 robust 하게:
-	//   (1) pointerdown 캡처 단계 — Ctrl 누른 채로 클릭 시작하면 즉시 brush 활성화.
-	//       echarts 가 mousedown 부터 brush rect 그리기 시작하므로 _pointerdown 이전_ 에
-	//       takeGlobalCursor 를 dispatch 해야 첫 클릭이 brush 로 잡힘. 실제로는 capture
-	//       phase 에 hook 해서 echarts 의 down handler 보다 먼저 실행되도록 함.
-	//   (2) keydown — 차트 위에 마우스가 있을 때 Ctrl 누르면 hover 차트에 brush 활성화
-	//       (이 패턴은 사용자가 키 먼저 누르고 마우스 움직이는 시나리오 커버).
+	// pointerdown 캡처 단계에서 진입한다 — Ctrl 누른 채로 클릭 시작하면 즉시 brush 활성화.
+	// echarts 가 mousedown 부터 brush rect 그리기 시작하므로 _pointerdown 이전_ 에
+	// takeGlobalCursor 를 dispatch 해야 첫 클릭이 brush 로 잡힌다. 실제로는 capture
+	// phase 에 hook 해서 echarts 의 down handler 보다 먼저 실행되도록 한다.
 	//
-	// 둘 다 keyup 에서 자동 비활성. brush rect 한 번 그리면 brushEnd 가 단발성으로 비활성.
-	let hoverChartKey: string | null = $state(null);
+	// keyup 에서 자동 비활성. brush rect 한 번 그리면 brushEnd 가 단발성으로 비활성.
 	let ctrlActiveKey: string | null = null;
 
-	function onChartMouseEnter(key: string) {
-		hoverChartKey = key;
-	}
 	function onChartMouseLeave(key: string) {
-		if (hoverChartKey === key) hoverChartKey = null;
+		// 드래그 도중 차트 밖으로 나가면 brush 를 풀어 준다 — 안 그러면 다른 차트로
+		// 옮겨가도 선택 커서가 남는다.
 		if (ctrlActiveKey === key) {
 			deactivateBrush(key);
 			ctrlActiveKey = null;
@@ -1285,16 +1279,17 @@
 		ctrlActiveKey = key;
 		activateBrush(key);
 	}
-	function onGlobalKeydown(e: KeyboardEvent) {
-		if (!onBrushSelected) return;
-		// e.ctrlKey 는 다른 키와 함께 눌렀을 때도 true 라 가짜 trigger 가능 — Control/Meta 단독 키일 때만.
-		if (e.key !== 'Control' && e.key !== 'Meta') return;
-		if (e.repeat) return;
-		if (!hoverChartKey) return;
-		if (ctrlActiveKey === hoverChartKey) return;
-		ctrlActiveKey = hoverChartKey;
-		activateBrush(hoverChartKey);
-	}
+	// ⚠️ 예전엔 여기에 onGlobalKeydown 이 있어서, 차트 위에 마우스가 있을 때 Ctrl 을
+	// **누르기만 해도** brush 가 켜졌다. Ctrl 은 단독으로 쓰는 키가 아니라서
+	// Ctrl+C / Ctrl+F / Ctrl+R / Cmd+Tab 처럼 흔한 단축키마다 영역 선택 커서가 떠서
+	// 복사 한 번 하려 해도 방해가 됐다.
+	//
+	// 진입은 아래 두 경로로 충분하다 — 둘 다 "실제로 선택하겠다" 는 의사가 분명하다.
+	//   • Ctrl/Cmd + 좌클릭 드래그 (onChartPointerDownCapture)
+	//   • 우클릭 → 영역 선택 메뉴
+	// 안내 문구도 "Ctrl + 드래그" 라 이 동작과 일치한다.
+	//
+	// keyup 은 남긴다. pointerdown 으로 켜진 brush 를 Ctrl 떼는 순간 풀어주는 안전장치다.
 	function onGlobalKeyup(e: KeyboardEvent) {
 		if (e.key !== 'Control' && e.key !== 'Meta') return;
 		if (ctrlActiveKey) {
@@ -1699,7 +1694,6 @@
 							bind:this={containers[item.key]}
 							class="w-full flex-1 min-h-0"
 							oncontextmenu={(e) => onChartContextMenu(e, item.key)}
-							onmouseenter={() => onChartMouseEnter(item.key)}
 							onmouseleave={() => onChartMouseLeave(item.key)}
 							onpointerdowncapture={(e) => onChartPointerDownCapture(e, item.key)}
 						></div>
@@ -1712,7 +1706,6 @@
 
 <svelte:window
 	onclick={closeBrushMenu}
-	onkeydown={onGlobalKeydown}
 	onkeyup={onGlobalKeyup}
 	onblur={() => {
 		if (ctrlActiveKey) {
