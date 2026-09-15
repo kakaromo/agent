@@ -1262,6 +1262,28 @@
 	// keyup 에서 자동 비활성. brush rect 한 번 그리면 brushEnd 가 단발성으로 비활성.
 	let ctrlActiveKey: string | null = null;
 
+	/**
+	 * macOS 인가 — 영역 선택 진입키를 정하는 데 쓴다.
+	 *
+	 * ⚠️ macOS 에서 **Ctrl + 좌클릭은 OS 차원의 보조 클릭(우클릭)** 이다. 그래서 Ctrl 을
+	 * 진입키로 쓰면 한 번의 제스처가 pointerdown(brush 활성화)과 contextmenu(영역 선택
+	 * 메뉴)를 동시에 때려서, 드래그하려는데 메뉴가 뜬다. 화면에 안내된 "우클릭" 과
+	 * "Ctrl + 드래그" 가 macOS 에선 **같은 동작**이 돼 버린다.
+	 *
+	 * Cmd 는 보조 클릭을 만들지 않으므로 충돌이 없다. macOS 관례(Cmd = 앱 단축키,
+	 * Ctrl = 보조 클릭)와도 맞는다.
+	 *
+	 * SSR(adapter-static prerender)에서는 navigator 가 없어 false 로 두고, 브라우저에서
+	 * 다시 평가된다 — 키 판정은 실제 이벤트 시점에만 쓰이므로 문제가 없다.
+	 */
+	const isMac =
+		typeof navigator !== 'undefined' &&
+		/Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+	/** 영역 선택 진입키 — macOS 는 Cmd, 그 외는 Ctrl. */
+	const brushModifierLabel = isMac ? '⌘' : 'Ctrl';
+	const hasBrushModifier = (e: { ctrlKey: boolean; metaKey: boolean }) =>
+		isMac ? e.metaKey : e.ctrlKey;
+
 	function onChartMouseLeave(key: string) {
 		// 드래그 도중 차트 밖으로 나가면 brush 를 풀어 준다 — 안 그러면 다른 차트로
 		// 옮겨가도 선택 커서가 남는다.
@@ -1273,9 +1295,10 @@
 	/** pointerdown 캡처 — Ctrl/Cmd 클릭 시 echarts down handler 보다 먼저 brush 활성화. */
 	function onChartPointerDownCapture(e: PointerEvent, key: string) {
 		if (!onBrushSelected) return;
-		// 좌클릭 + Ctrl/Cmd 일 때만. 우클릭(button === 2) 은 contextmenu 메뉴가 처리.
+		// 좌클릭 + 진입키(macOS=Cmd, 그 외=Ctrl) 일 때만.
+		// 우클릭(button === 2) 과 macOS 의 Ctrl+좌클릭은 contextmenu 메뉴가 처리한다.
 		if (e.button !== 0) return;
-		if (!(e.ctrlKey || e.metaKey)) return;
+		if (!hasBrushModifier(e)) return;
 		ctrlActiveKey = key;
 		activateBrush(key);
 	}
@@ -1291,7 +1314,8 @@
 	//
 	// keyup 은 남긴다. pointerdown 으로 켜진 brush 를 Ctrl 떼는 순간 풀어주는 안전장치다.
 	function onGlobalKeyup(e: KeyboardEvent) {
-		if (e.key !== 'Control' && e.key !== 'Meta') return;
+		// 진입키를 뗄 때만 푼다 — macOS 에서 Control 로 풀면 Cmd 로 켠 brush 가 안 꺼진다.
+		if (e.key !== (isMac ? 'Meta' : 'Control')) return;
 		if (ctrlActiveKey) {
 			deactivateBrush(ctrlActiveKey);
 			ctrlActiveKey = null;
@@ -1438,7 +1462,7 @@
 		{#if onBrushSelected}
 			<div class="text-muted-foreground text-[9px] leading-snug pt-1 border-t">
 				<div>우클릭 → 영역 선택</div>
-				<div>Ctrl + 드래그 → 영역 선택</div>
+				<div>{brushModifierLabel} + 드래그 → 영역 선택</div>
 				<div>차트 하단 모서리 드래그 → 높이 조절</div>
 			</div>
 		{/if}
