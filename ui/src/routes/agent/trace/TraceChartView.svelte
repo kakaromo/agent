@@ -5,6 +5,9 @@
 	import type { ChartMeta } from './types.js';
 	import { createCmdColorAssigner, isMgmtCmd, isHiddenInChart, getCmdGroup } from './cmdColors.js';
 	import BoxSelectIcon from '@lucide/svelte/icons/box-select';
+	import Undo2Icon from '@lucide/svelte/icons/undo-2';
+	import Redo2Icon from '@lucide/svelte/icons/redo-2';
+	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 
 	type Series = {
 		time: number[];
@@ -63,6 +66,22 @@
 		onResetZoom: () => void;
 		onBrushSelected?: (range: BrushRange) => void;
 		/**
+		 * 밖에서 넣어 주는 시간 범위 — 조회 이력(이전/이후)으로 되돌릴 때 쓴다.
+		 *
+		 * 지금까지 zoom 은 안에서만(datazoom 이벤트) 정해졌다. 이력 복원은 반대 방향이
+		 * 필요해서 이 prop 으로 받는다. **optional 이다** — 안 넘기면 예전과 똑같이
+		 * 동작한다(agent 쪽 두 소비처가 안 넘긴다).
+		 */
+		zoomRange?: { start: number; end: number } | null;
+		/** 조회 이력 — 넷 다 넘겼을 때만 하단에 이전/이후 버튼이 나온다. */
+		onUndo?: () => void;
+		onRedo?: () => void;
+		canUndo?: boolean;
+		canRedo?: boolean;
+		/** "N단계 중 M번째" 표시용. */
+		historyPosition?: number;
+		historyTotal?: number;
+		/**
 		 * fsio Flags 패널의 io_flags / syscall 선택을 서버사이드 필터로 올린다.
 		 * 미지정이면 예전처럼 클라이언트(샘플) 필터로 동작 — 호출부 없는 곳의 하위호환.
 		 */
@@ -91,8 +110,18 @@
 		onZoomChange,
 		onResetZoom,
 		onBrushSelected,
-		onFsioFilterChange
+		onFsioFilterChange,
+		zoomRange = null,
+		onUndo,
+		onRedo,
+		canUndo = false,
+		canRedo = false,
+		historyPosition,
+		historyTotal
 	}: Props = $props();
+
+	/** 이력 버튼을 그릴지 — 호출부가 이력을 넘긴 경우에만. */
+	const hasHistory = $derived(!!onUndo && !!onRedo);
 
 	// ── 시나리오 구간 밴드 ────────────────────────────────────────────────
 	//
@@ -1144,6 +1173,36 @@
 		onResetZoom();
 	}
 
+	/**
+	 * 밖에서 온 zoomRange 를 차트에 반영한다 (이력 복원 경로).
+	 *
+	 * ⚠️ suppressZoomSync 가 이 기능의 핵심이다. dispatchAction 은 datazoom 을 **다시**
+	 * 쏘는데, 가드가 없으면 그게 onZoomChange 로 올라가 방금 되돌린 상태가 이력에 새로
+	 * 쌓인다 — 이전 버튼을 눌러도 제자리인 것처럼 보인다.
+	 *
+	 * 내가 방금 만든 범위면 다시 넣지 않는다. 사용자가 굴리는 중에 서버 응답이 돌아와
+	 * 같은 값을 되쏘면 휠 동작이 끊긴다.
+	 */
+	$effect(() => {
+		const r = zoomRange;
+		if (r && currentZoomRange && r.start === currentZoomRange.start && r.end === currentZoomRange.end) {
+			return;
+		}
+		if (!r && !currentZoomRange) return;
+		// 차트가 아직 안 만들어졌으면 buildOption 이 currentZoomRange 를 읽어 알아서 반영한다.
+		currentZoomRange = r ? { start: r.start, end: r.end } : null;
+		suppressZoomSync = true;
+		for (const c of Object.values(charts)) {
+			if (!c || c.isDisposed()) continue;
+			c.dispatchAction(
+				r
+					? { type: 'dataZoom', startValue: r.start, endValue: r.end }
+					: { type: 'dataZoom', start: 0, end: 100 }
+			);
+		}
+		suppressZoomSync = false;
+	});
+
 	function attachBrush(chart: echarts.ECharts, key: string) {
 		chart.off('brushEnd');
 		chart.on('brushEnd', (params: any) => {
@@ -1400,7 +1459,39 @@
 				<span>total: {meta.totalEvents.toLocaleString()}</span>
 				<span>sampled: {meta.sampledEvents.toLocaleString()}</span>
 			{/if}
-			{#if zoomed || currentZoomRange}
+			{#if hasHistory}
+				<!-- 조회 이력 — 차트 zoom 뿐 아니라 필터·구간까지 한 덩어리로 되돌린다.
+					 (같은 시간 범위가 timeRange / filter 두 자리에 나뉘어 적혀서,
+					  zoom 만 되돌리면 남은 값 때문에 화면이 조용히 어긋난다.) -->
+				<span class="inline-flex items-center gap-1">
+					<button
+						class="inline-flex items-center gap-0.5 hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+						onclick={onUndo}
+						disabled={!canUndo}
+						title="이전 조회로"
+					>
+						<Undo2Icon class="size-3" /> 이전
+					</button>
+					<button
+						class="inline-flex items-center gap-0.5 hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+						onclick={onRedo}
+						disabled={!canRedo}
+						title="이후 조회로"
+					>
+						<Redo2Icon class="size-3" /> 이후
+					</button>
+					<button
+						class="inline-flex items-center gap-0.5 hover:text-foreground"
+						onclick={resetZoom}
+						title="전체 범위로 되돌리기"
+					>
+						<RotateCcwIcon class="size-3" /> 초기화
+					</button>
+					{#if historyTotal && historyTotal > 1}
+						<span class="opacity-60">{historyTotal}단계 중 {historyPosition}번째</span>
+					{/if}
+				</span>
+			{:else if zoomed || currentZoomRange}
 				<button class="underline text-primary" onclick={resetZoom}>전체 범위로</button>
 			{/if}
 			{#if isBpftraceFsio && (availableFlags.length > 0 || availableSyscalls.length > 0)}
