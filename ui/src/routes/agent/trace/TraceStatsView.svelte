@@ -301,7 +301,7 @@
 					label: a.direction,
 					min: a.minAddr.toLocaleString(),
 					max: a.maxAddr.toLocaleString(),
-					span: a.span.toLocaleString(),
+					range: a.span.toLocaleString(),
 					size: fmtBytes(a.span * a.unitBytes),
 					reqs: a.count.toLocaleString()
 				}))}
@@ -309,8 +309,8 @@
 					{ accessorKey: 'label', header: 'Direction' },
 					{ accessorKey: 'min', header: 'Min' },
 					{ accessorKey: 'max', header: 'Max' },
-					{ accessorKey: 'span', header: 'Span' },
-					{ accessorKey: 'size', header: 'Range size' },
+					{ accessorKey: 'range', header: 'Range' },
+					{ accessorKey: 'size', header: 'Range (bytes)' },
 					{ accessorKey: 'reqs', header: 'Reqs' }
 				]}
 				showPagination={false}
