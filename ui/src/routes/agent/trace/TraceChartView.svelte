@@ -396,6 +396,33 @@
 	});
 
 	/**
+	 * **주소(LBA) 한 칸이 몇 바이트인가.** 위 SIZE_UNIT_BYTES 와 **다른 값**이다.
+	 *
+	 *   ufs / ufscustom / fsio_ufs : 4096 B  (1 = 4KB LBA 한 칸)
+	 *   block / fsio_block         :  512 B  (1 = 섹터 한 칸)
+	 *
+	 * ⚠ fsio_* 가 갈리는 지점이다 — fsio 의 `size` 는 이미 bytes(계수 1)지만
+	 * `lba` 는 여전히 주소 칸이다. 여기에 SIZE_UNIT_BYTES 를 가져다 쓰면 fsio 주소가
+	 * 512~4096배 작게 나온다(에러 없이). Go 의 AddrUnitBytes 와 같은 규칙이고,
+	 * 서버 Address Range 표의 unitBytes 와도 같은 값이라 두 화면이 맞아떨어진다.
+	 */
+	const ADDR_UNIT_BYTES = $derived.by(() => {
+		const t = sizeTraceType ?? traceType;
+		if (t === 'block' || t === 'fsio_block') return 512;
+		return 4096;
+	});
+
+	/** 주소 대역을 바이트로 보여줄 때 — 2진 접두사(KiB/MiB/GiB). */
+	function fmtIec(b: number): string {
+		const abs = Math.abs(b);
+		if (abs < 1024) return `${Math.round(b)} B`;
+		if (abs < 1024 ** 2) return `${(b / 1024).toFixed(1)} KiB`;
+		if (abs < 1024 ** 3) return `${(b / 1024 ** 2).toFixed(1)} MiB`;
+		if (abs < 1024 ** 4) return `${(b / 1024 ** 3).toFixed(2)} GiB`;
+		return `${(b / 1024 ** 4).toFixed(2)} TiB`;
+	}
+
+	/**
 	 * log 축에서 빠지는 size=0 이벤트 수 (flush 등). 0 이면 배지를 안 띄운다.
 	 *
 	 * ⚠ **차트별로 센다.** 전체를 세면 discard 차트가 read/write 의 0 건수까지
@@ -1212,7 +1239,17 @@
 			n++;
 		}
 		if (n === 0) return null;
-		return { min, max, span: max - min, count: n };
+		const u = ADDR_UNIT_BYTES;
+		return {
+			min,
+			max,
+			span: max - min,
+			count: n,
+			// 주소 칸 수는 크기 감이 안 온다 — "350,207 칸" 보다 "1.34 GiB" 가 읽힌다.
+			minBytes: min * u,
+			maxBytes: max * u,
+			spanBytes: (max - min) * u
+		};
 	});
 
 	/**
@@ -1580,10 +1617,15 @@
 			{/if}
 			{#if visibleLbaRange}
 				<!-- 확대 구간의 주소 대역. 샘플 기준이라 `~` 를 붙인다 (전수는 Address Range 표). -->
-				<span title="확대한 구간의 LBA 범위 (샘플링된 차트 데이터 기준). 전수 값은 Statistics 탭의 Address Range 표를 보세요.">
+				<span
+					title="확대한 구간의 LBA 범위 (샘플링된 차트 데이터 기준). 괄호 안은 1 addr unit = {ADDR_UNIT_BYTES.toLocaleString()} B 로 환산한 값입니다. 전수 값은 Statistics 탭의 Address Range 표를 보세요."
+				>
 					LBA ~<b>{visibleLbaRange.min.toLocaleString()}</b> ~
 					<b>{visibleLbaRange.max.toLocaleString()}</b>
-					<span class="opacity-60">(span {visibleLbaRange.span.toLocaleString()})</span>
+					<span class="opacity-60">
+						({fmtIec(visibleLbaRange.minBytes)} ~ {fmtIec(visibleLbaRange.maxBytes)}, span
+						{fmtIec(visibleLbaRange.spanBytes)})
+					</span>
 				</span>
 			{/if}
 			{#if visibleSizeByDir}
