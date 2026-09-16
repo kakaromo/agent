@@ -73,6 +73,11 @@
 		 * 동작한다(agent 쪽 두 소비처가 안 넘긴다).
 		 */
 		zoomRange?: { start: number; end: number } | null;
+		/**
+		 * Filter 바로 직접 좁힌 시간 범위 (초). 휠 확대가 아니어도 "구간을 좁힌 것"은
+		 * 같아서, LBA 대역·전송량 표시는 이것도 기준으로 삼는다. 미지정이면 무시.
+		 */
+		filterTimeRange?: { start: number; end: number } | null;
 		/** 조회 이력 — 넷 다 넘겼을 때만 하단에 이전/이후 버튼이 나온다. */
 		onUndo?: () => void;
 		onRedo?: () => void;
@@ -112,6 +117,7 @@
 		onBrushSelected,
 		onFsioFilterChange,
 		zoomRange = null,
+		filterTimeRange = null,
 		onUndo,
 		onRedo,
 		canUndo = false,
@@ -1162,6 +1168,100 @@
 		});
 	}
 
+	/**
+	 * 확대한 시간 구간 안의 LBA 최소/최대 — 차트 옆에 바로 보여 준다.
+	 *
+	 * 확대할 때마다 "이 구간이 주소 공간의 어디를 건드렸나" 를 알려면 Statistics 탭의
+	 * Address Range 표로 넘어가야 했다. 확대·축소를 반복하는 흐름에서 탭을 왕복하게
+	 * 되므로 차트 옆에 한 줄로 띄운다.
+	 *
+	 * ⚠️ **샘플링된 차트 데이터 기준**이다. 서버가 다운샘플한 뒤의 배열이라 전수 통계가
+	 * 아니다 — 그래서 라벨에 `~` 를 붙이고, 정확한 값은 Address Range 표(서버 전수
+	 * 집계)가 맡는다. 두 값이 조금 달라도 버그가 아니다.
+	 *
+	 * ⚠️ mgmt(UPIU/UIC) 행은 lba 가 null 이다 (Rust 가 `CASE WHEN is_mgmt THEN NULL`).
+	 * Number.isFinite 로 걸러야 min 이 0 으로, max 가 NaN 으로 오염되지 않는다.
+	 *
+	 * ⚠️ 단위는 **주소 단위**(LBA 칸)지 바이트가 아니다. Y축과 같은 값을 그대로 쓴다.
+	 */
+	/**
+	 * 아래 두 표시의 기준 구간.
+	 *
+	 * 휠 확대(currentZoomRange)뿐 아니라 **Filter 바로 시간을 직접 넣은 경우**도 포함한다.
+	 * 사용자 입장에서 "구간을 좁혔다" 는 같은 일인데 한쪽만 표시되면 왜 안 나오는지
+	 * 알 수 없다. 휠 확대가 우선 — 필터를 걸어 둔 채로 더 확대할 수 있기 때문이다.
+	 */
+	const effectiveRange = $derived(currentZoomRange ?? filterTimeRange);
+
+	const visibleLbaRange = $derived.by(() => {
+		const r = effectiveRange;
+		if (!r) return null;
+		const time = series.time;
+		const lba = series.lba;
+		if (!time || !lba || time.length === 0) return null;
+		let min = Infinity;
+		let max = -Infinity;
+		let n = 0;
+		for (let i = 0; i < time.length; i++) {
+			const t = time[i];
+			if (t < r.start || t > r.end) continue;
+			const v = lba[i];
+			if (!Number.isFinite(v)) continue;
+			if (v < min) min = v;
+			if (v > max) max = v;
+			n++;
+		}
+		if (n === 0) return null;
+		return { min, max, span: max - min, count: n };
+	});
+
+	/**
+	 * 확대 구간의 read / write / discard **전송량**.
+	 *
+	 * "이 구간에서 뭘 얼마나 했나" 가 LBA 대역과 함께 보여야 판단이 된다.
+	 *
+	 * ⚠️ 행 선택은 sizeRowIndices 와 **같은 규칙**을 쓴다 — indexGroups(action 탭 +
+	 * fsio flag/syscall 필터)를 타고, mgmt 와 isHiddenInChart(응답 UPIU)는 뺀다.
+	 * series.size 를 통째로 훑으면 화면에 없는 행까지 더해져 숫자가 부푼다.
+	 *
+	 * ⚠️ 바이트 환산은 **SIZE_UNIT_BYTES**(size 계수)다. 주소 계수(4096/512/1)를
+	 * 가져다 쓰면 fsio 가 512배로 부푼다 — 에러 없이.
+	 *
+	 * ⚠️ LBA 범위와 같은 이유로 **샘플 기준**이다. 전수 값은 Statistics 탭이 맡는다.
+	 */
+	const visibleSizeByDir = $derived.by(() => {
+		const r = effectiveRange;
+		if (!r) return null;
+		const size = series.size;
+		const time = series.time;
+		if (!size || !time) return null;
+		const acc = { read: 0, write: 0, discard: 0 };
+		let any = false;
+		for (const [cmd, indices] of indexGroups.cmdIndices) {
+			if (isMgmtCmd(cmd)) continue;
+			if (isHiddenInChart(cmd)) continue;
+			const g = getCmdGroup(cmd);
+			if (g !== 'read' && g !== 'write' && g !== 'discard') continue;
+			for (const i of indices) {
+				const t = time[i];
+				if (t < r.start || t > r.end) continue;
+				const v = size[i];
+				if (!Number.isFinite(v) || v <= 0) continue;
+				acc[g] += v * SIZE_UNIT_BYTES;
+				any = true;
+			}
+		}
+		return any ? acc : null;
+	});
+
+	/** 전송량 표시용. 다른 trace 컴포넌트들과 같은 단계(B/KB/MB/GB). */
+	function fmtBytesTotal(b: number): string {
+		if (b < 1024) return `${b} B`;
+		if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+		if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+		return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+	}
+
 	function resetZoom() {
 		currentZoomRange = null;
 		suppressZoomSync = true;
@@ -1477,6 +1577,28 @@
 				<span>schema: {meta.schemaVersion}</span>
 				<span>total: {meta.totalEvents.toLocaleString()}</span>
 				<span>sampled: {meta.sampledEvents.toLocaleString()}</span>
+			{/if}
+			{#if visibleLbaRange}
+				<!-- 확대 구간의 주소 대역. 샘플 기준이라 `~` 를 붙인다 (전수는 Address Range 표). -->
+				<span title="확대한 구간의 LBA 범위 (샘플링된 차트 데이터 기준). 전수 값은 Statistics 탭의 Address Range 표를 보세요.">
+					LBA ~<b>{visibleLbaRange.min.toLocaleString()}</b> ~
+					<b>{visibleLbaRange.max.toLocaleString()}</b>
+					<span class="opacity-60">(span {visibleLbaRange.span.toLocaleString()})</span>
+				</span>
+			{/if}
+			{#if visibleSizeByDir}
+				<!-- 확대 구간의 방향별 전송량. 0 인 방향은 빼서 줄이 길어지지 않게 한다. -->
+				<span title="확대한 구간의 read/write/discard 전송량 (샘플링된 차트 데이터 기준). 전수 값은 Statistics 탭을 보세요.">
+					{#if visibleSizeByDir.read > 0}
+						<span class="mr-2">R ~<b>{fmtBytesTotal(visibleSizeByDir.read)}</b></span>
+					{/if}
+					{#if visibleSizeByDir.write > 0}
+						<span class="mr-2">W ~<b>{fmtBytesTotal(visibleSizeByDir.write)}</b></span>
+					{/if}
+					{#if visibleSizeByDir.discard > 0}
+						<span>D ~<b>{fmtBytesTotal(visibleSizeByDir.discard)}</b></span>
+					{/if}
+				</span>
 			{/if}
 			{#if hasHistory}
 				<!-- 조회 이력 — 차트 zoom 뿐 아니라 필터·구간까지 한 덩어리로 되돌린다.
