@@ -1243,12 +1243,12 @@
 		return {
 			min,
 			max,
-			span: max - min,
+			range: max - min,
 			count: n,
 			// 주소 칸 수는 크기 감이 안 온다 — "350,207 칸" 보다 "1.34 GiB" 가 읽힌다.
 			minBytes: min * u,
 			maxBytes: max * u,
-			spanBytes: (max - min) * u
+			rangeBytes: (max - min) * u
 		};
 	});
 
@@ -1623,8 +1623,8 @@
 					LBA ~<b>{visibleLbaRange.min.toLocaleString()}</b> ~
 					<b>{visibleLbaRange.max.toLocaleString()}</b>
 					<span class="opacity-60">
-						({fmtIec(visibleLbaRange.minBytes)} ~ {fmtIec(visibleLbaRange.maxBytes)}, span
-						{fmtIec(visibleLbaRange.spanBytes)})
+						({fmtIec(visibleLbaRange.minBytes)} ~ {fmtIec(visibleLbaRange.maxBytes)}, range
+						{fmtIec(visibleLbaRange.rangeBytes)})
 					</span>
 				</span>
 			{/if}
