@@ -195,3 +195,43 @@ export type ColumnFilter = {
 	/** IN/NOT_IN 은 전체, CONTAINS 는 [0], RANGE 는 [min, max] (빈 문자열 = 무제한) */
 	values: string[];
 };
+
+// ─── DRAM 대역폭 (dram_bw) — portal lib/api/trace.ts 의 같은 타입 사본 ───
+// TraceDramView.svelte 가 portal 과 같은 파일이 되도록 타입을 여기 둔다.
+
+/** 단위 MiB/s (무변환). 없는 값은 null — 0 으로 채우면 "대역폭 0" 으로 읽힌다. */
+export type DramBwSummary = {
+	samples: number;
+	avgMibps: number | null;
+	minMibps: number | null;
+	p50Mibps: number | null;
+	p95Mibps: number | null;
+	p99Mibps: number | null;
+	maxMibps: number | null;
+	intervalMedianMs: number | null;
+	intervalMaxMs: number | null;
+	timeStart: number | null;
+	timeEnd: number | null;
+};
+
+export type DramBwQuery = {
+	timeStart: number | null;
+	timeEnd: number | null;
+	spans: { start: number; end: number }[] | null;
+	targetPoints: number;
+};
+
+export type DramBandwidthResponse = {
+	time: number[];
+	avgMibps: number[];
+	maxMibps: number[];
+	bucketed: boolean;
+	bucketSec: number;
+	summary: DramBwSummary | null;
+	spans: { start: number; end: number; summary: DramBwSummary | null }[];
+	qualityWarnings: string[];
+	devs: string[];
+	/** agent 전용 — 이 잡들에 DRAM parquet 이 있나. 없으면 탭·차트를 숨긴다 (portal 은 parquet 목록으로 안다). */
+	available?: boolean;
+};
+

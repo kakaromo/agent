@@ -2,7 +2,8 @@
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import { DataTable } from '$lib/components/data-table';
-	import TraceChartView from './trace/TraceChartView.svelte';
+	import TraceChartView, { type DramChartSeries } from './trace/TraceChartView.svelte';
+	import TraceDramView from './trace/TraceDramView.svelte';
 	import TraceStatsView from './trace/TraceStatsView.svelte';
 	import BoundaryLegend from './trace/BoundaryLegend.svelte';
 	import { boundaryLabel } from './trace/types.js';
@@ -20,7 +21,7 @@
 	import { captionMuted } from '$lib/styles/common.js';
 	import { toast } from 'svelte-sonner';
 	import { onDestroy, untrack } from 'svelte';
-	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats, exportTraceRawCSV } from '$lib/api/agent.js';
+	import { getTraceResult, getTraceRawData, reparseTrace, getJobStatus, fetchExecutionByJobId, getAiStatus, type TraceFilter, type TraceStats, type TraceEvent, type TraceRawDataResult, type LatencyStats, type StepBoundary, type ClockSyncInfo, type JobExecutionRecord, getTraceClockSync, setBoundaryLabel, getFsioReadStats, exportTraceRawCSV, getTraceDramBw } from '$lib/api/agent.js';
 	import { getArchivedStats } from '$lib/api/agentTraceArchive.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
@@ -471,6 +472,77 @@
 		return () => { cancelled = true; };
 	});
 
+	/**
+	 * DRAM 대역폭 (dram.log → result_dram_bw.parquet). 수집 때 "DRAM 대역폭 함께 수집" 을
+	 * 켰고 기기가 지원했을 때만 있다 — 없으면 서버가 available=false 를 준다(에러 아님).
+	 *
+	 * 조회 범위: Charts 의 확대/필터 시간 → 없으면 켜진 구간 범위(zoomRange) → 없으면 전체.
+	 * agent 의 Charts 는 원본을 들고 확대만 하므로, DRAM 은 범위가 바뀔 때 해상도만 새로 받는다.
+	 */
+	let dramChart = $state<DramChartSeries | null>(null);
+	let hasDramData = $state(false);
+	const dramWindow = $derived.by<{ start: number; end: number } | null>(() => {
+		const st = Number(filterStartTime);
+		const en = Number(filterEndTime);
+		if (filterStartTime && filterEndTime && en > st) return { start: st, end: en };
+		return zoomRange ? { start: zoomRange.min, end: zoomRange.max } : null;
+	});
+	$effect(() => {
+		const sid = serverId;
+		const ids = activeJobIds;
+		const w = dramWindow;
+		if (!open || !sid || ids.length === 0) {
+			dramChart = null;
+			hasDramData = false;
+			return;
+		}
+		let cancelled = false;
+		getTraceDramBw(sid, { jobIds: ids, startTime: w?.start ?? null, endTime: w?.end ?? null, targetPoints: 2000 })
+			.then((r) => {
+				if (cancelled) return;
+				// 범위를 좁혀 0건이어도 DRAM 자체는 있는 잡이다 — 탭은 유지한다.
+				if (!w) hasDramData = !!r.available && r.time.length > 0;
+				else if (r.available) hasDramData = true;
+				dramChart = r.available && r.time.length > 0
+					? {
+							time: r.time,
+							avg: r.avgMibps,
+							max: r.maxMibps,
+							bucketed: r.bucketed,
+							bucketSec: r.bucketSec,
+							intervalMs: r.summary?.intervalMedianMs ?? null
+						}
+					: null;
+			})
+			.catch(() => {
+				// DRAM 조회 실패는 IO 화면을 막지 않는다 — DRAM 차트만 빠진다.
+				if (!cancelled) dramChart = null;
+			});
+		return () => { cancelled = true; };
+	});
+
+	/** DRAM 탭의 구간별 표 — 켜진 구간만 (전부 켜져 있으면 null = 구간 제한 없음). */
+	const dramSpans = $derived(
+		hiddenSteps.size === 0 || usableBoundaries.length === 0
+			? null
+			: allBoundaries
+					.map((b, i) => ({ b, i }))
+					.filter(({ b, i }) => !hiddenSteps.has(boundaryKey(b, i)))
+					.map(({ b, i }) => ({
+						start: b.startedMono,
+						end: b.finishedMono,
+						label: boundaryLabel(b),
+						color: behaviorSolid(i)
+					}))
+	);
+
+	/** DRAM 탭에서 휠로 확대 — Charts 확대와 같은 경로(시간 필터 + 통계 재조회). */
+	function onDramZoom(start: number, end: number) {
+		filterStartTime = String(start);
+		filterEndTime = String(end);
+		loadStats(buildFilter());
+	}
+
 	// 다른 job 의 trace 를 열면 loop/repeat 선택을 초기화한다 (이전 job 의 선택 잔존 방지).
 	// jobIds 첫 값만 의존 → selectedLoop 쓰기가 재실행을 유발하지 않음.
 	let lastFirstJob = $state('');
@@ -617,6 +689,7 @@
 		if (mainTab === 'behavior' && !hasBehavior) mainTab = 'raw';
 		if (mainTab === 'attribution' && !isFsio) mainTab = 'raw';
 		if (mainTab === 'cache' && !hasCacheData) mainTab = 'raw';
+		if (mainTab === 'dram' && !hasDramData) mainTab = 'raw';
 	});
 
 	// Filter state
@@ -1635,6 +1708,10 @@
 						<!-- VFS read 종료 요약(fsio_read)이 같이 수집됐을 때만. -->
 						<Tabs.Trigger value="cache" class="text-[10px] px-3 py-1">Page Cache</Tabs.Trigger>
 					{/if}
+					{#if hasDramData}
+						<!-- DRAM 대역폭(dram.log)이 같이 수집됐을 때만. -->
+						<Tabs.Trigger value="dram" class="text-[10px] px-3 py-1">DRAM BW</Tabs.Trigger>
+					{/if}
 					{#if hasBehavior}
 						<!-- 스텝 구간이 있을 때만. Attribution 과 같은 조건부 노출 방식. -->
 						<Tabs.Trigger value="behavior" class="text-[10px] px-3 py-1">Behavior</Tabs.Trigger>
@@ -1749,6 +1826,7 @@
 							}}
 							onResetZoom={handleResetZoom}
 							onBrushSelected={handleBrushSelected}
+							dram={dramChart}
 						/>
 					{:else}
 						<div class="text-center text-xs text-muted-foreground py-8">데이터 없음</div>
@@ -1904,6 +1982,31 @@
 							serverId={serverId ?? 0}
 							jobIds={activeJobIds}
 							filter={attributionFilter}
+						/>
+					</Tabs.Content>
+				{/if}
+
+				<!-- DRAM BW Tab (result_dram_bw.parquet 이 있을 때만) — portal /trace 와 같은 컴포넌트 -->
+				{#if hasDramData && serverId != null}
+					<Tabs.Content value="dram" class="pt-2">
+						<TraceDramView
+							load={(q) =>
+								getTraceDramBw(serverId ?? 0, {
+									jobIds: activeJobIds,
+									startTime: q.timeStart,
+									endTime: q.timeEnd,
+									spans: q.spans,
+									targetPoints: q.targetPoints
+								})}
+							sourceKey={activeJobIds.join(',')}
+							timeWindow={dramWindow}
+							domain={null}
+							spans={dramSpans}
+							boundaries={allBoundaries}
+							hiddenBoundaries={hiddenBoundaryIdx}
+							boundaryColor={behaviorSolid}
+							onZoomChange={onDramZoom}
+							onResetZoom={handleResetZoom}
 						/>
 					</Tabs.Content>
 				{/if}

@@ -102,7 +102,24 @@
 		 * 전부 넣으면 밴드가 통째로 사라진다 — "구분 없이 보고 싶을 때" 용.
 		 */
 		hiddenBoundaries?: Set<number>;
+		/**
+		 * DRAM 대역폭 시계열 (dram_bw 형제 parquet, Qualcomm bw_hwmon_meas). 있으면
+		 * "DRAM BW" 차트가 LBA 와 같은 시간축으로 붙는다. 단위 MiB/s (무변환).
+		 * 미지정/null 이면 차트 목록에서 빠진다 — agent 쪽 소비처는 안 넘긴다.
+		 */
+		dram?: DramChartSeries | null;
 	}
+
+	export type DramChartSeries = {
+		time: number[];
+		avg: number[];
+		max: number[];
+		/** true 면 avg/max 가 버킷값. false 면 원시 샘플(avg=max). */
+		bucketed: boolean;
+		bucketSec: number;
+		/** 샘플 간격 중앙값 (ms) — 공백 판정 기준. */
+		intervalMs: number | null;
+	};
 
 	let {
 		series,
@@ -123,7 +140,8 @@
 		canUndo = false,
 		canRedo = false,
 		historyPosition,
-		historyTotal
+		historyTotal,
+		dram = null
 	}: Props = $props();
 
 	/** 이력 버튼을 그릴지 — 호출부가 이력을 넘긴 경우에만. */
@@ -356,6 +374,9 @@
 	};
 	const CHART_ITEMS: ChartItem[] = [
 		{ key: 'lba', label: 'LBA', yLabel: 'LBA', group: 'common' },
+		// DRAM 대역폭 — IO 이벤트가 아니라 시스템 전역 시계열. LBA 바로 아래에 둬서
+		// "이 IO 구간에 DRAM 이 얼마나 돌았나" 를 위아래로 맞대 본다. dram prop 이 있을 때만.
+		{ key: 'dram', label: 'DRAM BW', yLabel: 'MiB/s', group: 'common' },
 		{ key: 'size', label: 'Size', yLabel: 'Size (KB)', group: 'common' },
 		// discard(UNMAP/TRIM) 전용 Size. 데이터 IO 와 크기대가 달라 같은 축에 두면
 		// 한쪽이 안 보인다 — dtoc_mgmt 를 분리한 것과 같은 이유다.
@@ -617,6 +638,9 @@
 		if (!series.size) {
 			items = items.filter((c) => c.key !== 'size' && c.key !== 'size_discard');
 		}
+		if (!dram || dram.time.length === 0) {
+			items = items.filter((c) => c.key !== 'dram');
+		}
 		// discard 가 한 건도 없으면 빈 차트를 내보내지 않는다 (fsio/일부 잡은 없다).
 		if (!sizeDiscardStats) {
 			items = items.filter((c) => c.key !== 'size_discard');
@@ -625,6 +649,15 @@
 	});
 
 	let visibleCharts = $state<Set<string>>(new Set(['lba', 'qd', 'dtoc', 'dtoc_mgmt']));
+
+	// DRAM 데이터가 처음 들어오면 한 번 켜 준다 (LBA 와 비교가 목적이라 기본 노출).
+	// 사용자가 끈 뒤에 줌으로 데이터가 다시 들어와도 다시 켜지 않는다.
+	let dramAutoShown = false;
+	$effect(() => {
+		if (dramAutoShown || !dram || dram.time.length === 0) return;
+		dramAutoShown = true;
+		if (!visibleCharts.has('dram')) visibleCharts = new Set([...visibleCharts, 'dram']);
+	});
 
 	/**
 	 * 범례를 접은 차트들.
@@ -914,13 +947,20 @@
 	 */
 	const timeDomain = $derived.by(() => {
 		const t = series.time;
-		if (!t || t.length === 0) return { min: undefined, max: undefined };
+		const dt = dram?.time ?? [];
+		if ((!t || t.length === 0) && dt.length === 0) return { min: undefined, max: undefined };
 		let lo = Infinity, hi = -Infinity;
-		for (let i = 0; i < t.length; i++) {
+		for (let i = 0; i < (t?.length ?? 0); i++) {
 			const v = t[i];
 			if (!Number.isFinite(v)) continue;
 			if (v < lo) lo = v;
 			if (v > hi) hi = v;
+		}
+		// DRAM 은 IO 가 없는 구간(idle 바닥)에도 샘플이 있다 — 축을 합집합으로 잡아야
+		// 그 구간이 잘리지 않는다. 시계열이 정렬돼 있어 양끝만 보면 된다.
+		if (dt.length) {
+			lo = Math.min(lo, dt[0]);
+			hi = Math.max(hi, dt[dt.length - 1]);
 		}
 		if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: undefined, max: undefined };
 
@@ -944,7 +984,123 @@
 		};
 	});
 
+	/**
+	 * 모든 차트의 플롯 왼쪽 끝 (px). ⚠ containLabel 로 두면 차트마다 y 라벨 폭
+	 * ("10,000,000" vs "3,500")만큼 플롯이 밀려 **같은 시각이 위아래로 어긋난다** —
+	 * LBA 와 DRAM 을 세로로 맞대 보는 게 목적이라 고정 여백으로 맞춘다.
+	 * 72px = fontSize 10 기준 "250,000,000"(LBA 상한대)이 들어가는 폭.
+	 */
+	const PLOT_LEFT = 72;
+	/**
+	 * LBA 차트의 오른쪽 여백(범례 폭) — DRAM 차트가 같은 값을 써서 오른쪽 끝도 맞춘다.
+	 * 범례 폭은 cmd 이름 길이로 차트마다 달라지므로 따로 두면 끝이 어긋난다.
+	 * CHART_ITEMS 순서상 lba 가 dram 보다 먼저 빌드된다.
+	 */
+	let lbaPlotRight = 90;
+
+	/**
+	 * DRAM BW 차트 옵션 — 다른 차트와 **같은 x축(timeDomain)·같은 inside zoom·같은 구간 밴드**.
+	 * 산점도가 아니라 선이고, IO 전용 기능(brush 필터, cmd 범례)은 붙이지 않는다.
+	 */
+	function buildDramOption(): echarts.EChartsOption {
+		const d = dram!;
+		// 수집 공백에서 선을 끊는다 — 빈 버킷은 서버가 안 싣는다. 안 끊으면 공백을
+		// 가로지르는 직선이 "그동안 이 값이었다" 로 읽힌다.
+		const threshold = Math.max(d.bucketSec * 3, ((d.intervalMs ?? 4) / 1000) * 5);
+		const withGaps = (ys: number[]) => {
+			const out: (number | null)[][] = [];
+			for (let i = 0; i < d.time.length; i++) {
+				if (i > 0 && d.time[i] - d.time[i - 1] > threshold) {
+					out.push([(d.time[i] + d.time[i - 1]) / 2, null]);
+				}
+				out.push([d.time[i], ys[i]]);
+			}
+			return out;
+		};
+		const COLOR = '#6366f1';
+		const fmt = (v: number, digits = 0) =>
+			v.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+		const lines = [
+			...(d.bucketed
+				? [
+						{
+							type: 'line' as const,
+							name: '최대',
+							data: withGaps(d.max),
+							showSymbol: false,
+							lineStyle: { width: 1, color: COLOR, opacity: 0.35 },
+							itemStyle: { color: COLOR, opacity: 0.35 }
+						}
+					]
+				: []),
+			{
+				type: 'line' as const,
+				name: d.bucketed ? '평균' : 'DRAM',
+				data: withGaps(d.avg),
+				showSymbol: false,
+				lineStyle: { width: 1.5, color: COLOR },
+				itemStyle: { color: COLOR },
+				markArea: boundaryBands.length
+					? { silent: true, label: { show: false }, data: boundaryBands }
+					: undefined
+			}
+		];
+		return {
+			animation: false,
+			grid: { left: PLOT_LEFT, right: lbaPlotRight, top: 10, bottom: 38 },
+			tooltip: {
+				trigger: 'axis',
+				formatter: (params: any) => {
+					const ps = (params as any[]).filter((p) => p?.value?.[1] != null);
+					if (!ps.length) return '';
+					const t = Number(ps[0].value[0]);
+					const rows = ps
+						.map((p) => `${p.seriesName}: ${fmt(p.value[1], d.bucketed && p.seriesName === '평균' ? 1 : 0)} MiB/s`)
+						.join('<br/>');
+					return `time: ${t.toFixed(6)}s<br/>${rows}`;
+				}
+			},
+			legend: {
+				orient: 'vertical',
+				right: 4,
+				top: 'middle',
+				icon: 'circle',
+				itemWidth: 8,
+				itemHeight: 8,
+				textStyle: { fontSize: 10 },
+				data: d.bucketed ? ['평균', '최대'] : ['DRAM']
+			},
+			xAxis: {
+				type: 'value' as const,
+				name: 'time (s)',
+				nameLocation: 'middle',
+				nameGap: 28,
+				min: timeDomain.min,
+				max: timeDomain.max,
+				nameTextStyle: { fontSize: 10 },
+				axisLabel: { fontSize: 10 }
+			},
+			yAxis: {
+				type: 'value' as const,
+				min: 0,
+				name: 'MiB/s',
+				nameTextStyle: { fontSize: 10 },
+				axisLabel: { fontSize: 10 }
+			},
+			dataZoom: [{
+				type: 'inside' as const,
+				xAxisIndex: 0,
+				filterMode: 'none' as const,
+				...(currentZoomRange
+					? { startValue: currentZoomRange.start, endValue: currentZoomRange.end }
+					: {})
+			}],
+			series: lines
+		} as echarts.EChartsOption;
+	}
+
 	function buildOption(key: string, label: string, yLabel: string) {
+		if (key === 'dram') return buildDramOption();
 		const seriesList = buildSeries(key as keyof Series | 'dtoc_mgmt' | 'size_discard');
 		const isCpuLba = key === 'cpu' && cpuColorMode === 'lba';
 		const legendNames = seriesList.map((s) => s.name);
@@ -1022,6 +1178,7 @@
 		const legendWidth = legendCollapsed
 			? 12
 			: Math.min(280, Math.max(90, Math.round(longestLabel * 5.6) + 28));
+		if (key === 'lba') lbaPlotRight = legendWidth;
 
 		// 구간 밴드 — 데이터가 아니라 배경이라 축 범위/legend 에 영향을 주면 안 된다.
 		// 빈 data 의 series 하나에 markArea 만 얹어서 그 둘을 피한다.
@@ -1044,7 +1201,7 @@
 		return {
 			animation: false,
 			// legend 를 오른쪽 세로로 배치 → 우측에 legend 공간 확보
-			grid: { left: 12, right: legendWidth, top: 10, bottom: 38, containLabel: true },
+			grid: { left: PLOT_LEFT, right: legendWidth, top: 10, bottom: 38 },
 			tooltip: {
 				trigger: 'item',
 				formatter: (p: any) => {
@@ -1431,7 +1588,7 @@
 	}
 	/** pointerdown 캡처 — Ctrl/Cmd 클릭 시 echarts down handler 보다 먼저 brush 활성화. */
 	function onChartPointerDownCapture(e: PointerEvent, key: string) {
-		if (!onBrushSelected) return;
+		if (!onBrushSelected || key === 'dram') return;
 		// 좌클릭 + 진입키(macOS=Cmd, 그 외=Ctrl) 일 때만.
 		// 우클릭(button === 2) 과 macOS 의 Ctrl+좌클릭은 contextmenu 메뉴가 처리한다.
 		if (e.button !== 0) return;
@@ -1460,7 +1617,8 @@
 	}
 
 	function onChartContextMenu(e: MouseEvent, key: string) {
-		if (!onBrushSelected) return;
+		// DRAM 차트의 y 는 MiB/s 라 IO 필터(LBA/지연 범위)로 옮길 수 없다.
+		if (!onBrushSelected || key === 'dram') return;
 		e.preventDefault();
 		brushMenuX = e.clientX;
 		brushMenuY = e.clientY;
@@ -1485,8 +1643,11 @@
 		const item = CHART_ITEMS.find((x) => x.key === key);
 		if (!item) return;
 		c.setOption(buildOption(key, item.label, item.yLabel));
-		attachLegendSync(c);
-		attachBrush(c, key);
+		// DRAM 은 cmd 범례·brush 필터(IO 좌표 기준) 대상이 아니다.
+		if (key !== 'dram') {
+			attachLegendSync(c);
+			attachBrush(c, key);
+		}
 		// zoom: visible 중 첫 번째 차트를 master 로
 		const firstVisible = CHART_ITEMS.find((x) => visibleCharts.has(x.key))?.key;
 		if (key === firstVisible) attachZoomSync(c);
@@ -1500,8 +1661,10 @@
 			if (!c || c.isDisposed() || !visibleCharts.has(key)) continue;
 			// notMerge=true 로 이전 series 모두 교체. lazyUpdate 는 ECharts 의 다음 frame 까지 묶어 처리.
 			c.setOption(buildOption(key, label, yLabel), { notMerge: true, lazyUpdate: true });
-			attachLegendSync(c);
-			attachBrush(c, key);
+			if (key !== 'dram') {
+				attachLegendSync(c);
+				attachBrush(c, key);
+			}
 		}
 		// zoom master 재설정
 		const first = CHART_ITEMS.find((x) => visibleCharts.has(x.key))?.key;
@@ -1555,6 +1718,7 @@
 		void cpuColorMode;
 		void sizeUseLog; // 스케일 전환 시 축 타입이 바뀌므로 다시 그려야 한다
 		void sizeUseLogDiscard;
+		void dram;
 		ensureLegendSelected();
 		rebuildAll();
 	});

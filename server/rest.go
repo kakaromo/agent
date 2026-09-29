@@ -328,6 +328,9 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			case "attribution":
 				handleTraceAttribution(w, r, agent)
 				return
+			case "dram-bw":
+				handleTraceDramBw(w, r, agent)
+				return
 			case "fsio-read-stats":
 				handleTraceFsioReadStats(w, r, agent)
 				return
@@ -534,6 +537,63 @@ func handleTraceFsioReadStats(w http.ResponseWriter, r *http.Request, agent *Dev
 		return
 	}
 	writeJSON(w, http.StatusOK, fsioReadStatsToMap(resp))
+}
+
+// handleTraceDramBw: POST /api/agent/trace/dram-bw
+// body { jobIds, startTime?, endTime?, spans?: [{start,end}], targetPoints? }
+//
+// DRAM 대역폭(dram.log → result_dram_bw.parquet) 시계열 + 요약. 응답 shape 은 portal
+// `/api/trace/dram-bw` 와 같다. DRAM parquet 이 없으면 **200 + available=false** — 에러가 아니다
+// (수집 때 끄거나 미지원 기기였던 정상 상태). 화면은 이걸로 DRAM 차트·탭을 숨긴다.
+func handleTraceDramBw(w http.ResponseWriter, r *http.Request, agent *DeviceAgentServer) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	body, err := readJSONBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "decode: "+err.Error())
+		return
+	}
+	jobIDs := stringSlice(body["jobIds"])
+	if len(jobIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "jobIds required")
+		return
+	}
+	infos, err := agent.collectTraceJobInfos(jobIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	q := trace.DramBwQuery{}
+	if v, ok := numberOf(body["startTime"]); ok {
+		q.Start = v
+	}
+	if v, ok := numberOf(body["endTime"]); ok {
+		q.End = v
+	}
+	if v, ok := numberOf(body["targetPoints"]); ok {
+		q.TargetPoints = int(v)
+	}
+	if arr, ok := body["spans"].([]any); ok {
+		for _, it := range arr {
+			m, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			st, ok1 := numberOf(m["start"])
+			en, ok2 := numberOf(m["end"])
+			if ok1 && ok2 {
+				q.Spans = append(q.Spans, trace.DramSpan{Start: st, End: en})
+			}
+		}
+	}
+	res, err := trace.ComputeDramBw(infos, q)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleTraceClockSync: POST /api/agent/trace/clocksync body { jobIds }

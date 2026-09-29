@@ -871,6 +871,20 @@ export function getFsioReadStats(serverId: number, data: {
 	return post(`/agent/trace/fsio-read-stats?serverId=${serverId}`, data);
 }
 
+/**
+ * DRAM 대역폭(dram.log → result_dram_bw.parquet) 시계열 + 요약. 응답 shape 은 portal 과 같다.
+ * DRAM 이 없는 잡이면 200 + available=false (에러 아님).
+ */
+export function getTraceDramBw(serverId: number, data: {
+	jobIds: string[];
+	startTime?: number | null;
+	endTime?: number | null;
+	spans?: { start: number; end: number }[] | null;
+	targetPoints?: number;
+}): Promise<import('../../routes/agent/trace/types.js').DramBandwidthResponse> {
+	return post(`/agent/trace/dram-bw?serverId=${serverId}`, data);
+}
+
 export function getTraceRawData(serverId: number, data: {
 	jobIds: string[]; filter?: TraceFilter;
 }): Promise<TraceRawDataResult> {
