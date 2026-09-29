@@ -126,6 +126,7 @@ var Specs = []StepSpec{
 			{Name: "trace_type", Enum: []string{"ufs", "block", "both", "fsio_ufs", "fsio_block"}, Default: "ufs", Desc: "트레이스 종류 (fsio_* 는 eBPF 기반 — root 필요, 파일명/프로세스 귀속 제공)"},
 			{Name: "window_seconds", Default: "1", Desc: "수집 윈도우 (초)"},
 			{Name: "include_vfs", Enum: []string{"true", "false"}, Default: "false", Desc: "fsio_* 에서 VFS 레이어도 수집 (page cache hit/miss·mmap 통계에 필요). 로그가 커진다"},
+			{Name: "include_dram", Enum: []string{"true", "false"}, Default: "true", Desc: "DRAM 대역폭(Qualcomm bw_hwmon_meas)을 dram.log 로 함께 수집. 이벤트가 없는 기기는 건너뛴다"},
 		},
 		Label: "Trace Start", Desc: "ftrace 시작", Icon: "scan-search", Color: "emerald",
 	},

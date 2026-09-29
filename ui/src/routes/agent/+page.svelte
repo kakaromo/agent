@@ -705,6 +705,7 @@
 					<AgentTraceForm
 						serverId={selectedServerId}
 						selectedDevices={selectedDeviceIds}
+						{devices}
 						serverName={selectedServerId ? getServerName(selectedServerId) : ''}
 						onJobStarted={startJob}
 						bind:activeTraceJobId

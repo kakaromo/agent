@@ -1,0 +1,36 @@
+# tracer: nop
+#
+     kworker/5:2H-25770  [005] ..... 268879.626314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 532, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.626324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.626334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.630314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 469, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.630324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.630334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.634314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 300, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.634324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.634334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+  fio-2034 [003] dn.. 268879.635314: ufshcd_command: send_req: tag: 5 size: 4096 LBA: 100 opcode: 0x28 group_id: 0x0 hwq_id: 1
+  fio-2034 [003] dn.. 268879.636314: ufshcd_command: complete_rsp: tag: 5 size: 4096 LBA: 100 opcode: 0x28 group_id: 0x0 hwq_id: 1
+  fio-2034   [000] ..... 268879.635314: block_rq_issue: 8,0 R 4096 () 1000 + 8 [fio]
+  fio-2034   [000] ..... 268879.636314: block_rq_complete: 8,0 R () 1000 + 8 [0]
+     kworker/5:2H-25770  [005] ..... 268879.638314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 610, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.638324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.638334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.642314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 1, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.642324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.642334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+  kworker/block_x[1]-99  [005] ..... 268879.646314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 1200, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.646324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.646334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.650314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 800, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.650324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.650334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.654314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 400, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.654324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.654334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.658314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 266, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.658324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.658334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.662314: bw_hwmon_meas: dev: 3109100.qcom,bwmon-ddr, mbps = 500, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.662324: bw_hwmon_meas: dev: 310b3300.qcom,bwmon-llcc-gold, mbps = 9999, us = 4000, wake = 0
+     kworker/5:2H-25770  [005] ..... 268879.662334: bw_hwmon_meas: dev: 310b7300.qcom,bwmon-llcc-prime, mbps = 8888, us = 4000, wake = 0

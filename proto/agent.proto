@@ -87,6 +87,11 @@ message DeviceInfo {
   string build_id = 10;          // ro.build.display.id
   string manufacturer = 11;      // ro.product.manufacturer (e.g. "samsung")
   int32 sdk_version = 12;        // ro.build.version.sdk
+  // DRAM 대역폭(Qualcomm bw_hwmon_meas) 수집 가능 여부 — **이벤트가 실제로 있는지**로 판정한다.
+  // Qualcomm 이어도 qcom-dcvs.ko 가 안 올라오면 없다. ftrace instance 지원도 필요하다.
+  bool dram_bw_supported = 13;
+  // 불가일 때 사유 (화면에 그대로 보여준다). 가능하면 빈 문자열.
+  string dram_bw_reason = 14;
 }
 
 message ListDevicesRequest {}
@@ -356,6 +361,13 @@ message StartTraceRequest {
   // 켜면 `--only ufs,vfs` 가 되어 fsio_read 를 볼 수 있다. 대신 VFS row 만큼
   // 로그가 커지므로 기본값은 끔이다. ftrace 계열(ufs/block/both)에는 영향이 없다.
   bool include_vfs = 6;
+
+  // DRAM 대역폭(bw_hwmon_meas, bwmon-ddr)도 함께 수집할지. ufs/block/both/fsio_* 모두 가능.
+  //
+  // IO trace 와 **다른 파일**(dram.log)로 받는다 — 별도 ftrace instance(move_dram)에
+  // trace_clock=boot 로 켜서, IO 버퍼와 섞이지 않고 fsiotrace(boot)와 같은 시간축이 된다.
+  // 기기에 이벤트가 없으면 조용히 건너뛰고 진행 메시지로 알린다 (수집 자체는 계속).
+  bool include_dram = 7;
 
   // 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
   // 비면 기본 위치(trace_dir)를 쓴다.

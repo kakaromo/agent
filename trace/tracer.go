@@ -47,6 +47,9 @@ type TraceJob struct {
 	// 비활성화된다 — 수집 자체는 영향받지 않는다. 상세는 clockoffset.go.
 	ClockSync TraceClockSync
 
+	// DRAM 대역폭 수집기 (include_dram 이고 기기가 지원할 때만). 산출물은 OutputDir/dram.log.
+	dram *dramCollector
+
 	// internal processes
 	adbCancel    context.CancelFunc
 	adbCmd       *exec.Cmd
@@ -210,6 +213,11 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		return "", fmt.Errorf("start collector: %w", err)
 	}
 
+	// DRAM 대역폭 — IO 와 다른 파일(dram.log)로. 실패해도 IO 수집은 계속한다.
+	if req.GetIncludeDram() {
+		m.startDram(setupCtx, job, md)
+	}
+
 	// clock offset 측정 — **collector 가 실제로 붙은 뒤**에 잰다.
 	//
 	// 여기가 트레이스의 시간 원점에 가장 가까운 지점이다. 예전엔 collector 기동
@@ -343,6 +351,7 @@ func (m *Manager) StopTrace(jobID string) error {
 	deviceID := job.DeviceID
 	tracingDir := job.TracingDir
 	traceType := job.TraceType
+	dramC := job.dram
 	job.Mu.Unlock()
 
 	const shellTimeout = 10 * time.Second
@@ -359,7 +368,11 @@ func (m *Manager) StopTrace(jobID string) error {
 			md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/tracing_on", tracingDir))
 			md.Device.Shell(shellCtx, fmt.Sprintf("echo 0 > %s/events/enable", tracingDir))
 		}
+		dramC.stop(shellCtx, md, md.TracingDir)
 		shellCancel()
+	} else {
+		// 기기가 이미 빠졌어도 호스트 쪽 수집 프로세스·파일은 닫는다.
+		dramC.stop(context.Background(), nil, "")
 	}
 
 	// 2. 수집 프로세스 종료 (동기). fsio 는 위 pkill 로 이미 끝났을 수 있고,
@@ -475,6 +488,57 @@ func (m *Manager) finalizeTrace(job *TraceJob) {
 // 기본은 Rust `tools/trace --parquet-only` 자식 프로세스. 1단계 안정 운영 후 Go 파서로
 // 정합성 검증을 거쳐 점진적으로 전환한다.
 func (m *Manager) runParquetOnly(job *TraceJob, progressState pb.JobState) error {
+	err := m.runParquetOnlyIO(job, progressState)
+	// DRAM 은 IO 결과와 무관하게 — dram.log 가 있으면 파싱한다. 실패해도 잡을 실패시키지 않는다.
+	m.parseDramSibling(job, progressState)
+	return err
+}
+
+// startDram — include_dram 요청 처리. 미지원·실패는 진행 메시지로 알리고 넘어간다.
+func (m *Manager) startDram(setupCtx context.Context, job *TraceJob, md *adb.ManagedDevice) {
+	say := func(msg string) {
+		job.notify(&pb.JobProgress{JobId: job.ID, DeviceId: job.DeviceID,
+			State: pb.JobState_JOB_STATE_RUNNING, Message: msg})
+	}
+	if !md.DramBwSupported {
+		say("DRAM 대역폭은 건너뜀 — " + md.DramBwReason)
+		return
+	}
+	c, err := startDramCollector(setupCtx, md, md.TracingDir, filepath.Join(job.OutputDir, DramLogName))
+	if err != nil {
+		slog.Warn("DRAM 수집 시작 실패", "job_id", job.ID, "error", err)
+		say("DRAM 대역폭 수집을 시작하지 못했어요 — " + err.Error())
+		return
+	}
+	job.Mu.Lock()
+	job.dram = c
+	job.Mu.Unlock()
+	say("DRAM 대역폭(bwmon-ddr) 수집 중 → " + DramLogName)
+}
+
+// parseDramSibling — OutputDir/dram.log → result_dram_bw.parquet (Go 파서).
+//
+// Go 파서를 쓰는 이유: 체크인된 tools/trace(Rust) 바이너리는 DRAM 을 모른다.
+// 판단은 **파일 존재**로 한다 — 에이전트 재시작 후 재파싱에도 잡 상태 없이 동작한다.
+func (m *Manager) parseDramSibling(job *TraceJob, progressState pb.JobState) {
+	dramLog := filepath.Join(job.OutputDir, DramLogName)
+	if st, err := os.Stat(dramLog); err != nil || st.Size() == 0 {
+		return
+	}
+	n, err := parser.RunDramParquet(dramLog, job.OutputDir, func(line string) {
+		job.notify(&pb.JobProgress{JobId: job.ID, State: progressState, Message: line})
+	})
+	if err != nil {
+		slog.Warn("DRAM 파싱 실패", "job_id", job.ID, "error", err)
+		job.notify(&pb.JobProgress{JobId: job.ID, State: progressState,
+			Message: "DRAM 대역폭 파싱에 실패했어요 — " + err.Error()})
+		return
+	}
+	slog.Info("DRAM parquet 생성", "job_id", job.ID, "samples", n)
+}
+
+// runParquetOnlyIO — IO trace.log 파싱 (기존 runParquetOnly 본체).
+func (m *Manager) runParquetOnlyIO(job *TraceJob, progressState pb.JobState) error {
 	jobID := job.ID
 
 	// 기존 결과 정리: result_*.parquet 만 제거 (trace.log 는 보존)

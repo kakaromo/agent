@@ -339,8 +339,13 @@ type DeviceInfo struct {
 	BuildId        string                 `protobuf:"bytes,10,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`           // ro.build.display.id
 	Manufacturer   string                 `protobuf:"bytes,11,opt,name=manufacturer,proto3" json:"manufacturer,omitempty"`                // ro.product.manufacturer (e.g. "samsung")
 	SdkVersion     int32                  `protobuf:"varint,12,opt,name=sdk_version,json=sdkVersion,proto3" json:"sdk_version,omitempty"` // ro.build.version.sdk
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// DRAM 대역폭(Qualcomm bw_hwmon_meas) 수집 가능 여부 — **이벤트가 실제로 있는지**로 판정한다.
+	// Qualcomm 이어도 qcom-dcvs.ko 가 안 올라오면 없다. ftrace instance 지원도 필요하다.
+	DramBwSupported bool `protobuf:"varint,13,opt,name=dram_bw_supported,json=dramBwSupported,proto3" json:"dram_bw_supported,omitempty"`
+	// 불가일 때 사유 (화면에 그대로 보여준다). 가능하면 빈 문자열.
+	DramBwReason  string `protobuf:"bytes,14,opt,name=dram_bw_reason,json=dramBwReason,proto3" json:"dram_bw_reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeviceInfo) Reset() {
@@ -455,6 +460,20 @@ func (x *DeviceInfo) GetSdkVersion() int32 {
 		return x.SdkVersion
 	}
 	return 0
+}
+
+func (x *DeviceInfo) GetDramBwSupported() bool {
+	if x != nil {
+		return x.DramBwSupported
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetDramBwReason() string {
+	if x != nil {
+		return x.DramBwReason
+	}
+	return ""
 }
 
 type ListDevicesRequest struct {
@@ -2514,6 +2533,12 @@ type StartTraceRequest struct {
 	// 켜면 `--only ufs,vfs` 가 되어 fsio_read 를 볼 수 있다. 대신 VFS row 만큼
 	// 로그가 커지므로 기본값은 끔이다. ftrace 계열(ufs/block/both)에는 영향이 없다.
 	IncludeVfs bool `protobuf:"varint,6,opt,name=include_vfs,json=includeVfs,proto3" json:"include_vfs,omitempty"`
+	// DRAM 대역폭(bw_hwmon_meas, bwmon-ddr)도 함께 수집할지. ufs/block/both/fsio_* 모두 가능.
+	//
+	// IO trace 와 **다른 파일**(dram.log)로 받는다 — 별도 ftrace instance(move_dram)에
+	// trace_clock=boot 로 켜서, IO 버퍼와 섞이지 않고 fsiotrace(boot)와 같은 시간축이 된다.
+	// 기기에 이벤트가 없으면 조용히 건너뛰고 진행 메시지로 알린다 (수집 자체는 계속).
+	IncludeDram bool `protobuf:"varint,7,opt,name=include_dram,json=includeDram,proto3" json:"include_dram,omitempty"`
 	// 산출물을 둘 **부모** 디렉토리. 실제 산출물은 그 아래 <traceJobId>/ 에 들어간다.
 	// 비면 기본 위치(trace_dir)를 쓴다.
 	//
@@ -2586,6 +2611,13 @@ func (x *StartTraceRequest) GetJobName() string {
 func (x *StartTraceRequest) GetIncludeVfs() bool {
 	if x != nil {
 		return x.IncludeVfs
+	}
+	return false
+}
+
+func (x *StartTraceRequest) GetIncludeDram() bool {
+	if x != nil {
+		return x.IncludeDram
 	}
 	return false
 }
@@ -8977,7 +9009,7 @@ var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/agent.proto\x12\x05agent\"\xf1\x02\n" +
+	"\x11proto/agent.proto\x12\x05agent\"\xc3\x03\n" +
 	"\n" +
 	"DeviceInfo\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x16\n" +
@@ -8993,7 +9025,9 @@ const file_proto_agent_proto_rawDesc = "" +
 	" \x01(\tR\abuildId\x12\"\n" +
 	"\fmanufacturer\x18\v \x01(\tR\fmanufacturer\x12\x1f\n" +
 	"\vsdk_version\x18\f \x01(\x05R\n" +
-	"sdkVersion\"\x14\n" +
+	"sdkVersion\x12*\n" +
+	"\x11dram_bw_supported\x18\r \x01(\bR\x0fdramBwSupported\x12$\n" +
+	"\x0edram_bw_reason\x18\x0e \x01(\tR\fdramBwReason\"\x14\n" +
 	"\x12ListDevicesRequest\"B\n" +
 	"\x13ListDevicesResponse\x12+\n" +
 	"\adevices\x18\x01 \x03(\v2\x11.agent.DeviceInfoR\adevices\".\n" +
@@ -9184,7 +9218,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
 	"\x13RunScenarioResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xd1\x01\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xf4\x01\n" +
 	"\x11StartTraceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
@@ -9192,7 +9226,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x0ewindow_seconds\x18\x03 \x01(\x05R\rwindowSeconds\x12\x19\n" +
 	"\bjob_name\x18\x04 \x01(\tR\ajobName\x12\x1f\n" +
 	"\vinclude_vfs\x18\x06 \x01(\bR\n" +
-	"includeVfs\x12\x1d\n" +
+	"includeVfs\x12!\n" +
+	"\finclude_dram\x18\a \x01(\bR\vincludeDram\x12\x1d\n" +
 	"\n" +
 	"output_dir\x18\x05 \x01(\tR\toutputDir\"+\n" +
 	"\x12StartTraceResponse\x12\x15\n" +

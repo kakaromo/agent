@@ -26,6 +26,10 @@ export interface Device {
 	buildId?: string;        // ro.build.display.id
 	manufacturer?: string;   // ro.product.manufacturer
 	sdkVersion?: number;     // ro.build.version.sdk
+	/** DRAM 대역폭(bw_hwmon_meas) 수집 가능 — 이벤트가 실제로 있는지로 판정 (SoC 이름 아님). */
+	dramBwSupported?: boolean;
+	/** 불가 사유 문장 (가능하면 빈 문자열). */
+	dramBwReason?: string;
 }
 
 export interface DeviceJobStatus {
@@ -759,6 +763,8 @@ export function startTrace(serverId: number, data: {
 	deviceId: string; traceType: string; windowSeconds?: number; jobName?: string;
 	/** fsio_* 에서 VFS 레이어도 수집 — page cache hit/miss·mmap 통계에 필요. */
 	includeVfs?: boolean;
+	/** DRAM 대역폭을 dram.log 로 함께 수집. 생략하면 서버가 켠다(지원 기기만). */
+	includeDram?: boolean;
 }): Promise<{ jobId: string }> {
 	return post(`/agent/trace/start?serverId=${serverId}`, data);
 }

@@ -33,6 +33,9 @@ type ManagedDevice struct {
 	SdkVersion     int32
 	TracingDir     string
 	State          pb.DeviceState
+	// DRAM 대역폭(bw_hwmon_meas) 수집 가능 여부 + 불가 사유. 발견 시 1회 판정.
+	DramBwSupported bool
+	DramBwReason    string
 }
 
 // DeviceChange — Refresh 가 감지한 디바이스 상태 변화 (broadcast 용).
@@ -276,6 +279,7 @@ func probeDevice(ctx context.Context, entry adbDeviceEntry) *ManagedDevice {
 	if md.TracingDir != "" {
 		initTracing(ctx, dev, md.TracingDir)
 	}
+	md.DramBwSupported, md.DramBwReason = ProbeDramBw(ctx, dev, md.TracingDir, md.Platform)
 	return md
 }
 
@@ -303,18 +307,20 @@ func (m *Manager) ListDevices() []*pb.DeviceInfo {
 	result := make([]*pb.DeviceInfo, 0, len(m.devices))
 	for _, md := range m.devices {
 		result = append(result, &pb.DeviceInfo{
-			DeviceId:       md.DeviceID,
-			Serial:         md.Serial,
-			State:          md.State,
-			AndroidVersion: md.AndroidVersion,
-			Model:          md.Model,
-			Board:          md.Board,
-			Platform:       md.Platform,
-			Hardware:       md.Hardware,
-			CpuAbi:         md.CpuAbi,
-			BuildId:        md.BuildID,
-			Manufacturer:   md.Manufacturer,
-			SdkVersion:     md.SdkVersion,
+			DeviceId:        md.DeviceID,
+			Serial:          md.Serial,
+			State:           md.State,
+			AndroidVersion:  md.AndroidVersion,
+			Model:           md.Model,
+			Board:           md.Board,
+			Platform:        md.Platform,
+			Hardware:        md.Hardware,
+			CpuAbi:          md.CpuAbi,
+			BuildId:         md.BuildID,
+			Manufacturer:    md.Manufacturer,
+			SdkVersion:      md.SdkVersion,
+			DramBwSupported: md.DramBwSupported,
+			DramBwReason:    md.DramBwReason,
 		})
 	}
 	// map 순회는 Go 런타임이 순서를 랜덤화하므로 정렬해 안정적인 순서를 보장한다.

@@ -283,12 +283,19 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 		// includeVfs — fsio 계열에서 VFS 레이어(page-cache 판정 row)도 받을지.
 		// 없으면 false = 기존 동작 그대로.
 		includeVfs, _ := body["includeVfs"].(bool)
+		// includeDram — DRAM 대역폭(bw_hwmon_meas)을 dram.log 로 함께 받을지.
+		// **없으면 켬** (사용자 결정: 지원 기기에서 기본 수집). 미지원 기기는 알아서 건너뛴다.
+		includeDram := true
+		if v, ok := body["includeDram"].(bool); ok {
+			includeDram = v
+		}
 		resp, err := agent.StartTrace(r.Context(), &pb.StartTraceRequest{
 			DeviceId:      deviceID,
 			TraceType:     traceType,
 			WindowSeconds: windowSec,
 			JobName:       jobName,
 			IncludeVfs:    includeVfs,
+			IncludeDram:   includeDram,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

@@ -47,6 +47,22 @@ var fsioReadParquetPatterns = []string{"result_fsio_read.parquet", "fsio_read.pa
 // ⚠ `*.parquet` 와일드카드(trace_type 이 "both"/"" 인 잡)가 이 파일을 **빨아들이면
 // 안 된다.** 스키마가 33컬럼으로 전혀 달라 union_by_name 으로 붙으면 행 수가
 // 통째로 부풀고(실측 471 → 834) 모든 통계가 조용히 틀린다.
+// dramBwParquetPatterns — DRAM 대역폭(bw_hwmon_meas) 형제 parquet.
+// ftrace 로그에 bw_hwmon_meas 줄이 섞이면 Rust 파서가 자동으로 만든다.
+var dramBwParquetPatterns = []string{"result_dram_bw.parquet", "dram_bw.parquet"}
+
+// isDramBwParquet — IO 통계 glob 에서 빼야 하는 DRAM parquet 인가.
+// ⚠ fsio_read 와 같은 이유: `*.parquet` 에 섞이면 union_by_name 으로 붙어 행 수가 부푼다.
+func isDramBwParquet(path string) bool {
+	base := filepath.Base(path)
+	for _, p := range dramBwParquetPatterns {
+		if base == p {
+			return true
+		}
+	}
+	return false
+}
+
 func isFsioReadParquet(path string) bool {
 	base := filepath.Base(path)
 	for _, p := range fsioReadParquetPatterns {
@@ -86,7 +102,7 @@ func findParquetFiles(dir, traceType string) []string {
 		for _, m := range matches {
 			// ⚠ fsio_read 는 스키마가 달라 섞이면 행 수가 부풀고 통계가 조용히 틀린다.
 			// `*.parquet` 와일드카드로 들어오는 경로를 여기서 막는다.
-			if isFsioReadParquet(m) {
+			if isFsioReadParquet(m) || isDramBwParquet(m) {
 				continue
 			}
 			found = append(found, m)

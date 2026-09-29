@@ -92,6 +92,9 @@ func deviceToMap(d *pb.DeviceInfo) map[string]any {
 		"buildId":        d.GetBuildId(),
 		"manufacturer":   d.GetManufacturer(),
 		"sdkVersion":     d.GetSdkVersion(),
+		// DRAM 대역폭 수집 가능 여부 — 체크박스 활성/사유 표시에 쓴다.
+		"dramBwSupported": d.GetDramBwSupported(),
+		"dramBwReason":    d.GetDramBwReason(),
 	}
 }
 

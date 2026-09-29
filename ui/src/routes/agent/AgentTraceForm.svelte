@@ -4,6 +4,7 @@
 	import { sectionLabel, captionMuted } from '$lib/styles/common.js';
 	import { startTrace, stopTrace, uploadFile } from '$lib/api/agent.js';
 	import type { ActiveJob } from './types.js';
+	import type { Device } from '$lib/api/agent.js';
 	import PlayIcon from '@lucide/svelte/icons/play';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
@@ -13,12 +14,14 @@
 	interface Props {
 		serverId: number | null;
 		selectedDevices: Set<string>;
+		/** DRAM 지원 여부를 보려고 받는다. 없으면 체크박스를 "확인 불가" 로 둔다. */
+		devices?: Device[];
 		serverName: string;
 		onJobStarted: (job: Omit<ActiveJob, 'events' | 'state' | 'eventSource'>) => void;
 		activeTraceJobId: string | null;
 	}
 
-	let { serverId, selectedDevices, serverName, onJobStarted, activeTraceJobId = $bindable() }: Props = $props();
+	let { serverId, selectedDevices, devices = [], serverName, onJobStarted, activeTraceJobId = $bindable() }: Props = $props();
 
 	let traceType = $state('ufs');
 
@@ -36,6 +39,12 @@
 	let deviceCount = $derived(selectedDevices.size);
 	let singleDeviceId = $derived(deviceCount === 1 ? [...selectedDevices][0] : null);
 
+	// DRAM 대역폭 — 지원 기기에서 **기본 켬** (비용이 거의 없고, 빠뜨리면 다시 못 모은다).
+	// 지원 여부는 SoC 이름이 아니라 기기에 이벤트가 실제로 있는지로 서버가 판정한다.
+	let includeDram = $state(true);
+	let selectedDevice = $derived(devices.find((d) => d.deviceId === singleDeviceId) ?? null);
+	let dramSupported = $derived(selectedDevice?.dramBwSupported === true);
+
 	async function handleStart() {
 		if (serverId == null || !singleDeviceId) return;
 		starting = true;
@@ -45,6 +54,8 @@
 				traceType,
 				windowSeconds: windowSeconds > 0 ? windowSeconds : undefined,
 				includeVfs: traceType.startsWith('fsio_') ? includeVfs : undefined,
+				// 미지원 기기는 명시적으로 끈다 — 서버 기본값(켬)에 맡기면 매번 "건너뜀" 메시지만 쌓인다.
+				includeDram: dramSupported && includeDram,
 				jobName: jobName || undefined
 			});
 			activeTraceJobId = res.jobId;
@@ -173,6 +184,33 @@
 				</span>
 			</label>
 		{/if}
+		<!-- DRAM 대역폭 — ufs/block/fsio 모두. IO 로그와 다른 파일(dram.log)로 받아 같은 시간축에 붙인다 -->
+		<label
+			class="flex items-start gap-1.5 text-[10px] mt-1.5 {dramSupported ? 'cursor-pointer' : 'opacity-60'}"
+		>
+			<input
+				type="checkbox"
+				checked={dramSupported && includeDram}
+				onchange={(e) => (includeDram = (e.currentTarget as HTMLInputElement).checked)}
+				disabled={!!activeTraceJobId || !dramSupported}
+				class="size-3 mt-0.5 shrink-0"
+			/>
+			<span>
+				DRAM 대역폭 함께 수집
+				{#if selectedDevice?.platform}
+					<span class="text-muted-foreground">· {selectedDevice.platform}</span>
+				{/if}
+				<span class="block text-[9px] text-muted-foreground leading-relaxed">
+					{#if !singleDeviceId}
+						디바이스를 하나 고르면 이 기기에서 받을 수 있는지 알려 드려요.
+					{:else if dramSupported}
+						Qualcomm bwmon-ddr 를 dram.log 로 따로 받아 IO 와 같은 시간축에 보여줘요. 부담은 거의 없어요.
+					{:else}
+						{selectedDevice?.dramBwReason || '이 기기에서 DRAM 대역폭을 받을 수 있는지 확인하지 못했어요.'}
+					{/if}
+				</span>
+			</span>
+		</label>
 	</div>
 
 	<!-- Window Seconds -->
