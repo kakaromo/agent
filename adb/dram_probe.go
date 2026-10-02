@@ -9,9 +9,15 @@ import (
 	"strings"
 )
 
-// dramProbeCmd — 이벤트와 ftrace instance 지원을 한 번에 확인. 출력: "event=0|1 inst=0|1".
+// dramProbeCmd — 이벤트·ftrace instance 지원과 instance 생성 권한을 한 번에 확인.
+// 출력: "event=0|1 inst=0|1 write=0|1".
+//
+// ⚠ 있는지(-d)만 보면 안 된다. user 빌드(shell uid)는 readtracefs 그룹이라 이벤트와
+// instances 디렉토리가 **보이지만** instances 가 `drwxr-x--- root readtracefs` 라
+// mkdir 이 Permission denied 다(SM-S938N user 빌드 확인). 그러면 화면은 "지원" 으로
+// 체크박스를 켜 두고 수집 때마다 조용히 건너뛰었다.
 func dramProbeCmd(tracingDir string) string {
-	return fmt.Sprintf(`e=0; i=0; [ -d %[1]s/events/dcvs/bw_hwmon_meas ] && e=1; [ -d %[1]s/instances ] && i=1; echo "event=$e inst=$i"`, tracingDir)
+	return fmt.Sprintf(`e=0; i=0; w=0; [ -d %[1]s/events/dcvs/bw_hwmon_meas ] && e=1; [ -d %[1]s/instances ] && i=1; [ -w %[1]s/instances ] && w=1; echo "event=$e inst=$i write=$w"`, tracingDir)
 }
 
 // ProbeDramBw — 이 기기에서 DRAM 대역폭을 받을 수 있나. 불가면 화면에 보여줄 사유 문장.
@@ -37,9 +43,12 @@ func parseDramProbe(out, platform string) (bool, string) {
 	}
 	hasEvent := strings.Contains(out, "event=1")
 	hasInst := strings.Contains(out, "inst=1")
+	canWrite := strings.Contains(out, "write=1")
 	switch {
-	case hasEvent && hasInst:
+	case hasEvent && hasInst && canWrite:
 		return true, ""
+	case hasEvent && hasInst:
+		return false, fmt.Sprintf("%s 에서 ftrace instance 를 만들 권한이 없어 DRAM 대역폭을 받을 수 없어요 — root 가 필요해요 (userdebug 빌드에서 adb root)", name)
 	case hasEvent:
 		return false, fmt.Sprintf("%s 는 ftrace instance 를 지원하지 않아 DRAM 대역폭을 따로 받을 수 없어요", name)
 	case strings.Contains(out, "event="):
