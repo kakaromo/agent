@@ -92,13 +92,9 @@ func getDeviceActivityFocus(ctx context.Context, dev *adb.Device) (string, error
 
 // getDeviceUIText dumps UI hierarchy and returns matching text.
 func getDeviceUIText(ctx context.Context, dev *adb.Device, pattern string) (bool, error) {
-	_, err := dev.Shell(ctx, "uiautomator dump /sdcard/ui.xml")
+	out, err := DumpUIXML(ctx, dev)
 	if err != nil {
-		return false, fmt.Errorf("uiautomator dump: %w", err)
-	}
-	out, err := dev.Shell(ctx, "cat /sdcard/ui.xml")
-	if err != nil {
-		return false, fmt.Errorf("cat ui.xml: %w", err)
+		return false, err
 	}
 	return strings.Contains(out, pattern), nil
 }

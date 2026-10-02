@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"agent/adb"
 )
@@ -54,24 +53,41 @@ type uiHierarchy struct {
 // DumpUIElements 는 디바이스의 현재 화면을 uiautomator 로 덤프해
 // 파싱된 요소 목록을 반환한다. clickableOnly=true 면 clickable="true" 요소만 남긴다.
 //
-// dump 실행 패턴은 기존 dumpUITexts / getDeviceUIText 와 동일하다
-// (uiautomator dump /sdcard/ui.xml → cat). 시그니처를 건드리지 않기 위해 별도 함수로 둔다.
+// dumpUICmd — 파일 없이 stdout 으로 받는 dump 명령. 이유는 DumpUIElements 주석.
+const dumpUICmd = "uiautomator dump /dev/stdout | cat"
+
+// dump 는 **파일을 거치지 않고 stdout 으로** 받는다.
+//
+// 예전엔 /sdcard 에 XML 을 쓰고 cat 했는데, YouTube watch 처럼 몇 초마다 조회하는
+// 스텝에서는 그 파일 생성·삭제가 **측정 중인 fsio/ufs trace 에 그대로 섞였다.**
+//
+// ⚠ `| cat` 이 필수다. `adb shell` 의 stdout 은 소켓이라 uiautomator 가
+// /dev/stdout 을 파일로 열지 못해 **XML 없이 "dumped to" 로그만** 찍고 exit 0 으로
+// 끝난다 (SM-S938N user 빌드 Android 16 에서 3/3 재현). 파이프를 끼우면 정상이다.
+// /dev/tty 도 같은 이유로 빈 결과다.
+//
+// dump 실패(idle 대기 실패 등)도 XML 이 없으므로 아래 검사에서 에러가 된다 —
+// 이전 화면을 다시 읽는 일은 없다.
 func DumpUIElements(ctx context.Context, dev *adb.Device, clickableOnly bool) ([]UIElement, error) {
-	// 동시 조회의 덮어쓰기와 dump 실패 후 이전 화면을 읽는 일을 막는다.
-	path := fmt.Sprintf("/sdcard/agent-ui-%d.xml", time.Now().UnixNano())
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		dev.Shell(cleanup, "rm -f "+path)
-	}()
-	if _, err := dev.Shell(ctx, "uiautomator dump "+path); err != nil {
-		return nil, fmt.Errorf("uiautomator dump: %w", err)
-	}
-	out, err := dev.Shell(ctx, "cat "+path)
+	out, err := DumpUIXML(ctx, dev)
 	if err != nil {
-		return nil, fmt.Errorf("cat ui.xml: %w", err)
+		return nil, err
 	}
 	return parseUIElements(out, clickableOnly)
+}
+
+// DumpUIXML — 현재 화면의 uiautomator XML 을 **기기에 파일을 남기지 않고** 받는다.
+// 화면 조회는 전부 이 함수를 거친다 (요소 탭·매크로 녹화/재생·YouTube).
+// 측정 대상 기기에 agent 가 만든 파일이 남으면 실제 UX 가 아니게 된다.
+func DumpUIXML(ctx context.Context, dev *adb.Device) (string, error) {
+	out, err := dev.Shell(ctx, dumpUICmd)
+	if err != nil {
+		return "", fmt.Errorf("uiautomator dump: %w", err)
+	}
+	if !strings.Contains(out, "<hierarchy") {
+		return "", fmt.Errorf("uiautomator dump: XML 없음: %s", strings.TrimSpace(out))
+	}
+	return out, nil
 }
 
 // parseUIElements 는 uiautomator dump XML 문자열을 파싱해 요소 목록으로 변환한다.

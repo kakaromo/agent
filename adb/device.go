@@ -134,6 +134,15 @@ func (d *Device) Pull(ctx context.Context, remote, local string) error {
 	return err
 }
 
+// ExecOut runs a command via `adb exec-out` and returns raw stdout bytes.
+//
+// 기기에 파일을 남기지 않고 바이너리(스크린샷 PNG 등)를 받을 때 쓴다.
+// `adb shell` 과 달리 pty/줄바꿈 변환이 없어 바이트가 그대로 온다.
+func (d *Device) ExecOut(ctx context.Context, cmd string) ([]byte, error) {
+	out, err := d.run(ctx, "-s", d.Serial, "exec-out", cmd)
+	return []byte(out), err
+}
+
 // IsAlive checks if the device is reachable.
 func (d *Device) IsAlive(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

@@ -1,6 +1,9 @@
 package macro
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleUIXML = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
 <hierarchy rotation="0">
@@ -163,5 +166,28 @@ func TestParseBounds(t *testing.T) {
 	}
 	if _, ok := parseBounds("garbage"); ok {
 		t.Errorf("expected parse failure for garbage")
+	}
+}
+
+// TestParseUIElementsTrailingLog — stdout dump 는 XML 뒤에 "UI hierchary dumped to"
+// 로그가 붙는다. 그 줄 때문에 파싱이 실패하면 모든 요소 기반 스텝이 깨진다.
+func TestParseUIElementsTrailingLog(t *testing.T) {
+	out := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">` +
+		`<node index="0" text="검색" resource-id="a:id/search" class="android.widget.TextView" content-desc="" clickable="true" bounds="[0,0][100,50]" /></hierarchy>` +
+		"UI hierchary dumped to: /dev/stdout\n"
+	els, err := parseUIElements(out, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(els) != 1 || els[0].Text != "검색" {
+		t.Fatalf("요소 파싱 결과가 다르다: %+v", els)
+	}
+}
+
+// TestDumpUICmdPipe — `| cat` 이 빠지면 adb shell 에서 XML 없이 로그만 나온다(실기기 확인).
+// /sdcard 파일로 되돌리면 측정 중 trace 에 dump write 가 섞인다.
+func TestDumpUICmdPipe(t *testing.T) {
+	if !strings.HasSuffix(dumpUICmd, "/dev/stdout | cat") {
+		t.Fatalf("dump 명령이 stdout 파이프가 아니다: %q", dumpUICmd)
 	}
 }

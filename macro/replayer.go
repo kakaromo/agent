@@ -342,13 +342,9 @@ func (r *Replayer) waitUntil(ctx context.Context, ev *pb.MacroEvent) error {
 
 // dumpUITexts runs uiautomator dump and extracts non-empty text values.
 func (r *Replayer) dumpUITexts(ctx context.Context) ([]string, error) {
-	_, err := r.dev.Shell(ctx, "uiautomator dump /sdcard/ui.xml")
+	out, err := DumpUIXML(ctx, r.dev)
 	if err != nil {
-		return nil, fmt.Errorf("uiautomator dump: %w", err)
-	}
-	out, err := r.dev.Shell(ctx, "cat /sdcard/ui.xml")
-	if err != nil {
-		return nil, fmt.Errorf("cat ui.xml: %w", err)
+		return nil, err
 	}
 
 	// Extract text="..." values

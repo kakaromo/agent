@@ -18,30 +18,22 @@ import (
 	pb "agent/pb"
 )
 
-const (
-	screenshotRemotePath = "/sdcard/macro_screenshot.png"
-)
+// pngSignature — PNG 파일의 첫 8바이트. screencap 실패 시 에러 문구가 오는 것을 거른다.
+var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 
 // CaptureScreenshot takes a screenshot from the device via ADB.
+//
+// `exec-out screencap -p` 로 PNG 를 stdout 으로 바로 받는다. 예전엔
+// /sdcard/macro_screenshot.png 에 쓰고 pull 했는데, 측정 중(YouTube OCR 등)에는
+// 그 write 가 trace 에 섞이고, 중간에 실패하면 파일이 기기에 남았다.
 func CaptureScreenshot(ctx context.Context, dev *adb.Device) (*pb.TakeScreenshotResponse, error) {
-	// Take screenshot on device
-	_, err := dev.Shell(ctx, "screencap -p "+screenshotRemotePath)
+	data, err := dev.ExecOut(ctx, "screencap -p")
 	if err != nil {
 		return &pb.TakeScreenshotResponse{Success: false}, fmt.Errorf("screencap: %w", err)
 	}
-
-	// Pull to temp file
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("macro_screenshot_%s_%d.png", dev.Serial, time.Now().UnixMilli()))
-	defer os.Remove(tmpFile)
-
-	if err := dev.Pull(ctx, screenshotRemotePath, tmpFile); err != nil {
-		return &pb.TakeScreenshotResponse{Success: false}, fmt.Errorf("pull screenshot: %w", err)
-	}
-
-	// Read file
-	data, err := os.ReadFile(tmpFile)
-	if err != nil {
-		return &pb.TakeScreenshotResponse{Success: false}, fmt.Errorf("read screenshot: %w", err)
+	if !bytes.HasPrefix(data, pngSignature) {
+		return &pb.TakeScreenshotResponse{Success: false},
+			fmt.Errorf("screencap: PNG 가 아니다: %.80q", data)
 	}
 
 	// Get dimensions
@@ -52,9 +44,6 @@ func CaptureScreenshot(ctx context.Context, dev *adb.Device) (*pb.TakeScreenshot
 		width = bounds.Dx()
 		height = bounds.Dy()
 	}
-
-	// Clean up remote file
-	dev.Shell(ctx, "rm -f "+screenshotRemotePath)
 
 	return &pb.TakeScreenshotResponse{
 		Success:   true,
