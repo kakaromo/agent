@@ -138,7 +138,7 @@ func TestMatchModeEnumMatchesImplementation(t *testing.T) {
 		t.Fatalf("uihierarchy.go 를 읽을 수 없습니다: %v", err)
 	}
 
-	body := string(src)
+	body := strings.ReplaceAll(string(src), "\r\n", "\n")
 	idx := strings.Index(body, "func matchPattern(")
 	if idx < 0 {
 		t.Fatal("matchPattern 함수를 찾을 수 없습니다 — 이름이 바뀌었다면 이 테스트도 갱신하세요.")

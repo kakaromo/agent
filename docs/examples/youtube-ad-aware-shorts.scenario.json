@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_Shorts_20개시청_DRAM",
+  "description": "YouTube 앱 실행 → Shorts 탭 → [본영상 10초 관측, 다음 카드로 이동] 19회 → 마지막 본영상 10초 관측. 광고 카드를 넘기면 스와이프 수가 늘며 정확한 고유 영상 개수는 검증하지 않습니다. 전체 구간 FSIO UFS+DRAM 수집. 재생 관측에서는 감지된 광고·미확인 시간을 제외하고 명시적인 건너뛰기 버튼만 누릅니다. 각 재생 단계의 광고·미확인 대기 한도는 누적 180초입니다. UI/OCR 조회가 측정 부하를 추가하며 짧은 광고와 버퍼링을 놓칠 수 있습니다. 기기 잠금 해제와 YouTube 초기 안내 완료가 필요합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "params": {
+        "clear_mode": "force_stop",
+        "label": "YouTube 앱 실행",
+        "package_name": "com.google.android.youtube",
+        "wait_activity": "HomeActivity",
+        "wait_seconds": "3"
+      },
+      "type": "launch_app"
+    },
+    {
+      "params": {
+        "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+        "element_match_mode": "regex",
+        "label": "Shorts 탭 선택"
+      },
+      "type": "tap_element"
+    },
+    {
+      "params": {
+        "label": "Shorts 최초 로딩 대기",
+        "seconds": "3"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "Shorts 10초 시청 (광고 제외 관측)",
+        "seconds": "10",
+        "surface": "shorts"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "count": "1",
+        "direction": "down",
+        "duration": "400",
+        "label": "다음 Shorts로 전환",
+        "pause": "1"
+      },
+      "type": "scroll"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "마지막 Shorts 10초 시청 (광고 제외 관측)",
+        "seconds": "10",
+        "surface": "shorts"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      },
+      "type": "stop_app"
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "loops": [
+    {
+      "count": 19,
+      "endStep": 5,
+      "startStep": 4
+    }
+  ],
+  "requirements": {
+    "traceType": "fsio_ufs"
+  }
+}

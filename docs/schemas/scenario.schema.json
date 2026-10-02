@@ -45,9 +45,10 @@
           "enum": [
             "benchmark", "shell", "cleanup", "sleep",
             "trace_start", "trace_stop", "condition",
-            "app_macro", "install_apk", "uninstall_apk"
+            "app_macro", "install_apk", "uninstall_apk", "iotest",
+            "launch_app", "stop_app", "tap_element", "tap", "text", "scroll", "key", "youtube"
           ],
-          "description": "proto ScenarioStep.type. 요소 조작(tap_element/scroll_capture/text 등)은 최상위 타입이 아니라 app_macro 스텝의 macro.events 안에 들어간다."
+          "description": "proto ScenarioStep.type. 직접 요소 조작 단계와 YouTube 광고·화질 단계를 지원한다."
         },
         "tool": {
           "type": "string",

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_홈피드탐색_DRAM",
+  "description": "YouTube 앱 실행 → 홈 탭 → 아래로 10회, 위로 5회 탐색. 각 스크롤 직전 광고 카드 표시를 기록하고 광고 링크는 누르지 않습니다. 전체 구간 FSIO UFS+DRAM 수집. 재생 관측에서는 감지된 광고·미확인 시간을 제외하고 명시적인 건너뛰기 버튼만 누릅니다. 각 재생 단계의 광고·미확인 대기 한도는 누적 180초입니다. UI/OCR 조회가 측정 부하를 추가하며 짧은 광고와 버퍼링을 놓칠 수 있습니다. 기기 잠금 해제와 YouTube 초기 안내 완료가 필요합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "params": {
+        "clear_mode": "force_stop",
+        "label": "YouTube 앱 실행",
+        "package_name": "com.google.android.youtube",
+        "wait_activity": "HomeActivity",
+        "wait_seconds": "3"
+      },
+      "type": "launch_app"
+    },
+    {
+      "params": {
+        "element_content_desc": "^(홈|Home)(,.*)?$",
+        "element_match_mode": "regex",
+        "label": "홈 탭 선택"
+      },
+      "type": "tap_element"
+    },
+    {
+      "params": {
+        "label": "홈 피드 로딩 대기",
+        "seconds": "3"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "action": "feed",
+        "count": "10",
+        "direction": "down",
+        "label": "홈 피드 아래로 탐색 10회 · 광고 표시 기록"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "label": "피드 확인 2초",
+        "seconds": "2"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "action": "feed",
+        "count": "5",
+        "direction": "up",
+        "label": "홈 피드 위로 재탐색 5회 · 광고 표시 기록"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "label": "탐색 후 대기 2초",
+        "seconds": "2"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      },
+      "type": "stop_app"
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "requirements": {
+    "traceType": "fsio_ufs"
+  }
+}

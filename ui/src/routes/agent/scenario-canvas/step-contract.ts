@@ -24,6 +24,27 @@ export interface StepContract {
 
 export const STEP_CONTRACTS: StepContract[] = [
 	{
+		type: "youtube",
+		label: "YouTube",
+		desc: "광고 확인·재생·화질",
+		icon: "play",
+		color: "rose",
+		destructive: false,
+		requiresTool: false,
+		aiUsable: true,
+		params: [
+			{ name: "action", required: false, enum: ["watch", "inspect", "feed", "quality", "select_video"], default: "watch", desc: "재생 관측 / 피드 광고 확인 / 스크롤하며 확인 / 화질 선택 / 일반 영상 선택" },
+			{ name: "title", required: false, desc: "select_video에서 제목 시작 문자열(선택)" },
+			{ name: "surface", required: false, enum: ["video", "shorts"], default: "video", desc: "watch 대상 화면. Shorts OCR에서 스폰서 표시를 판별할 때 사용" },
+			{ name: "count", required: false, default: "1", desc: "feed 스크롤 횟수" },
+			{ name: "direction", required: false, enum: ["up", "down"], default: "down", desc: "feed 스크롤 방향" },
+			{ name: "seconds", required: false, default: "60", desc: "광고·미확인 시간을 제외한 관측 시간. 0은 본영상 준비 확인" },
+			{ name: "ad_timeout", required: false, default: "180", desc: "광고·미확인 누적 대기 한도(초)" },
+			{ name: "quality", required: false, enum: ["360p", "720p", "1080p"], desc: "quality 동작의 요청 화질" },
+			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
+		]
+	},
+	{
 		type: "benchmark",
 		label: "Benchmark",
 		desc: "fio/iozone/tiotest",
@@ -292,6 +313,7 @@ export const STEP_CONTRACT_BY_TYPE: Record<string, StepContract> = Object.fromEn
 // tailwind 색상 계열 → 실제 클래스. tailwind 는 동적 문자열을 purge 하므로
 // 클래스 전체를 리터럴로 나열해야 한다.
 export const STEP_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+	youtube: { bg: 'bg-rose-100', text: 'text-rose-700' },
 	benchmark: { bg: 'bg-blue-100', text: 'text-blue-700' },
 	iotest: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
 	shell: { bg: 'bg-gray-100', text: 'text-gray-700' },

@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_화질변경_360_720_1080_DRAM",
+  "description": "YouTube 앱 실행 → Best of lofi hip hop 2021 검색 → 제목이 일치하는 일반 영상 선택 → 광고 종료 대기 → 360p·720p·1080p를 차례로 선택하고 각각 본영상 60초 관측 → 앱 종료. 설정 메뉴에 표시된 화질을 확인하며 실제 디코더 해상도는 검증하지 않습니다. 화질 메뉴 OCR에 Tesseract eng/kor가 필요할 수 있습니다. 전체 구간 FSIO UFS+DRAM 수집. 재생 관측에서는 감지된 광고·미확인 시간을 제외하고 명시적인 건너뛰기 버튼만 누릅니다. 각 재생 단계의 광고·미확인 대기 한도는 누적 180초입니다. UI/OCR 조회가 측정 부하를 추가하며 짧은 광고와 버퍼링을 놓칠 수 있습니다. 기기 잠금 해제와 YouTube 초기 안내 완료가 필요합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "params": {
+        "clear_mode": "force_stop",
+        "label": "YouTube 앱 실행",
+        "package_name": "com.google.android.youtube",
+        "wait_activity": "HomeActivity",
+        "wait_seconds": "3"
+      },
+      "type": "launch_app"
+    },
+    {
+      "params": {
+        "element_content_desc": "검색",
+        "label": "검색창 열기"
+      },
+      "type": "tap_element"
+    },
+    {
+      "params": {
+        "input_text": "Best of lofi hip hop 2021",
+        "label": "화질 비교용 긴 영상 검색",
+        "submit": "true"
+      },
+      "type": "text"
+    },
+    {
+      "params": {
+        "label": "검색 결과 로딩 대기",
+        "seconds": "3"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "action": "inspect",
+        "label": "검색 결과 광고 표시 확인"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "select_video",
+        "label": "광고·Shorts를 제외한 일반 영상 선택",
+        "title": "Best of lofi hip hop 2021"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "광고 종료·본영상 준비 확인",
+        "seconds": "0"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "quality",
+        "label": "360p 선택·적용 확인",
+        "quality": "360p"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "360p 본영상 60초 관측 (광고 제외)",
+        "seconds": "60"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "quality",
+        "label": "720p 선택·적용 확인",
+        "quality": "720p"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "720p 본영상 60초 관측 (광고 제외)",
+        "seconds": "60"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "quality",
+        "label": "1080p 선택·적용 확인",
+        "quality": "1080p"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "1080p 본영상 60초 관측 (광고 제외)",
+        "seconds": "60"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      },
+      "type": "stop_app"
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "requirements": {
+    "traceType": "fsio_ufs"
+  }
+}

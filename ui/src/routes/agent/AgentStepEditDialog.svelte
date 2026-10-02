@@ -175,6 +175,9 @@
 		local.type = newType;
 		if (newType === 'benchmark') {
 			local.formParams = getDefaultParams(local.tool);
+		} else if (newType === 'youtube') {
+			local.formParams = { action: 'watch', seconds: '60', ad_timeout: '180', quality: '360p' };
+			local.extraText = '';
 		}
 	}
 
@@ -248,6 +251,7 @@
 							<option value="shell">Shell</option>
 							<option value="cleanup">Cleanup</option>
 							<option value="sleep">Sleep</option>
+							<option value="youtube">YouTube</option>
 							<option value="trace_start">Trace Start</option>
 							<option value="trace_stop">Trace Stop</option>
 							<option value="launch_app">Launch App</option>
@@ -916,6 +920,35 @@
 						</div>
 					</div>
 
+				{:else if local.type === 'youtube'}
+					<div class="space-y-2">
+						<label for="youtube-action" class={sectionLabel}>동작</label>
+						<select id="youtube-action" bind:value={local.formParams.action} class="w-full border rounded px-2 py-1 text-xs bg-background">
+							<option value="watch">광고를 제외한 재생 관측</option>
+							<option value="inspect">피드 광고 표시 기록</option>
+							<option value="feed">피드 스크롤·광고 기록</option>
+							<option value="quality">화질 선택</option>
+							<option value="select_video">광고·Shorts를 제외한 영상 선택</option>
+						</select>
+						{#if local.formParams.action === 'quality'}
+							<select bind:value={local.formParams.quality} class="w-full border rounded px-2 py-1 text-xs bg-background">
+								<option value="360p">360p</option><option value="720p">720p</option><option value="1080p">1080p</option>
+							</select>
+						{:else if local.formParams.action === 'select_video'}
+							<input aria-label="제목 시작 문자열" type="text" bind:value={local.formParams.title} placeholder="제목 시작 문자열 (선택)" class="w-full border rounded px-2 py-1 text-xs" />
+						{:else if local.formParams.action === 'feed'}
+							<label for="youtube-count" class={sectionLabel}>스크롤 횟수</label>
+							<input id="youtube-count" type="text" bind:value={local.formParams.count} class="w-full border rounded px-2 py-1 text-xs" />
+							<select bind:value={local.formParams.direction} class="w-full border rounded px-2 py-1 text-xs"><option value="down">아래로</option><option value="up">위로</option></select>
+						{:else if local.formParams.action !== 'inspect'}
+							<select aria-label="재생 화면" bind:value={local.formParams.surface} class="w-full border rounded px-2 py-1 text-xs"><option value="video">일반 영상</option><option value="shorts">Shorts</option></select>
+							<label for="youtube-seconds" class={sectionLabel}>재생 관측 시간(초, 0은 본영상 준비 확인)</label>
+							<input id="youtube-seconds" type="text" bind:value={local.formParams.seconds} placeholder="60" class="w-full border rounded px-2 py-1 text-xs" />
+							<label for="youtube-timeout" class={sectionLabel}>광고·미확인 대기 한도(초)</label>
+							<input id="youtube-timeout" type="text" bind:value={local.formParams.ad_timeout} placeholder="180" class="w-full border rounded px-2 py-1 text-xs" />
+						{/if}
+						<p class={captionMuted}>화면을 주기적으로 확인하므로 짧은 광고를 놓칠 수 있고 측정 부하가 추가됩니다. 메뉴를 읽을 수 없거나 요청 화질이 없으면 실패합니다.</p>
+					</div>
 				{:else if local.type === 'sleep'}
 					<div class="space-y-2">
 						<p class="{captionMuted}">

@@ -247,7 +247,7 @@ export function protoToCanvas(
 			const basicKeys = new Set(basicOpts.map(o => o.key));
 			// install_apk / uninstall_apk 는 모든 params 를 formParams 에 그대로 채워야 dialog
 			// select 가 round-trip 되며, extraText 로 떨어지면 안 된다.
-			const isApkStep = s.type === 'install_apk' || s.type === 'uninstall_apk';
+			const isApkStep = s.type === 'install_apk' || s.type === 'uninstall_apk' || s.type === 'youtube';
 			// ⚠ trace_start/trace_stop 도 같은 이유로 params 를 formParams 에 그대로
 			// 채운다. 다이얼로그의 Trace Type select 가 **formParams.trace_type** 을
 			// 읽는데, trace_type 은 knownKeys 라 여기서 걸러져 formParams 에 못 들어갔다

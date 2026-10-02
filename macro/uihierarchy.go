@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"agent/adb"
 )
@@ -56,10 +57,17 @@ type uiHierarchy struct {
 // dump 실행 패턴은 기존 dumpUITexts / getDeviceUIText 와 동일하다
 // (uiautomator dump /sdcard/ui.xml → cat). 시그니처를 건드리지 않기 위해 별도 함수로 둔다.
 func DumpUIElements(ctx context.Context, dev *adb.Device, clickableOnly bool) ([]UIElement, error) {
-	if _, err := dev.Shell(ctx, "uiautomator dump /sdcard/ui.xml"); err != nil {
+	// 동시 조회의 덮어쓰기와 dump 실패 후 이전 화면을 읽는 일을 막는다.
+	path := fmt.Sprintf("/sdcard/agent-ui-%d.xml", time.Now().UnixNano())
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		dev.Shell(cleanup, "rm -f "+path)
+	}()
+	if _, err := dev.Shell(ctx, "uiautomator dump "+path); err != nil {
 		return nil, fmt.Errorf("uiautomator dump: %w", err)
 	}
-	out, err := dev.Shell(ctx, "cat /sdcard/ui.xml")
+	out, err := dev.Shell(ctx, "cat "+path)
 	if err != nil {
 		return nil, fmt.Errorf("cat ui.xml: %w", err)
 	}

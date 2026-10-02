@@ -39,6 +39,8 @@ if (-not $SkipUI) {
     Write-Host '=== Skipping UI build (-SkipUI) ==='
 }
 
+Set-Location $ScriptDir
+
 Write-Host "=== Building agent v$Version ==="
 
 # MinGW gcc 필수 — go-duckdb 가 cgo 의존이라 없으면 컴파일 불가

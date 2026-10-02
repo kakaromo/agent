@@ -527,6 +527,8 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 	step := es.step
 
 	switch step.Type {
+	case "youtube":
+		return o.executeYoutube(ctx, job, md, es, deviceID, *activeTraceJobID)
 	case "benchmark":
 		return o.executeBenchmarkStep(ctx, md, step, es, execIndex, stepFiles)
 	case "iotest":

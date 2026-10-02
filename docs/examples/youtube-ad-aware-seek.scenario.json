@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_영상구간이동_5회_DRAM",
+  "description": "YouTube 앱 실행 → lofi hip hop 1 hour 검색 → 아래로 10회 탐색 → 일반 영상 선택 → 본영상 30초 관측 → [앞으로 구간 이동 키 요청, 본영상 20초 관측] 5회. 실제 재생 위치 변경은 별도로 검증하지 않습니다. 전체 구간 FSIO UFS+DRAM 수집. 재생 관측에서는 감지된 광고·미확인 시간을 제외하고 명시적인 건너뛰기 버튼만 누릅니다. 각 재생 단계의 광고·미확인 대기 한도는 누적 180초입니다. UI/OCR 조회가 측정 부하를 추가하며 짧은 광고와 버퍼링을 놓칠 수 있습니다. 기기 잠금 해제와 YouTube 초기 안내 완료가 필요합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "params": {
+        "clear_mode": "force_stop",
+        "label": "YouTube 앱 실행",
+        "package_name": "com.google.android.youtube",
+        "wait_activity": "HomeActivity",
+        "wait_seconds": "3"
+      },
+      "type": "launch_app"
+    },
+    {
+      "params": {
+        "element_content_desc": "검색",
+        "label": "검색창 열기"
+      },
+      "type": "tap_element"
+    },
+    {
+      "params": {
+        "input_text": "lofi hip hop 1 hour",
+        "label": "긴 일반 영상 검색 (lofi hip hop 1 hour)",
+        "submit": "true"
+      },
+      "type": "text"
+    },
+    {
+      "params": {
+        "label": "검색 결과 로딩 대기",
+        "seconds": "3"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "count": "10",
+        "direction": "down",
+        "duration": "400",
+        "label": "검색 결과 탐색 (아래로 10회)",
+        "pause": "1"
+      },
+      "type": "scroll"
+    },
+    {
+      "params": {
+        "action": "select_video",
+        "label": "광고·Shorts를 제외한 일반 영상 선택"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "영상 초기 재생 30초 (광고 제외 관측)",
+        "seconds": "30"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "keycode": "90",
+        "label": "앞으로 구간 이동 요청"
+      },
+      "type": "key"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "구간 이동 후 재생 20초 (광고 제외 관측)",
+        "seconds": "20"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      },
+      "type": "stop_app"
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "loops": [
+    {
+      "count": 5,
+      "endStep": 9,
+      "startStep": 8
+    }
+  ],
+  "requirements": {
+    "traceType": "fsio_ufs"
+  }
+}
