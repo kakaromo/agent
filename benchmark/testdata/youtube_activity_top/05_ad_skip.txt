@@ -1,0 +1,525 @@
+  ACTIVITY com.sec.android.app.launcher/.activities.LauncherActivity 0 pid=1
+      mResumed=false mStopped=true mFinished=false
+    View Hierarchy:
+      com.android.internal.policy.DecorView{1 V.E...... R....... 0,0-1440,3120}
+        android.widget.TextView{2 V.ED..... ........ 0,0-100,100 #7f0b00f8 app:id/ad_progress_text}
+  ACTIVITY com.google.android.youtube/.app.honeycomb.Shell$HomeActivity dac8b77 pid=29873 userId=0 uid=10296 displayId=0(type=INTERNAL)
+    Local Activity 3167ceb State:
+      mResumed=true mStopped=false mFinished=false
+    View Hierarchy:
+      com.android.internal.policy.DecorView{4de40e V.ED..... R....... 0,0-1440,3120 aid=0}[Shell$HomeActivity]
+        android.widget.LinearLayout{90bdfd4 V.E...... ........ 0,0-1440,3120}
+          android.view.ViewStub{3592cb5 G.E...... ......I. 0,0-0,0 #10201eb android:id/action_mode_bar_stub}
+          android.widget.FrameLayout{cd29127 V.E...... ........ 0,0-1440,3120}
+            android.support.v7.widget.FitWindowsLinearLayout{df8b7e6 V.E...... ........ 0,0-1440,3120 #7f0b008e app:id/action_bar_root aid=1073741827}
+              android.support.v7.widget.ViewStubCompat{1955f4a G.E...... ......I. 0,0-0,0 #7f0b00ae app:id/action_mode_bar_stub aid=1073741828}
+              android.support.v7.widget.ContentFrameLayout{99e5641 V.E...... ........ 0,0-1440,3120 #1020002 android:id/content}
+                com.google.android.apps.youtube.app.ui.swipetocontainer.DrawerContainerLayout{bf6dd3b VFE...... ........ 0,0-1440,3120 #7f0b0cc6 app:id/more_drawer_container aid=1073741829}
+                  com.google.android.apps.youtube.app.ui.swipetocontainer.SwipeToContainerFrameLayout{b9517ca V.E...... ........ 0,0-1440,3120 #7f0b1463 app:id/slim_status_bar_player_container aid=1073741830}
+                    com.google.android.apps.youtube.app.common.ui.navigationbar.NavigationBarDividerLayout{81a7735 V.ED..... ........ 0,0-1440,2940 #7f0b0d55 app:id/navigation_bar_divider_frame aid=1073741831}
+                      com.google.android.libraries.youtube.common.ui.AccessibilityLayerLayout{5a3556c V.E...... ........ 0,0-1440,2940 #7f0b0069 app:id/accessibility_layer_container aid=1073741832}
+                        com.google.android.apps.youtube.app.watch.nextgenwatch.ui.NextGenWatchContainerLayout{85e7e1f V.E...... ........ 0,0-1440,2940 #7f0b0d7a app:id/next_gen_watch_container_layout aid=1073741833}
+                          androidx.coordinatorlayout.widget.CoordinatorLayout{decddbe G.E...... ......ID 0,0-1440,2940 #7f0b18c2 app:id/watch_while_layout_coordinator_layout aid=1073741834}
+                            android.widget.FrameLayout{19e875 V.E...... ......ID 0,0-1440,2940 #7f0b0e55 app:id/pane_fragment_container aid=1073741835}
+                              com.google.android.apps.youtube.app.common.ui.inline.InlinePlayerLayout{af7475c G.ED..... ......ID 0,0-1440,2760 #7f0b0a03 app:id/inline_player_container aid=1073741836}
+                              androidx.coordinatorlayout.widget.CoordinatorLayout{e0b297a V.E...... ......ID 0,128-1440,2760 #7f0b02dd app:id/browse_fragment_layout_coordinator_layout}
+                                android.view.ViewStub{d1df924 G.E...... ......I. 0,0-0,0 #7f0b0e54 app:id/pane_fragment_background_container_stub}
+                                com.google.android.apps.youtube.app.ui.actionbar.ElevatedAppBarLayout{d843c8d V.E...... ......ID 0,0-1440,180 #7f0b01a2 app:id/appbar_layout}
+                                  com.google.android.apps.youtube.app.ui.actionbar.MainCollapsingToolbarLayout{cde4ebb V.ED..... ......ID 0,0-1440,180 #7f0b1725 app:id/toolbar_container}
+                                    android.widget.FrameLayout{646afd8 V.E...... ......ID 0,0-1440,0 #7f0b0468 app:id/collapsing_header_container}
+                                    android.support.v7.widget.Toolbar{87decaf V.E...... ......ID 0,0-1440,180 #7f0b1723 app:id/toolbar}
+                                      android.view.ViewStub{ebcdf31 G.E...... ......I. 0,0-0,0 #7f0b0a87 app:id/leading_accessories_container_stub}
+                                      android.support.v7.widget.ActionMenuView{3522616 V.E...... .......D 1289,0-1440,180}
+                                        kj{c991b97 VFED..C.. ......ID 0,0-151,180}
+                                      android.support.v7.widget.AppCompatImageButton{162f184 VFED..C.. ......ID 0,0-210,180}
+                                      android.widget.RelativeLayout{ae1ac8e V.E...... .......D 210,0-1289,180}
+                                        android.widget.LinearLayout{ccf3d6d V.E...... ......ID 0,0-899,180 #7f0b12d3 app:id/search_box}
+                                          android.support.v7.widget.AppCompatTextView{8428da2 VFED..C.. ........ 0,30-719,150 #7f0b12e8 app:id/search_query}
+                                          android.support.v7.widget.AppCompatImageView{8c9da33 VFED..C.. ......ID 719,0-899,180 #7f0b12d8 app:id/search_clear}
+                                        android.support.v7.widget.AppCompatImageView{4dfa1f0 G.ED..... ......I. 0,0-0,0 #7f0b0aa2 app:id/lens_search}
+                                        android.support.v7.widget.AppCompatImageView{62f4369 VFED..C.. ......ID 899,0-1079,180 #7f0b1874 app:id/voice_search}
+                                  android.widget.LinearLayout{4dfe1ee G.E...... ......ID 0,0-0,0 #7f0b0400 app:id/chip_bar_container}
+                                    android.view.View{63de68f V.ED..... ......I. 0,0-0,0}
+                                    android.widget.LinearLayout{634ed1c V.E...... ......I. 0,0-0,0 #7f0b03ff app:id/chip_bar_chips_container}
+                                      com.google.android.libraries.youtube.common.ui.YouTubeTextView{46fad25 G.ED..... ......I. 0,0-0,0 #7f0b162b app:id/text}
+                                      android.support.v7.widget.RecyclerView{9ec2efa VFED..... ......I. 0,0-0,0}
+                                android.widget.FrameLayout{dceee42 V.E...... .......D 0,180-1440,2632 #7f0b0e56 app:id/pane_fragment_contents}
+                                  com.google.android.libraries.youtube.rendering.ui.widget.loadingframe.LoadingFrameLayout{3951908 V.E...... .......D 0,0-1440,2452 #7f0b0b60 app:id/loading_layout}
+                                    android.widget.ProgressBar{f3c5cab G.ED..... ......I. 615,1121-825,1331 #7f0b0b56 app:id/load_progress}
+                                    com.google.android.apps.youtube.app.common.rendering.SnappyRecyclerView{b0cdeab VFED..... ......ID 0,0-1440,2452 #7f0b1262 app:id/results aid=1073741927}
+                                      android.widget.Space{34f8d1b I.ED..... ......I. 0,0-1440,0}
+                                      hfy{2068986 VFED..... ......ID 0,0-1440,1170 aid=1073742018}
+                                        com.facebook.litho.ComponentHost{c8578fa VFED..C.. .......D 0,0-1440,1080}
+                                          com.facebook.litho.ComponentHost{bd7df25 V.ED..... .......D 0,0-1440,810}
+                                            android.widget.ImageView{4b9c1c8 V.ED..... ........ 0,0-1440,810}
+                                            com.facebook.litho.ComponentHost{a36a71c V.ED..... .......D 0,0-1440,810}
+                                              android.widget.ImageView{317eb1c V.ED..... ......ID 0,0-1440,810}
+                                              android.widget.ImageView{bb041dd V.ED..... ......ID 1222,712-1282,772}
+                                          com.facebook.litho.ComponentHost{831bf08 V.ED..... .......D 0,810-1440,1080}
+                                            android.widget.ImageView{ffbf8aa VFED..C.. ......ID 45,45-180,180}
+                                            com.facebook.litho.ComponentHost{d92f6a1 V.ED..... ........ 210,45-1230,270}
+                                              com.facebook.litho.ComponentHost{3e40c6 V.ED..... ........ 0,0-1020,225}
+                                                com.facebook.litho.ComponentHost{1621887 V.ED..... ........ 0,0-1020,225}
+                                                  com.facebook.litho.ComponentHost{9a7c3b4 V.ED..... ........ 0,0-1020,150}
+                                                  com.facebook.litho.ComponentHost{b475bdd V.ED..... ........ 0,150-1020,225}
+                                            android.widget.ImageView{5fd0cb0 VFED..C.. ......ID 1260,45-1350,135}
+                                      hfy{c68376a VFED..... .......D 0,1170-1440,2346}
+                                        com.facebook.litho.ComponentHost{d3db623 VFED..C.. .......D 0,0-1440,1086}
+                                          com.facebook.litho.ComponentHost{2d76720 V.ED..... ........ 45,0-1395,23}
+                                            com.facebook.litho.ComponentHost{9e2d8d9 V.ED..... ........ 75,0-1275,120}
+                                          com.facebook.litho.ComponentHost{47ea29e V.ED..... ........ 45,27-1395,57}
+                                          com.facebook.litho.ComponentHost{3ab917f V.ED..... .......D 45,61-1395,820}
+                                            android.widget.ImageView{cc3322f V.ED..... ........ 0,0-1350,759}
+                                            com.facebook.litho.ComponentHost{d9bd54c V.ED..... .......D 0,0-1350,759}
+                                              android.widget.ImageView{4743c99 V.ED..... ......ID 0,0-1350,760}
+                                              android.widget.ImageView{685c0c V.ED..... ......ID 977,661-1037,721}
+                                          com.facebook.litho.ComponentHost{b1f2995 V.ED..... .......D 0,820-1440,1086}
+                                            com.facebook.litho.ComponentHost{92e4aaa V.ED..... ........ 45,45-1230,266}
+                                              com.facebook.litho.ComponentHost{cf1c69b V.ED..... ........ 0,0-1185,221}
+                                                com.facebook.litho.ComponentHost{456fa38 V.ED..... ........ 0,0-1185,221}
+                                                  com.facebook.litho.ComponentHost{895ca11 V.ED..... ........ 0,0-1185,150}
+                                                  com.facebook.litho.ComponentHost{57e6776 V.ED..... ........ 0,150-1185,221}
+                                                    com.facebook.litho.ComponentHost{59c3177 V.ED..... ........ 0,0-343,71}
+                                            android.widget.ImageView{3f3abd3 VFED..C.. ......ID 1260,45-1350,135}
+                                      hfy{bd9f1c5 VFED..... .......D 0,2346-1440,3441}
+                                        com.facebook.litho.ComponentHost{39d81e4 VFED..C.. .......D 0,0-1440,1005}
+                                          com.facebook.litho.ComponentHost{1fbf64d V.ED..... .......D 0,0-1440,810}
+                                            android.widget.ImageView{bcf2fc3 V.ED..... ........ 0,0-1440,810}
+                                            com.facebook.litho.ComponentHost{9e18502 V.ED..... .......D 0,0-1440,810}
+                                              android.widget.ImageView{81afad4 V.ED..... ......ID 0,0-1440,810}
+                              com.google.android.apps.youtube.app.common.ui.inline.InlinePlayerOverlayLayout{82d2beb G.ED..... ......ID 0,0-1440,2760 #7f0b0a04 app:id/inline_player_overlay_container aid=1073741837}
+                                android.widget.FrameLayout{d186e13 V.E...... ........ 0,0-1440,2760}
+                                  com.google.android.apps.youtube.app.common.player.overlay.InlineTimeBarWrapper{aa2d850 V.E...... ........ 0,0-1440,874 #7f0b09ff app:id/inline_playback_time_bar}
+                                    jol{1476a3c GFED..... ......I. 0,739-1440,874 #7f0b09ff app:id/inline_playback_time_bar}
+                            android.widget.FrameLayout{5e7d9ee V.E...... ........ 0,2790-1440,2790 #7f0b1280 app:id/root_pill_container aid=1073741849}
+                            android.widget.FrameLayout{4327e8f V.E...... ......ID 0,2940-1440,2940 #7f0b0e57 app:id/pane_fragment_footer_container aid=1073741850}
+                            android.widget.FrameLayout{da9a51c V.E...... ........ 0,0-1440,2940 #7f0b07f4 app:id/fab_container aid=1073741851}
+                              android.view.ViewStub{31eaa49 G.E...... ......I. 0,0-0,0 #7f0b07ee app:id/extended_fab_view_stub aid=1073741852}
+                              com.google.android.libraries.quantum.fab.FloatingActionButton{966ef4e GFED..C.. ......I. 0,0-0,0 #7f0b07f3 app:id/fab}
+                            com.google.android.apps.youtube.app.ui.actionbar.ElevatedAppBarLayout{6fc1b69 G.E...... ......I. 0,0-0,0 #7f0b01a2 app:id/appbar_layout aid=1073741853}
+                              com.google.android.apps.youtube.app.ui.actionbar.MainCollapsingToolbarLayout{211d86f V.ED..... ......I. 0,0-0,0 #7f0b1725 app:id/toolbar_container}
+                                android.widget.FrameLayout{665297c V.E...... ......I. 0,0-0,0 #7f0b0468 app:id/collapsing_header_container}
+                                android.support.v7.widget.Toolbar{d9ea205 V.E...... ......I. 0,0-0,0 #7f0b1723 app:id/toolbar}
+                                  android.view.ViewStub{6c6b25a G.E...... ......I. 0,0-0,0 #7f0b0a87 app:id/leading_accessories_container_stub}
+                          android.view.View{88d8c8b V.ED..... ........ 0,128-1440,3068 #7f0b12bd app:id/scrim_view aid=1073741854}
+                          com.google.android.apps.youtube.app.watch.nextgenwatch.ui.NextGenWatchLayout{68186b3 V.E...... ........ 0,0-1440,2940 #7f0b0d7c app:id/next_gen_watch_layout_no_player_fragment_container aid=1073741855}
+                            android.view.ViewStub{3996168 G.E...... ......I. 0,0-0,0 #7f0b0723 app:id/elevated_player_timely_shelf_view_stub}
+                            android.view.ViewStub{26c5981 G.E...... ......I. 0,0-0,0 #7f0b18a9 app:id/watch_full_background_view_stub}
+                            android.widget.FrameLayout{62d9a26 GFE...C.. ......I. 0,0-0,0 #7f0b0c7f app:id/miniplayer_chevron_container}
+                              android.support.v7.widget.AppCompatImageView{5c66667 V.ED..... ......ID 0,0-0,0 #7f0b0c82 app:id/miniplayer_left_chevron}
+                              android.support.v7.widget.AppCompatImageView{3572c14 V.ED..... ......ID 0,0-0,0 #7f0b0c85 app:id/miniplayer_right_chevron}
+                            android.widget.FrameLayout{7040cbd G.E...... ......I. 0,0-0,0 #7f0b0f73 app:id/playlist_entry_point_container}
+                              android.view.ViewStub{fc932b2 G.E...... ......I. 0,0-0,0 #7f0b0f75 app:id/playlist_entry_point_stub}
+                              android.view.ViewStub{dc90203 G.E...... ......I. 0,0-0,0 #7f0b0f74 app:id/playlist_entry_point_padding_fix_stub}
+                            android.view.View{e84f580 G.ED..... ......ID 0,0-0,0 #7f0b0d53 app:id/navigation_bar_background_view}
+                            android.widget.FrameLayout{1f81941 GFE...C.. ......ID 0,0-0,0 #7f0b084c app:id/floaty_bar_controls_view}
+                              android.widget.RelativeLayout{269b7b9 G.E...... ......I. 0,0-0,0 #7f0b0533 app:id/controls_layout}
+                                com.google.android.libraries.youtube.common.ui.YouTubeTextView{f13c7fe V.ED..... ......I. 0,0-0,0 #7f0b0854 app:id/floaty_title}
+                                android.widget.LinearLayout{ecfbb5f V.E...... ......I. 0,0-0,0 #7f0b0852 app:id/floaty_subtitle_bar}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{403e9ac G.ED..... ......I. 0,0-0,0 #7f0b00c1 app:id/ad_badge}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{de51675 G.ED..... ......I. 0,0-0,0 #7f0b00c6 app:id/ad_badge_separator}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{ae0660a V.ED..... ......I. 0,0-0,0 #7f0b0853 app:id/floaty_subtitle_text}
+                                  android.widget.LinearLayout{65eae7b G.E...... ......I. 0,0-0,0 #7f0b0525 app:id/continue_watching_premium}
+                                    android.support.v7.widget.AppCompatImageView{d9bf498 V.ED..... ......ID 0,0-0,0 #7f0b023e app:id/badge_icon}
+                                    com.google.android.libraries.youtube.common.ui.YouTubeTextView{57da4f1 V.ED..... ......I. 0,0-0,0 #7f0b0240 app:id/badge_icon_text}
+                                android.support.v7.widget.AppCompatImageView{226d8d6 V.ED..... ......I. 0,0-0,0 #7f0b0850 app:id/floaty_close_button}
+                                android.widget.FrameLayout{c1fb757 V.E...... ......I. 0,0-0,0 #7f0b0f1a app:id/play_pause_layout}
+                                  android.support.v7.widget.AppCompatImageView{7a7c244 V.ED..... ......I. 0,0-0,0 #7f0b0851 app:id/floaty_play_pause_button}
+                                  android.widget.ProgressBar{4369f2d V.ED..... ......I. 0,0-0,0 #7f0b1035 app:id/progress_bar}
+                                com.google.android.libraries.youtube.common.ui.TouchImageView{98fac62 G.ED..... ......I. 0,0-0,0 #7f0b0cae app:id/modern_miniplayer_rewind_button}
+                                com.google.android.libraries.youtube.common.ui.TouchImageView{e7e71f3 G.ED..... ......I. 0,0-0,0 #7f0b0cab app:id/modern_miniplayer_forward_button}
+                            android.widget.FrameLayout{780beb0 G.E...... ......ID 0,0-1440,2940 #7f0b18bb app:id/watch_player_background}
+                              com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{80b0129 V.ED..... ......ID 0,0-1440,2940 #7f0b0415 app:id/cinematic_image_background}
+                              com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{5c02cae V.ED..... ......ID 0,0-1440,2940 #7f0b0416 app:id/cinematic_scrim}
+                            android.widget.FrameLayout{d043a4f VFE...... ........ 0,128-1440,938 #7f0b18ba app:id/watch_player}
+                              android.view.View{cab15dc VFED..... ........ 0,0-1,1}
+                              android.widget.FrameLayout{5c35fa3 I.E...... ......I. 0,0-0,0 #7f0b0f61 app:id/player_timely_shelf_view}
+                              android.widget.FrameLayout{33b7fa6 V.E...... ........ 0,0-1440,810 #7f0b0f45 app:id/player_fragment_container}
+                                com.google.android.apps.youtube.app.player.YouTubePlayerViewNotForReflection{848dd7e VFE...... ........ 0,0-1440,810 #7f0b0f67 app:id/player_view aid=1073741902}
+                                  82116979(0,0,1440,810)
+                                    aowq{7a9677d V.E...... ........ 0,0-1440,810}
+                                      android.view.SurfaceView{2af4501 V.E...... ........ 0,0-1440,810}
+                                      android.view.View{8575672 G.ED..... ......I. 0,0-1440,810}
+                              com.google.android.apps.youtube.app.common.player.overlay.YouTubePlayerOverlaysLayout{c742c6b VFE...... ........ 0,0-1440,810 #7f0b0f5a app:id/player_overlays}
+                                android.widget.FrameLayout{5089ccb G.E...... ......I. 0,0-0,0}
+                                  android.widget.FrameLayout{7b2bac3 V.E...... ......I. 0,0-0,0}
+                                    android.widget.FrameLayout{1d31f40 G.E...... ......ID 0,0-0,0 #7f0b07fd app:id/fade_overlay}
+                                    android.widget.LinearLayout{5e9fe79 G.E...... ......I. 0,0-0,0 #7f0b02a7 app:id/bottom_right_label}
+                                      com.google.android.libraries.youtube.common.ui.YouTubeTextView{ac067be V.ED..... ......ID 0,0-0,0 #7f0b02a8 app:id/bottom_right_label_text}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{3988bee G.E...... ......ID 0,0-1440,810}
+                                  android.support.v7.widget.AppCompatImageView{8c1b3c8 V.ED..... ......ID 0,0-1440,810}
+                                android.support.constraint.ConstraintLayout{1b543f2 G.E...... ......I. 0,0-0,0}
+                                  android.support.v7.widget.AppCompatImageView{e7c401f VFED..... ......I. 0,0-0,0 #7f0b1688 app:id/thumbnail}
+                                  android.view.View{d6aef6c V.ED..... ......I. 0,0-0,0 #7f0b0265 app:id/big_boards_overlay_scrim}
+                                android.widget.ImageView{e647bb G.ED..... ......ID 0,0-0,0}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{dbdb82c V.E...... ........ 0,0-1440,810}
+                                  nvs{5030935 I.E...... ......I. 0,0-1440,810}
+                                    aqvw{31741ca V.E...... ........ 0,0-1440,810}
+                                    com.google.android.apps.youtube.app.player.endscreen.visibility.VisibilityEmittingFrameLayout{32ebf3b VFE...... ........ 1335,45-1395,167 #7f0b1713 app:id/toggle_button_root}
+                                      com.google.android.libraries.youtube.rendering.ui.spec.typography.YouTubeAppCompatTextView{bcd9658 V.ED..C.. ........ 0,0-60,122 #7f0b171f app:id/toggled_on_button}
+                                      com.google.android.libraries.youtube.rendering.ui.spec.typography.YouTubeAppCompatTextView{a6803b1 V.ED..C.. ........ 0,0-60,122 #7f0b171e app:id/toggled_off_button}
+                                okt{60f584c V.E...... ........ 0,0-1440,810}
+                                  android.widget.FrameLayout{b4fb096 V.E...... ........ 0,0-1440,810}
+                                    okp{c667bc7 I.E...... ......I. 0,0-1440,810}
+                                android.widget.RelativeLayout{30e3356 G.E...... ......I. 0,0-0,0}
+                                android.widget.FrameLayout{c3ed528 V.E...... ........ 0,0-1440,810}
+                                  android.view.ViewStub{2c01417 G.E...... ......I. 0,0-0,0 #7f0b019b app:id/app_promo_ad_cta_overlay_stub}
+                                  android.view.ViewStub{2b1c004 G.E...... ......I. 0,0-0,0 #7f0b0c95 app:id/modern_app_promo_ad_cta_overlay_stub}
+                                  android.view.ViewStub{54829ed G.E...... ......I. 0,0-0,0 #7f0b1795 app:id/two_line_headline_collapsible_ad_cta_overlay_stub}
+                                  android.view.ViewStub{6ce4022 G.E...... ......I. 0,0-0,0 #7f0b1796 app:id/two_line_headline_collapsible_ad_cta_overlay_stub_v2}
+                                  android.view.ViewStub{9a7dab3 G.E...... ......I. 0,0-0,0 #7f0b0703 app:id/elements_ad_cta_overlay_stub}
+                                  android.view.ViewStub{a8cd870 G.E...... ......I. 0,0-0,0 #7f0b0a8d app:id/leave_behind_ad_cta_overlay_stub}
+                                  android.view.ViewStub{e8a77e9 G.E...... ......I. 0,0-0,0 #7f0b0a8e app:id/leave_behind_ad_cta_overlay_stub_v2}
+                                  android.widget.FrameLayout{8b43c6e G.E...... ......ID 0,0-0,0 #7f0b0466 app:id/collapsible_ad_cta_overlay_container}
+                                    android.widget.FrameLayout{a3b6f0f V.E...... ......ID 0,0-0,0 #7f0b0a75 app:id/layout_container}
+                                      android.view.View{bbf0b9c V.ED..... ......ID 0,0-0,0 #7f0b07c7 app:id/expanded_background_container}
+                                      android.support.v7.widget.AppCompatImageView{eac258d V.ED..... ......ID 0,0-0,0 #7f0b169b app:id/thumbnail_icon}
+                                      android.widget.FrameLayout{c89a9a5 V.E...... ......ID 0,0-0,0 #7f0b045c app:id/collapsed_cta_button_container}
+                                        android.widget.LinearLayout{2ebb17a G.E...... ......I. 0,0-0,0 #7f0b045b app:id/collapsed_cta_button}
+                                          com.google.android.libraries.youtube.common.ui.YouTubeTextView{cc9ed2b V.ED..... ......ID 0,0-0,0 #7f0b00db app:id/ad_cta_button_text}
+                                          android.support.v7.widget.AppCompatImageView{27f4588 V.ED..... ......I. 0,0-0,0 #7f0b00da app:id/ad_cta_button_icon}
+                                      android.widget.LinearLayout{6903b21 V.E...... ......I. 0,0-0,0 #7f0b07d6 app:id/expanded_metadata_container}
+                                        android.widget.LinearLayout{9f36b46 V.E...... ......I. 0,0-0,0 #7f0b07de app:id/expanded_text_container}
+                                          com.google.android.libraries.youtube.common.ui.YouTubeTextView{5783107 V.ED..... ......I. 0,0-0,0 #7f0b07df app:id/expanded_title}
+                                          android.widget.LinearLayout{5873234 V.E...... ......I. 0,0-0,0 #7f0b00c2 app:id/ad_badge_and_details_text_container}
+                                            com.google.android.libraries.youtube.common.ui.YouTubeTextView{414685d V.ED..... ......I. 0,0-0,0 #7f0b00c1 app:id/ad_badge}
+                                            com.google.android.libraries.youtube.common.ui.YouTubeTextView{96af5d2 G.ED..... ......I. 0,0-0,0 #7f0b060e app:id/description_text_separator}
+                                            com.google.android.libraries.youtube.common.ui.YouTubeTextView{bdcd6a3 G.ED..... ......I. 0,0-0,0 #7f0b07cd app:id/expanded_description}
+                                            android.support.v7.widget.AppCompatImageView{b7f3da0 G.ED..... ......ID 0,0-0,0 #7f0b14d7 app:id/star_icon}
+                                        android.widget.GridLayout{3b42d59 V.E...... ......I. 0,0-0,0 #7f0b07cc app:id/expanded_cta_buttons}
+                                          android.widget.LinearLayout{55e9d1e V.E...... ......I. 0,0-0,0 #7f0b07cb app:id/expanded_cta_button_container}
+                                            android.widget.LinearLayout{5c39ff V.E...... ......I. 0,0-0,0 #7f0b07ca app:id/expanded_cta_button}
+                                              com.google.android.libraries.youtube.common.ui.YouTubeTextView{b2a93cc V.ED..... ......ID 0,0-0,0 #7f0b00db app:id/ad_cta_button_text}
+                                              android.support.v7.widget.AppCompatImageView{5f14615 G.ED..... ......I. 0,0-0,0 #7f0b00da app:id/ad_cta_button_icon}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{4536d2a V.ED..... ......I. 0,0-0,0 #7f0b0e26 app:id/overflow_button}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{7fce0c4 V.E...... ........ 0,0-1440,810}
+                                  android.widget.FrameLayout{b44771b VFE...... ........ 0,0-1440,810 #7f0b1900 app:id/youtube_controls_overlay}
+                                    android.support.v7.widget.AppCompatImageView{25320b8 G.ED..... ......I. 0,0-0,0 #7f0b12bc app:id/scrim_overlay}
+                                    android.support.v7.widget.AppCompatImageView{7ad2e91 G.ED..... ......I. 0,0-0,0 #7f0b1741 app:id/top_gradient_scrim_overlay}
+                                    android.support.v7.widget.AppCompatImageView{e1331f6 G.ED..... ......I. 0,0-0,0 #7f0b0295 app:id/bottom_gradient_scrim_overlay}
+                                    com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{1a969f7 V.E...... ........ 0,0-1440,810 #7f0b0a1a app:id/inset_controls_overlay_wrapper}
+                                      com.google.android.apps.youtube.app.player.overlay.StubWrapperLayout{f759064 V.E...... ........ 0,0-1440,810 #7f0b0a1b app:id/inset_overlay_view_layout}
+                                        android.widget.ProgressBar{86522cd I.ED..... ........ 585,270-855,540 #7f0b0f4f app:id/player_loading_view_thin}
+                                        android.widget.FrameLayout{b387782 G.E...... ......I. 0,0-0,0 #7f0b0d27 app:id/multiview_overlay}
+                                        android.view.ViewStub{c00ae93 G.E...... ......I. 0,0-0,0 #7f0b0266 app:id/big_boards_overlay_stub}
+                                        android.widget.RelativeLayout{a2d4ed0 V.E...... ........ 0,0-1440,810 #7f0b0533 app:id/controls_layout}
+                                          android.widget.LinearLayout{82e1ec9 G.E...... ......I. 0,0-0,0 #7f0b0f44 app:id/player_error_view_container}
+                                            com.google.android.libraries.youtube.common.ui.YouTubeTextView{17a89ce VFED..... ......ID 0,0-0,0 #7f0b0f43 app:id/player_error_view}
+                                            android.view.ViewStub{a7da0ef G.E...... ......I. 0,0-0,0 #7f0b0f40 app:id/player_error_action_buttons_stub}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{218d059 GFED..C.. ......I. 0,0-0,0 #7f0b0f2d app:id/player_collapse_button}
+                                          android.view.ViewStub{66087fc G.E...... ......I. 0,0-0,0 #7f0b1285 app:id/rotation_button_container_stub}
+                                          android.widget.Space{705d2cc G.ED..... ......I. 0,0-0,0 #7f0b1702 app:id/title_anchor}
+                                          com.google.android.apps.youtube.app.player.overlay.InterceptingFrameLayout{6b5ecd2 G.E...... ......I. 0,0-0,0 #7f0b0f64 app:id/player_video_heading}
+                                            android.support.v7.widget.AppCompatTextView{970de85 G.ED..... ......I. 0,0-0,0 #7f0b0f65 app:id/player_video_title_view}
+                                            hfy{8b974da V.ED..... ......I. 0,0-0,0}
+                                          android.view.View{cbc78f6 G.ED..... ......I. 0,0-0,0 #7f0b1738 app:id/top_bar_background}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{1e2041e GFED..C.. ......I. 0,0-0,0 #7f0b0f55 app:id/player_overflow_button}
+                                          android.view.ViewStub{32d5d0b G.E...... ......I. 0,0-0,0 #7f0b0f57 app:id/player_overflow_button_container_stub}
+                                          android.support.v7.widget.AppCompatImageView{28c021b GFED..C.. ......I. 0,0-0,0 #7f0b092b app:id/hide_controls_button_top}
+                                          android.view.ViewStub{a234fb8 G.E...... ......I. 0,0-0,0 #7f0b020d app:id/autonav_toggle}
+                                          android.view.ViewStub{e2c27e8 G.E...... ......I. 0,0-0,0 #7f0b0209 app:id/autonav_preview_stub}
+                                          com.google.android.apps.youtube.app.player.overlay.InterceptingLinearLayout{60a01a3 G.E...... ......I. 0,0-0,0 #7f0b0f2a app:id/player_additional_view_container}
+                                            com.google.android.libraries.youtube.mdx.mediaroute.entrypoint.MdxEntryPointButton{f144ed7 VFED..C.. ......I. 0,0-0,0 #7f0b0f50 app:id/player_mdx_entry_point_button}
+                                            com.google.android.libraries.youtube.common.ui.TouchImageView{265de01 VFED..CL. ......I. 0,0-0,0 #7f0b0f60 app:id/player_subtitle_button}
+                                            com.google.android.libraries.youtube.common.ui.TouchImageView{4ca04a6 VFED..C.. ......I. 0,0-0,0}
+                                            com.google.android.libraries.youtube.common.ui.TouchImageView{5d2bee7 VFED..C.. ......I. 0,0-0,0}
+                                          android.widget.LinearLayout{5d48ca0 V.E...... ......ID 1440,8-1440,8 #7f0b0121 app:id/ads_additional_view_container}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{7b114ff GFED..C.. ......I. 0,0-0,0 #7f0b0b0c app:id/live_chat_overlay_button}
+                                          android.view.ViewStub{3a33191 G.E...... ......I. 0,0-0,0 #7f0b0d29 app:id/music_app_deeplink_button}
+                                          android.widget.FrameLayout{326442a GFE...C.. ......I. 0,0-0,0 #7f0b1849 app:id/video_zoom_indicator_layout}
+                                            com.google.android.libraries.youtube.common.ui.YouTubeTextView{e8fda94 V.ED..... ......I. 0,0-0,0 #7f0b1848 app:id/video_zoom_indicator}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{a51593d GFED..C.. ......I. 0,0-0,0 #7f0b0f48 app:id/player_learn_more_button_icon}
+                                          com.google.android.libraries.youtube.common.ui.TouchImageView{1c532 GFED..C.. ......I. 0,0-0,0 #7f0b0f49 app:id/player_learn_more_button_icon_with_bg}
+                                          android.support.v7.widget.AppCompatTextView{1826283 VFED..C.. ........ 993,8-1432,188 #7f0b0f47 app:id/player_learn_more_button}
+                                          android.widget.LinearLayout{2da0c00 G.E...... ......I. 0,0-0,0 #7f0b0f4a app:id/player_learn_more_button_modern}
+                                            android.widget.LinearLayout{e7f4c39 V.E...... ......I. 0,0-0,0 #7f0b0f4b app:id/player_learn_more_button_modern_container}
+                                              android.support.v7.widget.AppCompatTextView{283027e VFED..... ......I. 0,0-0,0 #7f0b0f4d app:id/player_learn_more_button_modern_text}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{7fea3df GFED..... ......I. 0,0-0,0 #7f0b0f4c app:id/player_learn_more_button_modern_icon}
+                                          android.widget.RelativeLayout{ad3e82c V.E...... ........ 0,255-1440,555 #7f0b0531 app:id/controls_button_group_layout}
+                                            android.widget.FrameLayout{e15e620 G.E...... ......I. 0,0-0,0 #7f0b0f39 app:id/player_control_play_pause_replay_button_touch_area}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{1e01d6a IFED..C.. ......I. 0,0-0,0 #7f0b0f38 app:id/player_control_play_pause_replay_button}
+                                            android.widget.FrameLayout{7ac52b4 G.E...... ......I. 0,0-0,0 #7f0b0f3d app:id/player_control_rewind_button_touch_area}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{680eba8 GFED..... ......I. 0,0-0,0 #7f0b0f3c app:id/player_control_rewind_button}
+                                            android.widget.FrameLayout{ca3edd G.E...... ......I. 0,0-0,0 #7f0b0f32 app:id/player_control_fast_forward_button_touch_area}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{8a1b6c1 GFED..... ......I. 0,0-0,0 #7f0b0f31 app:id/player_control_fast_forward_button}
+                                            android.widget.FrameLayout{1324a52 G.E...... ......I. 0,0-0,0 #7f0b0f3b app:id/player_control_previous_button_touch_area}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{382229a GFED..... ......I. 0,0-0,0 #7f0b0f3a app:id/player_control_previous_button}
+                                            android.widget.FrameLayout{27ad123 G.E...... ......I. 0,0-0,0 #7f0b0f36 app:id/player_control_next_button_touch_area}
+                                              com.google.android.libraries.youtube.common.ui.TouchImageView{20fd7cb GFED..... ......I. 0,0-0,0 #7f0b0f35 app:id/player_control_next_button}
+                                          android.widget.Space{aff72f5 I.ED..... ......I. 720,315-720,495 #7f0b038d app:id/center_anchor}
+                                          android.widget.Space{248c88a I.ED..... ......I. 0,0-0,180 #7f0b1733 app:id/top_anchor}
+                                          android.widget.Space{97d1915 G.ED..... ......I. 0,0-0,0 #7f0b0741 app:id/end_anchor}
+                                          com.google.android.libraries.youtube.common.ui.YouTubeTextView{3e64098 GFED..... ......I. 0,0-0,0 #7f0b1627 app:id/temp_toast}
+                                          com.google.android.libraries.youtube.common.ui.YouTubeTextView{e4800f1 GFED..... ......I. 0,0-0,0 #7f0b0e98 app:id/persistent_toast}
+                                          android.view.ViewStub{ad39efb G.E...... ......I. 0,0-0,0 #7f0b12cb app:id/scrubbed_preview_extended}
+                                          android.view.ViewStub{7ad5b18 G.E...... ......I. 0,0-0,0 #7f0b02cb app:id/bottom_ui_container_stub}
+                                          android.view.ViewStub{3214971 G.E...... ......I. 0,0-0,0 #7f0b1805 app:id/video_exploder_bottom_ui_container_stub}
+                                        android.view.ViewStub{7f2e356 G.E...... ......I. 0,0-0,0 #7f0b10bb app:id/quick_seek_overlay_stub}
+                                        android.view.ViewStub{e332fd7 G.E...... ......I. 0,0-0,0 #7f0b184b app:id/video_zoom_overlay_stub}
+                                        android.view.ViewStub{ba910c4 G.E...... ......I. 0,0-0,0 #7f0b082a app:id/fine_scrubbing_overlay_stub}
+                                        com.google.android.apps.youtube.app.common.player.overlay.InlineTimeBarWrapper{5b00bad V.E...... ........ 0,0-1440,874 #7f0b18c4 app:id/watch_while_time_bar_view_overlay}
+                                          jol{f645f93 G..D..... ......I. 0,739-1440,874}
+                                        android.view.ViewStub{451dee2 G.E...... ......I. 0,0-0,0 #7f0b071f app:id/elevated_controls_layout_stub}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{182af50 V.E...... ........ 0,0-1440,810}
+                                  jnw{d90f273 V.E...... ........ 0,0-1440,810}
+                                    hfy{8887530 V.ED..... ........ 0,0-1440,810}
+                                android.widget.LinearLayout{c04cc89 G.E...... ......I. 0,0-0,0 #7f0b0f51 app:id/player_message_overlay_container}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{8eeb5a9 V.ED..... ......I. 0,0-0,0 #7f0b0f53 app:id/player_message_overlay_title}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{2b3072e V.ED..... ......I. 0,0-0,0 #7f0b0f52 app:id/player_message_overlay_subtitle}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{9c1c402 V.E...... ........ 0,0-1440,810}
+                                  joc{dfe42cf V.E...... ........ 0,0-1440,810}
+                                    hfy{8b7b45c V.ED..... ........ 0,0-1440,810}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{ee3aefb V.E...... ........ 0,0-1440,810}
+                                  mwn{a540365 G.E...... ......ID 0,0-1440,810}
+                                    com.google.android.libraries.youtube.common.ui.YouTubeTextView{3ec683a V.ED..... ......ID 45,169-1395,235 #7f0b0bc2 app:id/mdx_playing_on_tv}
+                                araz{dd22ee2 V.E...... ........ 0,0-1440,810}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{22bf511 V.E...... ........ 0,0-1440,810}
+                                  jnw{a463ceb V.E...... ........ 0,0-1440,810}
+                                    hfy{f39ba48 V.ED..... ........ 0,0-1440,810}
+                                jyx{f14a35b G.E...... ......I. 0,0-0,0}
+                                android.widget.RelativeLayout{d882eae V.E...... ........ 0,0-1440,810}
+                                  com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{e0670e1 V.E...... ........ 0,0-1440,810 #7f0b144c app:id/size_adjustable_outer_wrapper}
+                                    android.widget.RelativeLayout{c571ed4 V.E...... ........ 0,0-1440,810 #7f0b144b app:id/size_adjustable_inner_wrapper}
+                                      android.widget.RelativeLayout{13470b0 G.E...... ......I. 0,0-0,0 #7f0b181c app:id/video_metadata_container}
+                                        android.support.v7.widget.AppCompatImageView{e28ce06 G.ED..... ......I. 0,0-0,0 #7f0b0458 app:id/collapse_button}
+                                        android.widget.FrameLayout{4c9bcc7 G.E...... ......I. 0,0-0,0 #7f0b03dc app:id/channel_thumbnail_container}
+                                          com.google.android.libraries.youtube.common.ui.CircularImageView{a5432f4 V.ED..... ......I. 0,0-0,0 #7f0b03da app:id/channel_thumbnail}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{a183a1d G.ED..... ......I. 0,0-0,0 #7f0b16fe app:id/title}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{d73c492 G.ED..... ......I. 0,0-0,0 #7f0b00bf app:id/ad_attribution}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{b1b5e63 G.ED..... ......I. 0,0-0,0 #7f0b01ef app:id/author}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{4fb8a60 G.ED..... ......I. 0,0-0,0 #7f0b0a8a app:id/learn_more_cta}
+                                      com.google.android.libraries.youtube.ads.player.ui.BrandInteractionView{9835b19 GFE...... ......I. 0,0-0,0 #7f0b02da app:id/brand_interaction_view}
+                                      android.support.v7.widget.AppCompatTextView{10597de GFED..C.. ......I. 0,0-0,0 #7f0b00f9 app:id/ad_reengagement_view}
+                                      com.google.android.libraries.youtube.ads.player.ui.AdDisclosureBannerView{75b7dbf GFE...... ......I. 0,0-0,0 #7f0b00e1 app:id/ad_disclosure_banner_view}
+                                        android.support.constraint.ConstraintLayout{2feec8c V.E...... ......I. 0,0-0,0 #7f0b00e2 app:id/ad_disclosure_container}
+                                          android.support.v7.widget.AppCompatTextView{2e58fd5 V.ED..... ......ID 0,0-0,0 #7f0b00e0 app:id/ad_disclosure_banner_text}
+                                          android.support.v7.widget.AppCompatImageView{14f53ea G.ED..... ......I. 0,0-0,0 #7f0b00de app:id/ad_disclosure_banner_navigate_arrow}
+                                      com.google.android.libraries.youtube.ads.player.ui.InfoChip{b5436db GFE...C.. ......I. 0,0-0,0 #7f0b09d4 app:id/info_chip}
+                                      android.widget.LinearLayout{3f44578 V.E...... ........ 23,637-240,802 #7f0b00dd app:id/ad_details_container_layout}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{efc5451 G.ED..... ......I. 0,0-0,0 #7f0b00c1 app:id/ad_badge}
+                                        com.google.android.libraries.youtube.ads.player.ui.AdProgressTextView{ac6c4b6 VFED..C.. ........ 15,15-202,150 #7f0b00f8 app:id/ad_progress_text}
+                                        com.google.android.libraries.youtube.ads.player.ui.AdProgressView{15565b7 G.E...... ......I. 0,0-0,0 #7f0b00f7 app:id/ad_progress}
+                                      com.google.android.libraries.youtube.ads.player.ui.SkipAdButton{8e44124 VFE...C.. ........ 1098,450-1440,630 #7f0b144f app:id/skip_ad_button}
+                                        android.widget.LinearLayout{ae0e48d V.E...... ........ 0,30-319,150 #7f0b1450 app:id/skip_ad_button_container}
+                                          com.google.android.libraries.youtube.common.ui.YouTubeTextView{9727642 V.ED..... ........ 45,24-244,95 #7f0b1453 app:id/skip_ad_button_text}
+                                          android.support.v7.widget.AppCompatImageView{ed0a653 V.ED..... ........ 244,37-289,82 #7f0b1452 app:id/skip_ad_button_icon}
+                                      com.google.android.libraries.youtube.ads.player.ui.AdCountdownView{8b64b90 G.E...... ......I. 0,0-0,0 #7f0b00d3 app:id/ad_countdown}
+                                        android.widget.LinearLayout{2043c89 V.E...... ......I. 0,0-0,0 #7f0b00d4 app:id/ad_countdown_container}
+                                          android.widget.FrameLayout{135b48e V.E...... ......I. 0,0-0,0 #7f0b00d5 app:id/ad_countdown_text_container}
+                                            android.support.v7.widget.AppCompatImageView{4b554af V.ED..... ......I. 0,0-0,0 #7f0b0553 app:id/countdown_background}
+                                            com.google.android.libraries.youtube.ads.player.ui.AdCountdownTextView{8c9abf3 VFED..C.. ......I. 0,0-0,0 #7f0b0556 app:id/countdown_text}
+                                          android.widget.FrameLayout{f5c90bc G.E...... ......I. 0,0-0,0 #7f0b00d6 app:id/ad_countdown_timer_container}
+                                            com.google.android.libraries.youtube.ads.player.ui.AdCountdownTextView{beb1845 VFED..C.. ......I. 0,0-0,0 #7f0b00d8 app:id/ad_countdown_timer_text}
+                                            android.widget.ProgressBar{edc8b9a V.ED..... ......ID 0,0-0,0 #7f0b00d7 app:id/ad_countdown_timer_progress_bar}
+                                          android.support.v7.widget.AppCompatImageView{98c8ccb VFED..C.. ......ID 0,0-0,0 #7f0b0513 app:id/content_thumbnail}
+                                ofm{be8572e G.E...... ......I. 0,0-0,0}
+                                ohu{1b5845c V.E...... ........ 0,0-1440,810}
+                                ohr{326b83a G.E...... ......I. 0,0-0,0}
+                                android.widget.LinearLayout{33feb19 GFE...C.. ......ID 0,0-0,0}
+                                  android.widget.ProgressBar{3bffca8 V.ED..... ......ID 0,0-0,0 #7f0b104a app:id/progressbar}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{9a9f3c1 V.ED..... ......ID 0,0-0,0 #7f0b0c44 app:id/message_status}
+                                android.support.constraint.ConstraintLayout{2f8748d G.E...... ......I. 0,0-0,0}
+                                  android.view.View{de7c766 V.ED..... ......I. 0,0-0,0 #7f0b022d app:id/background}
+                                  com.google.android.libraries.youtube.common.ui.YouTubeTextView{9552aa7 V.ED..... ......ID 0,0-0,0 #7f0b0bb4 app:id/mdx_autoplay_desc}
+                                  android.widget.LinearLayout{6c3b54 V.E...... ......I. 0,0-0,0 #7f0b0089 app:id/action_bar}
+                                    android.widget.FrameLayout{f210afd VFE...C.. ......I. 0,0-0,0 #7f0b0339 app:id/cancel}
+                                      com.google.android.libraries.youtube.rendering.ui.spec.typography.YouTubeAppCompatTextView{f18f3f2 V.ED..... ......ID 0,0-0,0 #7f0b0340 app:id/cancel_text}
+                                    android.widget.FrameLayout{71fca43 VFE...C.. ......I. 0,0-0,0 #7f0b0f17 app:id/play_now}
+                                      com.google.android.libraries.youtube.rendering.ui.spec.typography.YouTubeAppCompatTextView{afbb8c0 V.ED..... ......ID 0,0-0,0 #7f0b0f18 app:id/play_now_text}
+                                android.view.View{b8260bc V.ED..... ........ 0,0-1440,810}
+                                com.google.android.apps.youtube.app.player.overlay.SizeAdjustableOverlayWrapperLayout{8c1e4e V.E...... ........ 0,0-1440,810}
+                                  jnw{3f859f9 V.E...... ........ 0,0-1440,810}
+                                    hfy{bbe5d3e V.ED..... ........ 0,0-1440,810}
+                                android.widget.FrameLayout{40dda43 V.E...... ........ 0,0-1440,810 #7f0b0f5b app:id/player_overlays_custom_views_container}
+                              android.support.v7.widget.AppCompatImageView{3f0ac61 V.ED..... ........ 0,0-1440,810 #7f0b0f6a app:id/playerless_thumbnail}
+                              android.widget.FrameLayout{6052386 G.E...... ......I. 0,0-0,0 #7f0b0f69 app:id/playerless_miniplayer_controls_view}
+                            android.widget.FrameLayout{a72447 G.E...... ......I. 0,0-0,0 #7f0b18c0 app:id/watch_timely_shelf_view}
+                            android.widget.FrameLayout{a224474 V.E...... ........ 0,0-1440,2002 #7f0b181e app:id/video_metadata_layout}
+                              android.view.View{72aad9d V.ED..... ........ 0,0-1440,2002 #7f0b18b9 app:id/watch_panel_scrim}
+                              androidx.coordinatorlayout.widget.CoordinatorLayout{c6ac79f V.E...... ........ 0,0-1440,2002 #7f0b18b7 app:id/watch_panel}
+                                android.widget.FrameLayout{b2f9dfe V.E...... ........ 0,0-1440,2002}
+                                  android.widget.FrameLayout{643a0ec V.E...... ........ 0,0-1440,2002 #7f0b18a0 app:id/watch_cinematic_background}
+                                    com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{be5db93 V.ED..... ........ 0,0-1440,2002 #7f0b0415 app:id/cinematic_image_background}
+                                    com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{7777d0 V.ED..... ........ 0,0-1440,810 #7f0b0416 app:id/cinematic_scrim}
+                                  com.google.android.libraries.youtube.rendering.ui.widget.loadingframe.LoadingFrameLayout{e35bc42 V.E...... ........ 0,0-1440,2002 #7f0b180f app:id/video_info_loading_layout}
+                                    android.widget.FrameLayout{85b9cb5 G.E...... ......I. 0,0-0,0}
+                                      com.google.android.libraries.youtube.common.ui.YouTubeTextView{1bf0f4a G.ED..... ......I. 0,0-0,0 #7f0b16fe app:id/title}
+                                      android.widget.ProgressBar{23e3ebb V.ED..... ......I. 0,0-0,0}
+                                    com.google.android.libraries.youtube.rendering.ui.stickyheaders.StickyHeaderContainer{b3fdfd8 V.E...... ........ 0,0-1440,2002 #7f0b1527 app:id/sticky_header_container}
+                                      android.support.v7.widget.RecyclerView{9764f31 VFED..... ........ 0,0-1440,2002 #7f0b18b5 app:id/watch_list}
+                                        android.widget.LinearLayout{df8e21c V.E...... ........ 0,0-1440,244 #7f0b0b8e app:id/main_companion_container}
+                                          android.view.ViewStub{9ced1f0 G.E...... ......I. 0,0-0,0 #7f0b00cf app:id/ad_companion_card_stub}
+                                          android.view.ViewStub{a6b369 G.E...... ......I. 0,0-0,0 #7f0b019e app:id/app_promotion_companion_card_stub}
+                                          android.view.ViewStub{dda91ee G.E...... ......I. 0,0-0,0 #7f0b04ba app:id/compact_companion_card_stub}
+                                          android.view.ViewStub{a9ad68f G.E...... ......I. 0,0-0,0 #7f0b0d12 app:id/multi_item_companion_card_stub}
+                                          android.view.ViewStub{2e71d1c G.E...... ......I. 0,0-0,0 #7f0b1389 app:id/shopping_companion_card_stub}
+                                          android.widget.FrameLayout{6ee1d25 V.E...... ........ 0,0-1440,244 #7f0b06fa app:id/element_companion_card}
+                                            hfy{fe1defa VFED..... ........ 0,0-1440,244}
+                                              com.facebook.litho.ComponentHost{4784cab VFED..C.. ........ 0,0-1440,240}
+                                                android.widget.ImageView{402b8b9 VFED..CL. ........ 45,52-180,187}
+                                                com.facebook.litho.ComponentHost{5d6ef08 V.ED..... ........ 225,129-744,190}
+                                                android.widget.ImageView{eed9eac VFED..C.. ........ 887,75-977,165}
+                                                com.facebook.litho.ComponentHost{18866a1 VFED..C.. ........ 1037,45-1395,195}
+                                                  com.facebook.litho.ComponentHost{7def0c6 VFED..... ........ 0,0-358,150}
+                                                    aufr{66d0887 V.ED..... ........ 0,0-358,150}
+                                          android.view.ViewStub{46ff3b4 G.E...... ......I. 0,0-0,0 #7f0b15d5 app:id/suggested_videos_companion_card_stub}
+                                        hfy{76cac8d VFED..C.. ........ 0,244-1440,509}
+                                          com.facebook.litho.ComponentHost{123cbdd V.ED..... ........ 14,21-1426,265}
+                                        hfy{f1c6195 VFED..... ........ 0,509-1440,689}
+                                          com.facebook.litho.ComponentHost{e495352 V.ED..... ........ 0,0-1440,180}
+                                            com.facebook.litho.ComponentHost{7a623 VFED..... ........ 45,0-363,180}
+                                              com.facebook.litho.ComponentHost{9f29720 V.ED..... ........ 0,0-318,180}
+                                                com.facebook.litho.ComponentHost{91648d9 VFED..C.. ........ 0,0-120,180}
+                                                  android.widget.ImageView{4f937a6 V.ED..... ........ 0,30-120,150}
+                                                com.facebook.litho.ComponentHost{985529e V.ED..... ........ 150,0-318,180}
+                                                  com.facebook.litho.ComponentHost{124817f VFED..C.. ........ 0,32-168,152}
+                                                    com.facebook.litho.ComponentHost{33a054c V.ED..... ........ 0,34-168,87}
+                                            com.facebook.litho.ComponentHost{2199995 VFED..... ........ 670,0-1440,180}
+                                              com.facebook.litho.ComponentHost{feffaaa V.ED..... ........ 0,0-154,180}
+                                                com.facebook.litho.ComponentHost{109b69b V.ED..... ........ 0,0-154,180}
+                                                  com.facebook.litho.ComponentHost{da82a38 VFED..C.. ........ 0,0-154,180}
+                                                    com.facebook.litho.ComponentHost{cc73a11 VFED..C.. ........ 30,43-124,137}
+                                                      com.facebook.litho.ComponentHost{eab1776 V.ED..... ........ 0,0-94,94}
+                                                        com.airbnb.lottie.LottieAnimationView{b432177 V.ED..... ........ -43,-43-137,137}
+                                              com.facebook.litho.ComponentHost{8d1b1e4 V.ED..... ........ 154,0-308,180}
+                                                com.facebook.litho.ComponentHost{fd4664d V.ED..... ........ 0,0-154,180}
+                                                  com.facebook.litho.ComponentHost{1293502 VFED..C.. ........ 0,0-154,180}
+                                                    android.widget.ImageView{f17a700 V.ED..... ........ 32,45-122,135}
+                                              com.facebook.litho.ComponentHost{e3e5e13 V.ED..... ........ 308,0-462,180}
+                                                com.facebook.litho.ComponentHost{6ea0850 V.ED..... ........ 0,0-154,180}
+                                                  com.facebook.litho.ComponentHost{e0e1a49 VFED..C.. ........ 0,0-154,180}
+                                                    android.widget.ImageView{c613adf V.ED..... ........ 32,45-122,135}
+                                              com.facebook.litho.ComponentHost{5799f4e V.ED..... ........ 462,0-616,180}
+                                                com.facebook.litho.ComponentHost{7a6c86f V.ED..... ........ 0,0-154,180}
+                                                  com.facebook.litho.ComponentHost{7ef597c VFED..C.. ........ 0,0-154,180}
+                                                    android.widget.ImageView{de18b8a V.ED..... ........ 32,45-122,135}
+                                              com.facebook.litho.ComponentHost{151205 V.ED..... ........ 616,0-616,180}
+                                              com.facebook.litho.ComponentHost{954625a V.ED..... ........ 616,0-770,180}
+                                                com.facebook.litho.ComponentHost{a817c8b V.ED..... ........ 0,0-154,180}
+                                                  com.facebook.litho.ComponentHost{b969168 VFED..C.. ........ 0,0-154,180}
+                                                    android.widget.ImageView{c572871 V.ED..... ........ 32,45-122,135}
+                                        hfy{92174a9 VFED..... ........ 0,689-1440,1057}
+                                          com.facebook.litho.ComponentHost{dd9c981 VFED..C.. ........ 45,30-1395,338}
+                                            com.facebook.litho.ComponentHost{be64a26 VFED..... ........ 0,0-1350,113}
+                                              com.facebook.litho.ComponentHost{b095667 V.ED..... ........ 1214,53-1259,76}
+                                              com.facebook.litho.ComponentHost{5f75c14 V.ED..... ........ 1274,53-1297,76}
+                                              com.facebook.litho.ComponentHost{3d87cbd V.ED..... ........ 1214,53-1259,76}
+                                            com.facebook.litho.ComponentHost{5ce2b2 V.ED..... ........ 0,113-1350,293}
+                                              hpi{c4af203 V..D..... ........ 0,0-1350,180}
+                                                hnp{2f82580 VFED..... ........ 0,0-1350,180}
+                                                  hfy{1527b9 VFED..... ........ 0,0-1350,180}
+                                                    com.facebook.litho.ComponentHost{d3277fe VFED..C.. ........ 0,0-1350,180}
+                                                      android.widget.ImageView{a22a560 V.ED..... ........ 45,37-135,127}
+                                                hfy{b80ab5f G.ED..... ......I. 0,0-0,0}
+                                                fhc{47a19ac G.ED..... ......ID 600,-150-750,0}
+                                        hfy{696098c V.ED..... ........ 0,1057-1440,1087}
+                                        hfy{7263d51 VFED..CL. ........ 0,1087-1440,3083}
+                                          com.facebook.litho.ComponentHost{2d78675 V.ED..... ........ 0,0-1440,1996}
+                                          com.facebook.litho.ComponentHost{43a160a VFED..CL. ........ 0,0-1440,1440}
+                                            android.widget.ImageView{2a0b145 V.ED..... ........ 0,0-1440,1440}
+                                            android.widget.ImageView{38129a8 V.ED..... ........ 1305,1305-1410,1410}
+                                          com.facebook.litho.ComponentHost{52e9e7b VFED..CL. ........ 0,1440-1440,1756}
+                                            android.widget.ImageView{2f5fba7 VFED..CL. ........ 45,45-180,180}
+                                            com.facebook.litho.ComponentHost{7452498 VFED..CL. ........ 225,45-1290,120}
+                                              com.facebook.litho.ComponentHost{f2714f1 VFED..C.. ........ 0,0-1065,75}
+                                            com.facebook.litho.ComponentHost{f6b88d6 VFED..CL. ........ 225,120-1290,195}
+                                            com.facebook.litho.ComponentHost{ffea757 VFED..CL. ........ 225,210-371,271}
+                                            com.facebook.litho.ComponentHost{ab3f244 VFED..CL. ........ 386,210-625,271}
+                                            android.widget.ImageView{87cab43 VFED..CL. ........ 1290,45-1380,135}
+                                          com.facebook.litho.ComponentHost{7070f2d VFED..CL. ........ 45,1756-1395,1906}
+                                            com.facebook.litho.ComponentHost{e6f5c62 VFED..... ........ 0,0-1350,150}
+                                              aufr{95c61f3 V.ED..... ........ 0,0-1350,150}
+                                  android.view.ViewStub{71feeb0 G.E...... ......I. 0,0-0,0 #7f0b01ab app:id/arrow_drag_handle_stub}
+                                  android.view.View{2289724 G.ED..... ......ID 0,0-0,0 #7f0b12ba app:id/scrim}
+                                  android.widget.FrameLayout{ea0190 VFE...C.. ........ 0,1552-1440,1822 #7f0b0f73 app:id/playlist_entry_point_container}
+                                    android.view.ViewStub{f727129 G.E...... ......I. 0,0-0,0 #7f0b0f75 app:id/playlist_entry_point_stub}
+                                    android.widget.FrameLayout{eadcae V.E...... ........ 0,0-1440,270}
+                                      androidx.constraintlayout.widget.ConstraintLayout{fd12a4f V.E...... ........ 30,0-1410,240 #7f0b0f72 app:id/playlist_entry_point_bar}
+                                        com.google.android.libraries.youtube.common.ui.TouchImageView{f0d45dc GFED..C.. ......I. 0,0-0,0 #7f0b0ff5 app:id/previous_button}
+                                        android.support.v7.widget.AppCompatImageView{817f6e5 V.ED..... ........ 68,75-158,165 #7f0b0955 app:id/icon}
+                                        android.support.v7.widget.AppCompatImageView{98c15ba V.ED..... ........ 1245,75-1335,165 #7f0b03fc app:id/chevron}
+                                        com.google.android.libraries.youtube.common.ui.TouchImageView{7201c6b GFED..C.. ......I. 0,0-0,0 #7f0b0d79 app:id/next_button}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{716e3c8 V.ED..... ........ 226,41-316,104 #7f0b0d7d app:id/next_label}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{2d61c61 V.ED..... ........ 316,41-1200,104 #7f0b0d7e app:id/next_video_title}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{5d5d386 G.ED..... ......I. 0,0-0,0 #7f0b0fae app:id/position_shrunk}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{2221447 G.ED..... ......I. 0,0-0,0 #7f0b12b8 app:id/screen_name}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{9a7474 V.ED..... ........ 226,124-1245,187 #7f0b0f7b app:id/playlist_name}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{6f71d9d G.ED..... ......I. 0,0-0,0 #7f0b0faa app:id/position}
+                                      androidx.constraintlayout.widget.ConstraintLayout{6aba212 G.E...... ......I. 0,0-0,0 #7f0b16a3 app:id/thumbnail_notification_bar}
+                                        android.support.v7.widget.AppCompatImageView{e61ade3 V.ED..... ......I. 0,0-0,0 #7f0b0d9d app:id/notification_icon}
+                                        com.google.android.libraries.youtube.common.ui.YouTubeTextView{32463e0 V.ED..... ......ID 0,0-0,0 #7f0b0da5 app:id/notification_text}
+                                        android.support.v7.widget.AppCompatImageView{c2cf699 V.ED..... ......I. 0,0-0,0 #7f0b0da6 app:id/notification_thumbnail}
+                                  android.view.ViewStub{59dcd5e G.E...... ......I. 0,0-0,0 #7f0b09d0 app:id/info_cards_drawer}
+                                android.view.View{5ddd95f GFED..C.. ......I. 0,0-0,0 #7f0b12bb app:id/scrim_for_mdx_expanded_queue}
+                            android.view.ViewStub{27ff212 G.E...... ......I. 0,0-0,0 #7f0b18b2 app:id/watch_info_panel_view_stub}
+                            androidx.coordinatorlayout.widget.CoordinatorLayout{827bde3 V.E...... ........ 0,0-1440,2812 #7f0b0759 app:id/engagement_panel_wrapper}
+                              android.widget.RelativeLayout{a6cdb9c G.E...... ......ID 0,0-1440,2130 #7f0b0753 app:id/engagement_panel_lower_view}
+                                android.view.View{55933e0 V.ED..... ......ID 0,0-1440,2130 #7f0b0754 app:id/engagement_panel_lower_view_scrim}
+                              android.widget.RelativeLayout{1eb39a5 G.E...... ......I. 0,0-1440,2812 #7f0b0750 app:id/engagement_panel}
+                            com.google.android.apps.youtube.app.common.player.overlay.InlineTimeBarWrapper{4098699 V.E...... ........ 0,128-1440,1002 #7f0b18c3 app:id/watch_while_time_bar_view}
+                              jol{b7f5694 V..D..... ........ 0,739-1440,874}
+                            android.widget.FrameLayout{2671d5e G.E...... ......I. 0,128-1440,1002 #7f0b0c4c app:id/meta_scrubber_view}
+                            com.google.android.apps.youtube.app.common.player.overlay.InlineTimeBarWrapper{8d74c21 G.E...... ......ID 0,0-0,0 #7f0b084e app:id/floaty_bar_time_bar_view}
+                              jol{3ec562b V..D..C.. ......I. 0,0-0,0 #7f0b084e app:id/floaty_bar_time_bar_view}
+                        android.widget.FrameLayout{58e553f V.E...... ........ 0,0-1440,0 #7f0b088c app:id/fullscreen_mode_container aid=1073741856}
+                        androidx.coordinatorlayout.widget.CoordinatorLayout{94dae0c G.E...... ......I. 0,0-0,0 #7f0b018a app:id/app_engagement_panel_wrapper aid=1073741857}
+                          android.view.View{b835db5 GFED..C.. ......I. 0,0-0,0 #7f0b12ba app:id/scrim}
+                          android.widget.RelativeLayout{90d8dc0 G.E...... ......I. 0,0-0,0 #7f0b0189 app:id/app_engagement_panel}
+                        android.widget.FrameLayout{a62f355 G.E...... ......I. 0,0-0,0 #7f0b0bba app:id/mdx_fragment_container aid=1073741858}
+                        com.google.android.apps.youtube.app.common.ui.bottomui.BottomUiContainer{b03b16a G.E...... ......I. 0,0-0,0 #7f0b02ca app:id/bottom_ui_container aid=1073741859}
+                        android.widget.LinearLayout{29d065b V.E...... ........ 0,2940-1440,2940 #7f0b0284 app:id/bottom_bar_container aid=1073741860}
+                          com.google.android.libraries.youtube.rendering.ui.pivotbar.PivotBar{a2d9ef8 GFED..... ......ID 0,0-1440,180 #7f0b0ef2 app:id/pivot_bar aid=1073741861}
+                            android.widget.LinearLayout{7ac6fd1 V.E...... .......D 0,0-1440,180}
+                              android.support.constraint.ConstraintLayout{b237a36 VFE...C.. ..S..AID 0,0-360,180}
+                                android.widget.Space{91bad37 I.ED..... ..S..AI. 0,8-360,8 #7f0b0246 app:id/badge_top_anchor aid=1073741862}
+                                android.widget.Space{f19b2a4 I.ED..... ..S..AI. 187,16-187,16 #7f0b0244 app:id/badge_start_anchor aid=1073741863}
+                                android.widget.FrameLayout{137380d V.E...... ..S..A.D 135,16-225,106 #7f0b16a1 app:id/thumbnail_layout aid=1073741864}
+                                  android.support.v7.widget.AppCompatImageView{ea503c2 V.ED..... ..S..AID 0,0-90,90 #7f0b0974 app:id/image}
+                                android.widget.Space{d73e5d3 I.ED..... ..S..AI. 180,61-180,61 #7f0b1040 app:id/progress_indicator_stub aid=1073741865}
+                                com.google.android.libraries.youtube.common.ui.YouTubeTextView{e915510 V.ED..... ..S..A.. 160,114-201,165 #7f0b162b app:id/text aid=1073741866}
+                                android.view.ViewStub{62c4809 G.E...... ..S..AI. 0,0-0,0 #7f0b0d6f app:id/new_content_dot aid=1073741867}
+                                android.view.ViewStub{ec39a0e G.E...... ..S..AI. 0,0-0,0 #7f0b0d6e app:id/new_content_count aid=1073741868}
+                              android.support.constraint.ConstraintLayout{70d0c2f VFE...C.. ......ID 360,0-720,180}
+                                android.widget.Space{59eb23c I.ED..... ......I. 0,11-360,11 #7f0b0246 app:id/badge_top_anchor aid=1073741869}
+                                android.widget.Space{5485bc5 I.ED..... ......I. 187,19-187,19 #7f0b0244 app:id/badge_start_anchor aid=1073741870}
+                                android.widget.FrameLayout{b23491a V.E...... .......D 135,19-225,109 #7f0b16a1 app:id/thumbnail_layout aid=1073741871}
+                                  android.support.v7.widget.AppCompatImageView{2683c4b V.ED..... ......ID 0,0-90,90 #7f0b0974 app:id/image}
+                                android.widget.Space{5c2b628 I.ED..... ......I. 180,64-180,64 #7f0b1040 app:id/progress_indicator_stub aid=1073741872}
+                                com.google.android.libraries.youtube.common.ui.YouTubeTextView{257ef41 V.ED..... ........ 120,117-240,161 #7f0b162b app:id/text aid=1073741873}
+                                android.view.ViewStub{79cdce6 G.E...... ......I. 0,0-0,0 #7f0b0d6f app:id/new_content_dot aid=1073741874}
+                                android.view.ViewStub{8fc5227 G.E...... ......I. 0,0-0,0 #7f0b0d6e app:id/new_content_count aid=1073741875}
+                              android.support.constraint.ConstraintLayout{5a10cd4 VFE...C.. ......ID 720,0-1080,180}
+                                android.widget.Space{7733e7d I.ED..... ......I. 0,8-360,8 #7f0b0246 app:id/badge_top_anchor aid=1073741876}
+                                android.widget.Space{ac9e172 I.ED..... ......I. 187,16-187,16 #7f0b0244 app:id/badge_start_anchor aid=1073741877}
+                                android.widget.FrameLayout{ad1e9c3 V.E...... .......D 135,16-225,106 #7f0b16a1 app:id/thumbnail_layout aid=1073741878}
+                                  android.support.v7.widget.AppCompatImageView{6c2240 V.ED..... ......ID 0,0-90,90 #7f0b0974 app:id/image}
+                                android.widget.Space{dfa4579 I.ED..... ......I. 180,61-180,61 #7f0b1040 app:id/progress_indicator_stub aid=1073741879}
+                                com.google.android.libraries.youtube.common.ui.YouTubeTextView{950a2be V.ED..... ........ 143,114-217,165 #7f0b162b app:id/text aid=1073741880}
+                                android.view.ViewStub{5df5f1f G.E...... ......I. 0,0-0,0 #7f0b0d6f app:id/new_content_dot aid=1073741881}
+                                android.view.ViewStub{11226c G.E...... ......I. 0,0-0,0 #7f0b0d6e app:id/new_content_count aid=1073741882}
+                              android.support.constraint.ConstraintLayout{b50c035 VFE...C.. ......ID 1080,0-1440,180}
+                                android.widget.Space{9f02cca I.ED..... ......I. 0,8-360,8 #7f0b0246 app:id/badge_top_anchor aid=1073741883}
+                                android.widget.Space{724ce3b I.ED..... ......I. 187,16-187,16 #7f0b0244 app:id/badge_start_anchor aid=1073741884}
+                                android.widget.FrameLayout{e23f958 V.E...... .......D 135,16-225,106 #7f0b16a1 app:id/thumbnail_layout aid=1073741885}
+                                  android.support.v7.widget.AppCompatImageView{d5a2ab1 V.ED..... ......ID 0,0-90,90 #7f0b0974 app:id/image}
+                                android.view.ViewStub{e4c4b96 G.E...... ......I. 0,0-0,0}
+                                com.google.android.libraries.youtube.common.ui.YouTubeTextView{1881317 V.ED..... ........ 106,114-255,165 #7f0b162b app:id/text aid=1073741886}
+                                android.view.ViewStub{78b5304 G.E...... ......I. 0,0-0,0 #7f0b0d6f app:id/new_content_dot aid=1073741887}
+                                android.view.ViewStub{2b5c0ed G.E...... ......I. 0,0-0,0 #7f0b0d6e app:id/new_content_count aid=1073741888}
+                        android.widget.FrameLayout{c798b22 G.E...... ......I. 0,0-0,0 #7f0b0a36 app:id/interstitials_container aid=1073741890}
+                        android.widget.FrameLayout{670c9b3 G.E...... ......I. 0,0-0,0 #7f0b06fd app:id/element_fragment aid=1073741889}
+                      android.widget.FrameLayout{eec9b70 V.E...... ........ 0,0-1440,2940 #7f0b08bd app:id/global_slim_status_bar_container aid=1073741891}
+                    android.view.View{aba7ee9 V.ED..... ........ 0,0-4,4}
+                    android.widget.FrameLayout{549376e V.E...... ........ 0,0-1440,128}
+                      android.widget.FrameLayout{c244e0f V.E...... ........ 0,0-1440,128 #7f0b18bd app:id/watch_status_bar_view aid=1073741892}
+                        com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{9d7fe9c V.ED..... ........ 0,0-1440,128 #7f0b0415 app:id/cinematic_image_background}
+                        com.google.android.apps.youtube.app.common.ui.cinematics.CinematicImageView{93320a5 G.ED..... ......ID 0,0-1440,0 #7f0b0416 app:id/cinematic_scrim}
+                      android.view.View{3555c7a I.ED..... ........ 0,0-1440,128 #7f0b08be app:id/global_status_bar_view aid=1073741893}
+                  com.google.android.material.navigation.NavigationView{de1bc2b I.ED..... ......ID -1050,0-0,3120 #7f0b06b2 app:id/drawer_nav_view aid=1073741894}
+                    com.google.android.material.internal.NavigationMenuView{4b46888 VFED.V... ......ID 0,0-1050,3120 #7f0b0615 app:id/design_navigation_view}
+                      android.widget.LinearLayout{9da2221 V.E...... ......I. 0,128-1050,158 #7f0b0d5f app:id/navigation_header_container}
+                    android.widget.FrameLayout{eccc646 V.E...... ......ID 0,0-1050,3120 #7f0b06b1 app:id/drawer_content_view aid=1073741895}
+                xtb{1bdf007 G.ED..... ......I. 0,0-0,0}
+                com.google.android.apps.youtube.app.common.player.overlay.InlineTimeBarWrapper{4165928 V.E...... ........ 0,0-1440,3120 #7f0b11d1 app:id/reel_time_bar aid=1073741896}
+                  jol{4354fd7 G.ED..... ......I. 0,2668-1440,2848}
+        android.view.View{96b8534 V.ED..... ........ 0,2940-1440,3120 #1020030 android:id/navigationBarBackground}

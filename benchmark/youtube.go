@@ -340,6 +340,28 @@ func (o *Orchestrator) executeYoutube(ctx context.Context, job *Job, md *adb.Man
 	sample := func(ctx context.Context) (youtubeSample, error) {
 		probe, cancel := context.WithTimeout(ctx, 25*time.Second)
 		defer cancel()
+		// 일반 영상은 뷰 트리(dumpsys activity top)로 먼저 판정한다. 재생 중 uiautomator 는
+		// idle 을 못 잡아 12초를 기다린 뒤 실패해 표본 간격이 ~17초로 벌어졌다.
+		// 판정할 수 없으면(플레이어 없음·백그라운드·Shorts) 아래 기존 경로로 간다.
+		if p["surface"] != "shorts" {
+			if top, err := md.Device.Shell(probe, "dumpsys activity top"); err == nil {
+				if views, ok := parseYoutubeViewTree(top); ok {
+					switch state, skipBtn := youtubeTreeState(views); state {
+					case "ad":
+						return youtubeSample{"ad", skipBtn}, nil
+					case "player":
+						media, err := md.Device.Shell(probe, "dumpsys media_session")
+						if err != nil {
+							return youtubeSample{}, err
+						}
+						if youtubePlaying(media) {
+							return youtubeSample{"content", nil}, nil
+						}
+						return youtubeSample{"unknown", nil}, nil
+					}
+				}
+			}
+		}
 		dumpCtx, dumpCancel := context.WithTimeout(probe, 12*time.Second)
 		els, err := macro.DumpUIElements(dumpCtx, md.Device, false)
 		dumpCancel()
