@@ -58,3 +58,37 @@ func TestYoutubeDeviceMenuOCR(t *testing.T) {
 		t.Log(w.Text, w.CenterX, w.CenterY)
 	}
 }
+
+func TestYoutubeDeviceControls(t *testing.T) {
+	serial := os.Getenv("YOUTUBE_TEST_DEVICE")
+	if serial == "" {
+		t.Skip("실기기 지정 필요")
+	}
+	dev := adb.NewDevice(serial)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	for _, target := range []string{"play", "pause", "fullscreen", "inline", "play"} {
+		out, _, err := youtubeControl(ctx, dev, target)
+		if err != nil {
+			t.Fatal(target, err)
+		}
+		t.Log(out)
+	}
+}
+
+func TestYoutubeDevicePanels(t *testing.T) {
+	serial := os.Getenv("YOUTUBE_TEST_DEVICE")
+	if serial == "" {
+		t.Skip("실기기 지정 필요")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	dev := adb.NewDevice(serial)
+	for _, target := range []string{"comments", "close_panel", "description", "close_panel"} {
+		out, _, err := youtubePanel(ctx, dev, target)
+		if err != nil {
+			t.Fatal(target, err)
+		}
+		t.Log(out)
+	}
+}

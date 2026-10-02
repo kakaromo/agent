@@ -71,7 +71,7 @@ export function stepSummary(form: StepForm): string {
 	switch (form.type) {
 		case 'benchmark': return `${form.tool} · ${form.formParams.rw ?? ''} · ${form.formParams.bs ?? ''}`;
 		case 'iotest': return `${form.iotestConfig?.threads.length ?? 0} threads`;
-		case 'youtube': return form.stepLabel?.trim() || (form.formParams.action === 'quality' ? `${form.formParams.quality ?? ''} 화질 확인` : form.formParams.action === 'feed' ? `피드 ${form.formParams.count ?? 1}회 · 광고 확인` : form.formParams.action === 'inspect' ? '광고 표시 확인' : `광고 제외 관측 ${form.formParams.seconds ?? 60}초`);
+		case 'youtube': return form.stepLabel?.trim() || (form.formParams.action === 'control' || form.formParams.action === 'panel' ? `YouTube ${form.formParams.target ?? ''}` : form.formParams.action === 'network_cycle' ? `네트워크 ${form.formParams.seconds ?? 10}초 차단·복구` : form.formParams.action === 'select_video' ? '일반 영상 선택' : form.formParams.action === 'quality' ? `${form.formParams.quality ?? ''} 화질 확인` : form.formParams.action === 'feed' ? `피드 ${form.formParams.count ?? 1}회 · 광고 확인` : form.formParams.action === 'inspect' ? '광고 표시 확인' : `광고 제외 관측 ${form.formParams.seconds ?? 60}초`);
 		case 'shell': return form.extraText.slice(0, 30) || 'shell';
 		case 'cleanup': return form.cleanupMode === 'all' ? '전체 삭제' : form.cleanupMode === 'steps' ? 'step 파일 삭제' : form.cleanupPath || '삭제';
 		// 구간 이름을 붙였으면 그것을 보여준다 — 캔버스에서도 "무엇을 기다리는 중"인지 읽혀야 한다.

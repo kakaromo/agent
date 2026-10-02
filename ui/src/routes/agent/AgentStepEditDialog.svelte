@@ -176,7 +176,7 @@
 		if (newType === 'benchmark') {
 			local.formParams = getDefaultParams(local.tool);
 		} else if (newType === 'youtube') {
-			local.formParams = { action: 'watch', seconds: '60', ad_timeout: '180', quality: '360p' };
+			local.formParams = { action: 'watch', seconds: '60', ad_timeout: '180', quality: '360p', target: 'play', count: '1', direction: 'down', surface: 'video' };
 			local.extraText = '';
 		}
 	}
@@ -923,14 +923,27 @@
 				{:else if local.type === 'youtube'}
 					<div class="space-y-2">
 						<label for="youtube-action" class={sectionLabel}>동작</label>
-						<select id="youtube-action" bind:value={local.formParams.action} class="w-full border rounded px-2 py-1 text-xs bg-background">
+						<select id="youtube-action" bind:value={local.formParams.action} onchange={(e) => { if (!local) return; if (e.currentTarget.value === 'panel') local.formParams.target = 'comments'; if (e.currentTarget.value === 'control') local.formParams.target = 'play'; }} class="w-full border rounded px-2 py-1 text-xs bg-background">
 							<option value="watch">광고를 제외한 재생 관측</option>
 							<option value="inspect">피드 광고 표시 기록</option>
 							<option value="feed">피드 스크롤·광고 기록</option>
 							<option value="quality">화질 선택</option>
 							<option value="select_video">광고·Shorts를 제외한 영상 선택</option>
+							<option value="control">재생·화면 제어</option>
+							<option value="panel">댓글·설명 패널</option>
+							<option value="network_cycle">네트워크 끊김·복구</option>
 						</select>
-						{#if local.formParams.action === 'quality'}
+						{#if local.formParams.action === 'panel'}
+							<select aria-label="패널 동작" bind:value={local.formParams.target} class="w-full border rounded px-2 py-1 text-xs bg-background"><option value="comments">댓글 열기</option><option value="description">설명 열기</option><option value="close_panel">패널 닫기</option></select>
+						{:else if local.formParams.action === 'control'}
+							<select aria-label="재생 제어 동작" bind:value={local.formParams.target} class="w-full border rounded px-2 py-1 text-xs bg-background">
+								<option value="play">재생</option><option value="pause">일시정지</option><option value="fullscreen">전체화면</option><option value="inline">일반화면</option><option value="next">다음 영상</option><option value="previous">이전 영상</option><option value="minimize">최소화</option>
+							</select>
+						{:else if local.formParams.action === 'network_cycle'}
+							<label for="youtube-network-seconds" class={sectionLabel}>연결을 끊는 시간(초, 최대 120)</label>
+							<input id="youtube-network-seconds" type="text" bind:value={local.formParams.seconds} class="w-full border rounded px-2 py-1 text-xs" />
+							<p class={captionMuted}>Wi-Fi와 모바일 데이터의 원래 상태를 저장하며, 취소·실패해도 복원을 시도합니다.</p>
+						{:else if local.formParams.action === 'quality'}
 							<select bind:value={local.formParams.quality} class="w-full border rounded px-2 py-1 text-xs bg-background">
 								<option value="360p">360p</option><option value="720p">720p</option><option value="1080p">1080p</option>
 							</select>

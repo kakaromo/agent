@@ -208,6 +208,20 @@ func (o *Orchestrator) executeYoutube(ctx context.Context, job *Job, md *adb.Man
 	if action == "quality" {
 		return setYoutubeQuality(ctx, md.Device, p["quality"])
 	}
+	if action == "control" {
+		return youtubeControl(ctx, md.Device, p["target"])
+	}
+	if action == "panel" {
+		return youtubePanel(ctx, md.Device, p["target"])
+	}
+	if action == "network_cycle" {
+		duration, err := youtubeSeconds(p, "seconds", 10, 120)
+		if err != nil {
+			return "", nil, err
+		}
+		err = youtubeNetworkCycle(ctx, md.Device.Shell, duration)
+		return "YOUTUBE_NETWORK_CYCLE|네트워크 끊김·복원", nil, err
+	}
 	if action == "select_video" {
 		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()

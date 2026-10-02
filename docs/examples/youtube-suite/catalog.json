@@ -1,0 +1,1444 @@
+[
+  {
+    "id": "A01",
+    "name": "앱종료_재실행_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "01-cold-start.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "앱 데이터·캐시는 삭제하지 않습니다. 프로세스 재시작 테스트입니다."
+  },
+  {
+    "id": "A02",
+    "name": "홈이동_복귀_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "02-background.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A03",
+    "name": "Chrome이동_복귀_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "03-other-app.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "Chrome 현재 화면을 열고 돌아옵니다. 웹 탐색이나 Chrome 강제 종료는 하지 않습니다."
+  },
+  {
+    "id": "A04",
+    "name": "백그라운드_2분후복귀",
+    "category": "기본",
+    "status": "template-created",
+    "file": "04-long-background.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A05",
+    "name": "일시정지_재생_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "05-pause.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A06",
+    "name": "전체화면_전환_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "06-fullscreen.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A07",
+    "name": "앞뒤_구간이동_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "07-seek-both.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "키 이벤트를 보내고 재생을 확인합니다. 실제 위치 이동 여부·이동 초 수는 자동 검증하지 않습니다."
+  },
+  {
+    "id": "A08",
+    "name": "다음영상_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "08-next-video.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "현재 플레이어의 다음 영상 버튼을 사용합니다."
+  },
+  {
+    "id": "A09",
+    "name": "이전_다음영상_3회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "09-previous-next.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "이전 영상 버튼이 제공되는 재생 이력이 필요합니다."
+  },
+  {
+    "id": "A10",
+    "name": "미니플레이어_피드탐색",
+    "category": "기본",
+    "status": "template-created",
+    "file": "10-miniplayer-feed.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "미니플레이어 전환 요청 후 피드를 탐색합니다. 축소 상태의 실제 백그라운드 재생은 검증하지 않습니다."
+  },
+  {
+    "id": "A11",
+    "name": "공유메뉴_열기닫기_3회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "11-share-dismiss.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "공유 대상 선택이나 메시지 전송은 하지 않습니다."
+  },
+  {
+    "id": "A12",
+    "name": "연속재생_10분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "12-long-10m.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A13",
+    "name": "연속재생_30분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "13-long-30m.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A14",
+    "name": "같은영상_재선택_3회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "14-same-selection.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "같은 검색 제목의 영상을 다시 선택합니다. 재생 위치 초기화나 영상 ID 동일성은 보장하지 않습니다."
+  },
+  {
+    "id": "A15",
+    "name": "빠른영상전환_20회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "15-rapid-next.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A16",
+    "name": "고정화질_360p_3분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "16-fixed-360p.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다."
+  },
+  {
+    "id": "A17",
+    "name": "고정화질_720p_3분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "17-fixed-720p.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다."
+  },
+  {
+    "id": "A18",
+    "name": "고정화질_1080p_3분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "18-fixed-1080p.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다."
+  },
+  {
+    "id": "A19",
+    "name": "저고화질_교차_3회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "19-quality-alternate.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A20",
+    "name": "검색어_3종탐색",
+    "category": "기본",
+    "status": "template-created",
+    "file": "20-search-terms.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "검색어마다 앱을 재실행하여 검색창 상태를 초기화합니다."
+  },
+  {
+    "id": "A21",
+    "name": "검색결과_30회탐색",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "21-search-scroll.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A22",
+    "name": "홈피드_장시간탐색",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "22-home-scroll.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A23",
+    "name": "홈_새로고침요청_10회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "23-refresh.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "최상단에서 아래로 당기는 입력을 보냅니다. 서버의 새 추천 응답 여부는 검증하지 않습니다."
+  },
+  {
+    "id": "A24",
+    "name": "Shorts_빠르게넘기기_30회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "24-shorts-fast.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "각 카드의 광고 표시를 확인하고 넘깁니다. UI 조회 시간 때문에 일정한 1초 간격은 아닙니다."
+  },
+  {
+    "id": "A25",
+    "name": "Shorts_이전다음_10회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "25-shorts-back.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A26",
+    "name": "Shorts_일시정지_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "26-shorts-pause.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A27",
+    "name": "Shorts_홈이동복귀_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "27-shorts-background.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A28",
+    "name": "Shorts_한카드_10분",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "28-shorts-loop.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "다음 카드 입력 없이 현재 Shorts를 관측합니다. 광고 카드는 자동으로 넘깁니다."
+  },
+  {
+    "id": "A29",
+    "name": "일반영상_Shorts교차_3회",
+    "category": "반복·장시간",
+    "status": "template-created",
+    "file": "29-video-shorts.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A30",
+    "name": "네트워크_끊김복구",
+    "category": "복구",
+    "status": "template-created",
+    "file": "30-network-video.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "Wi-Fi·모바일 데이터 원래 상태를 저장하고 취소·실패 시에도 복원을 시도합니다. 캐시로 재생이 지속될 수 있어 버퍼링 발생 자체를 성공 조건으로 쓰지 않습니다."
+  },
+  {
+    "id": "A31",
+    "name": "Shorts_네트워크복구",
+    "category": "복구",
+    "status": "template-created",
+    "file": "31-network-shorts.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A32",
+    "name": "네트워크_끊김복구_3회",
+    "category": "복구",
+    "status": "template-created",
+    "file": "32-network-repeat.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A33",
+    "name": "전체화면_일시정지_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "33-fullscreen-pause.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": ""
+  },
+  {
+    "id": "A34",
+    "name": "전체화면_구간이동_5회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "34-fullscreen-seek.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "구간 이동 키를 보내고 재생을 확인하며 실제 이동 위치는 별도 확인합니다."
+  },
+  {
+    "id": "A35",
+    "name": "댓글탐색_3회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "35-comments.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "댓글을 읽고 스크롤만 합니다. 댓글 작성·좋아요 입력은 없습니다. OCR에 Tesseract eng/kor가 필요할 수 있습니다."
+  },
+  {
+    "id": "A36",
+    "name": "설명탐색_3회",
+    "category": "기본",
+    "status": "template-created",
+    "file": "36-description.scenario.json",
+    "deviceValidation": "not-run-full",
+    "preconditions": [
+      "잠금 해제",
+      "YouTube 초기 안내 완료",
+      "FSIO·DRAM 지원 기기"
+    ],
+    "success": "각 단계 성공 및 trace 종료. next/previous/seek는 요청 전송과 후속 재생만 확인하며 영상 ID·이동 위치는 별도 확인.",
+    "notes": "설명을 스크롤하고 닫습니다. 외부 링크는 선택하지 않습니다."
+  },
+  {
+    "id": "C01",
+    "name": "최초실행",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 전용 신규 프로필"
+    ],
+    "procedure": [
+      "초기 안내 확인",
+      "필요한 권한 선택",
+      "홈 진입"
+    ],
+    "success": "홈 진입·초기 안내 재등장 없음",
+    "automationBlocker": "계정·앱 데이터 초기화가 필요해 자동 실행 제외",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C02",
+    "name": "화면꺼짐_복귀",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "기기 잠금 정책과 해제 방법 확인"
+    ],
+    "procedure": [
+      "30초 재생",
+      "화면 끄기 10초",
+      "켜기·잠금 해제",
+      "30초 재생"
+    ],
+    "success": "복귀 후 본영상 재생",
+    "automationBlocker": "잠금 해제 자동화 미구현",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C03",
+    "name": "회전_세로가로",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "회전 잠금 원래 값 확보"
+    ],
+    "procedure": [
+      "30초 재생",
+      "가로 20초",
+      "세로 20초, 5회",
+      "원래 설정 복원"
+    ],
+    "success": "방향·재생 복귀 및 설정 원복",
+    "automationBlocker": "OS별 회전 제어·실패 시 원복 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C04",
+    "name": "추천목록_재생중탐색",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "영상 아래 추천 목록 접근 확인"
+    ],
+    "procedure": [
+      "재생",
+      "추천 목록 10회 스크롤",
+      "플레이어 복귀"
+    ],
+    "success": "재생 유지 또는 복귀 후 재개",
+    "automationBlocker": "패널·목록 스크롤 범위 구분 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C05",
+    "name": "검색필터",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "현재 검색 필터 항목 확인"
+    ],
+    "procedure": [
+      "검색",
+      "필터 열기",
+      "길이·정렬 변경",
+      "결과 탐색"
+    ],
+    "success": "요청 필터 표시와 결과 로딩",
+    "automationBlocker": "버전별 필터 UI 선택자 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C06",
+    "name": "채널탐색",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 채널의 일반 영상·탭 확인"
+    ],
+    "procedure": [
+      "채널 진입",
+      "동영상·Shorts 탭 이동",
+      "영상 선택"
+    ],
+    "success": "선택한 채널의 영상 재생",
+    "automationBlocker": "채널 카드·탭 선택자 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C07",
+    "name": "구독피드",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "구독 채널이 있는 테스트 계정"
+    ],
+    "procedure": [
+      "구독 탭",
+      "10회 스크롤",
+      "영상 재생"
+    ],
+    "success": "구독 피드 표시·재생",
+    "automationBlocker": "계정 구독 상태 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C08",
+    "name": "시청기록",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "시청 기록이 켜진 테스트 계정"
+    ],
+    "procedure": [
+      "기록 열기",
+      "이전 영상 선택",
+      "30초 재생"
+    ],
+    "success": "기록의 영상 선택과 재생",
+    "automationBlocker": "기록 메뉴·계정 상태 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C09",
+    "name": "짧은영상_끝까지",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "길이·ID가 확인된 짧은 영상 5개"
+    ],
+    "procedure": [
+      "각 영상을 끝까지 시청",
+      "다음 영상 선택"
+    ],
+    "success": "5개 영상의 종료 상태 확인",
+    "automationBlocker": "종료 상태·영상 ID 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C10",
+    "name": "영상끝_다시재생",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "짧은 영상·다시 재생 버튼"
+    ],
+    "procedure": [
+      "종료까지 시청",
+      "다시 재생, 3회"
+    ],
+    "success": "같은 영상의 종료·시작 위치 확인",
+    "automationBlocker": "종료 감지·위치 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C11",
+    "name": "자동재생",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "자동재생 제공 영상·기존 설정 확보"
+    ],
+    "procedure": [
+      "자동재생 켜기",
+      "영상 종료",
+      "다음 영상 확인",
+      "설정 원복"
+    ],
+    "success": "다른 영상 ID로 전환",
+    "automationBlocker": "설정 원복·영상 ID 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C12",
+    "name": "재생목록_연속",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "공개 테스트 재생목록"
+    ],
+    "procedure": [
+      "목록 첫 영상",
+      "종료",
+      "다음 영상, 3개"
+    ],
+    "success": "목록 순서대로 ID 전환",
+    "automationBlocker": "재생목록 선택·종료 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C13",
+    "name": "재생목록_선택변경",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "3개 이상 영상의 테스트 목록"
+    ],
+    "procedure": [
+      "1번",
+      "3번",
+      "2번 선택, 각각 30초"
+    ],
+    "success": "선택한 목록 위치와 영상 ID 일치",
+    "automationBlocker": "목록 UI 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C14",
+    "name": "탐색바_먼구간",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "탐색 가능한 긴 영상"
+    ],
+    "procedure": [
+      "초반",
+      "50%",
+      "90%",
+      "10% 이동"
+    ],
+    "success": "실제 재생 위치가 요청 구간에 도달",
+    "automationBlocker": "탐색바 범위·재생 위치 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C15",
+    "name": "같은구간_반복",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "탐색 가능한 영상·대상 시간"
+    ],
+    "procedure": [
+      "60초 위치",
+      "20초 재생, 5회"
+    ],
+    "success": "매회 시작 위치와 재생 구간 일치",
+    "automationBlocker": "정확한 위치 검증 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C16",
+    "name": "자동화질",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "자동 화질 메뉴와 기존 설정 확인"
+    ],
+    "procedure": [
+      "자동 선택",
+      "3분 재생",
+      "표시 화질 기록"
+    ],
+    "success": "자동 설정 유지·재생",
+    "automationBlocker": "자동 메뉴 선택·원래 설정 복원 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C17",
+    "name": "재생속도",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "속도 변경 지원 영상"
+    ],
+    "procedure": [
+      "0.5배",
+      "1배",
+      "2배 각각 30초",
+      "원복"
+    ],
+    "success": "메뉴에 요청 속도 표시",
+    "automationBlocker": "속도 메뉴 선택자·원복 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C18",
+    "name": "자막_켜기끄기",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "자막 있는 영상·기존 설정 확보"
+    ],
+    "procedure": [
+      "자막 켜기·끄기 각각 20초, 5회",
+      "원복"
+    ],
+    "success": "자막 상태 표시와 재생",
+    "automationBlocker": "현재 기준 영상은 자막 미제공",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C19",
+    "name": "자막언어",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "2개 언어 이상 자막 영상"
+    ],
+    "procedure": [
+      "언어 A",
+      "B",
+      "A 각각 30초",
+      "원복"
+    ],
+    "success": "요청 언어 표시",
+    "automationBlocker": "지원 언어·메뉴 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C20",
+    "name": "오디오트랙",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "다중 오디오 영상"
+    ],
+    "procedure": [
+      "트랙 A",
+      "B",
+      "A 각각 30초",
+      "원복"
+    ],
+    "success": "요청 오디오 트랙 표시",
+    "automationBlocker": "다중 오디오 영상·선택자 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C21",
+    "name": "미니플레이어_복귀",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "미니플레이어 확장 선택자 확인"
+    ],
+    "procedure": [
+      "축소",
+      "피드 탐색",
+      "확장, 5회"
+    ],
+    "success": "같은 영상 화면으로 복귀",
+    "automationBlocker": "확장 컨트롤·영상 동일성 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C22",
+    "name": "PiP",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "PiP 지원 계정·지역·OS 설정"
+    ],
+    "procedure": [
+      "재생",
+      "홈",
+      "PiP 20초",
+      "앱 복귀, 5회"
+    ],
+    "success": "PiP 창 표시와 복귀",
+    "automationBlocker": "권한·지원 여부 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C23",
+    "name": "분할화면",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "분할 화면 지원 OS·다른 앱"
+    ],
+    "procedure": [
+      "YouTube+Chrome 분할",
+      "각각 조작",
+      "단일 화면 복귀"
+    ],
+    "success": "분할 상태·재생·복귀",
+    "automationBlocker": "OS별 분할 UI·원복 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C24",
+    "name": "Shorts_댓글",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "댓글 허용 Shorts"
+    ],
+    "procedure": [
+      "시청",
+      "댓글 열기·스크롤",
+      "닫기, 5회"
+    ],
+    "success": "댓글 표시·Shorts 재개",
+    "automationBlocker": "Shorts 댓글 선택자 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C25",
+    "name": "Shorts_채널복귀",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "채널 링크가 있는 Shorts"
+    ],
+    "procedure": [
+      "제작자 채널 열기",
+      "탐색",
+      "뒤로 복귀"
+    ],
+    "success": "원래 Shorts 복귀",
+    "automationBlocker": "채널 링크·영상 ID 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C26",
+    "name": "광고_건너뛸수없음",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "건너뛰기 없는 광고가 실제 노출됨"
+    ],
+    "procedure": [
+      "광고 전체 관측",
+      "본영상 시작 확인"
+    ],
+    "success": "광고와 본영상 구간 분리",
+    "automationBlocker": "광고 노출 비결정적; watch 공통 동작으로 관측 가능",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C27",
+    "name": "광고_연속",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "2개 이상 연속 광고 실제 노출"
+    ],
+    "procedure": [
+      "연속 광고 관측",
+      "가능한 버튼만 건너뛰기",
+      "본영상"
+    ],
+    "success": "각 광고 경계·본영상 복귀",
+    "automationBlocker": "광고 개별 ID·연속 개수 판별 미구현",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C28",
+    "name": "광고_중간",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "중간 광고 실제 노출되는 긴 영상"
+    ],
+    "procedure": [
+      "본영상",
+      "광고",
+      "본영상 계속 관측"
+    ],
+    "success": "광고 구간 분리와 본영상 재개",
+    "automationBlocker": "광고 노출 비결정적; 장시간 watch에서 관측 가능",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C29",
+    "name": "광고중_앱복귀",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "현재 광고 상태가 확인됨"
+    ],
+    "procedure": [
+      "광고 확인",
+      "홈 10초",
+      "복귀",
+      "종료 대기"
+    ],
+    "success": "광고 상태와 본영상 복귀",
+    "automationBlocker": "광고 시작에 맞춘 동작 트리거 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C30",
+    "name": "광고중_화면전환",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "현재 광고 상태·전체화면 제공"
+    ],
+    "procedure": [
+      "광고 확인",
+      "전체화면",
+      "일반화면",
+      "본영상"
+    ],
+    "success": "전환 및 광고 구간 기록",
+    "automationBlocker": "광고 트리거·광고별 컨트롤 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C31",
+    "name": "오프라인_앱실행",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "실패 시 네트워크 복원 절차"
+    ],
+    "procedure": [
+      "오프라인 전환",
+      "앱 실행",
+      "온라인 복귀",
+      "재시도"
+    ],
+    "success": "오프라인 표시·재연결 후 로딩",
+    "automationBlocker": "시나리오 전체 범위의 네트워크 원복 구현 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C32",
+    "name": "WiFi_모바일전환",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "활성 SIM·데이터 이용 가능·기존 망 상태 확보"
+    ],
+    "procedure": [
+      "Wi-Fi 재생",
+      "모바일망",
+      "Wi-Fi 원복"
+    ],
+    "success": "망 변경·재생 복구",
+    "automationBlocker": "현재 기기의 SIM·데이터망 사용 가능 여부 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C33",
+    "name": "느린네트워크",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "속도 제한 가능한 AP 또는 테스트 프록시"
+    ],
+    "procedure": [
+      "대역폭 제한",
+      "3분 재생",
+      "제한 해제"
+    ],
+    "success": "실제 제한 속도와 재생·버퍼링 기록",
+    "automationBlocker": "외부 망 제어 장비 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C34",
+    "name": "대역폭감소_고화질",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "속도 제한 장비·고화질 영상"
+    ],
+    "procedure": [
+      "고화질 재생",
+      "대역폭 감소",
+      "회복"
+    ],
+    "success": "실제 망 속도·표시 화질·버퍼링 변화",
+    "automationBlocker": "외부 망 제어 및 버퍼링 검출 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C35",
+    "name": "버퍼링중_조작",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "버퍼링을 확인할 수 있는 제한망"
+    ],
+    "procedure": [
+      "버퍼링 확인",
+      "정지·탐색·다른 영상 선택"
+    ],
+    "success": "각 조작 후 복구 상태",
+    "automationBlocker": "버퍼링 트리거·망 제어 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C36",
+    "name": "라이브_연속",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "현재 방송 중인 공개 라이브"
+    ],
+    "procedure": [
+      "라이브 선택",
+      "10분 시청"
+    ],
+    "success": "라이브 상태 유지·재생",
+    "automationBlocker": "유효한 방송·라이브 UI 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C37",
+    "name": "라이브_전환",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "현재 방송 중인 라이브 3개"
+    ],
+    "procedure": [
+      "각 방송 30초 시청",
+      "다음 방송"
+    ],
+    "success": "방송 ID 변경·재생",
+    "automationBlocker": "동시 방송 목록 확보 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C38",
+    "name": "라이브_채팅",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "채팅 제공 라이브"
+    ],
+    "procedure": [
+      "채팅 열기·스크롤·닫기, 5회"
+    ],
+    "success": "채팅 표시와 재생 유지",
+    "automationBlocker": "라이브 채팅 UI 확인 필요; 메시지 전송 없음",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C39",
+    "name": "라이브_화질",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "여러 화질 제공 라이브"
+    ],
+    "procedure": [
+      "지원 화질 낮음",
+      "높음",
+      "낮음"
+    ],
+    "success": "요청 화질 표시·방송 재생",
+    "automationBlocker": "라이브 화질 메뉴·지원 해상도 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C40",
+    "name": "라이브_과거현재",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "되감기 가능한 라이브"
+    ],
+    "procedure": [
+      "과거 시점 이동",
+      "현재로 복귀"
+    ],
+    "success": "현재 방송 시점 복귀",
+    "automationBlocker": "라이브 탐색 위치·실시간 버튼 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C41",
+    "name": "라이브_연결복구",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "방송 중인 라이브·망 상태 확보"
+    ],
+    "procedure": [
+      "30초 시청",
+      "network_cycle 10초",
+      "60초 시청"
+    ],
+    "success": "재연결 후 방송 복귀",
+    "automationBlocker": "라이브 선택·재생 상태 판별 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C42",
+    "name": "라이브_방송종료",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "종료 시점을 제어하는 테스트 방송"
+    ],
+    "procedure": [
+      "방송 재생",
+      "송출 종료",
+      "종료 화면 관측"
+    ],
+    "success": "종료 상태로 전환",
+    "automationBlocker": "테스트 송출 환경 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C43",
+    "name": "계정전환",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 계정 2개"
+    ],
+    "procedure": [
+      "A 계정",
+      "B 계정",
+      "A 계정 복원"
+    ],
+    "success": "표시 계정과 피드 변경·원복",
+    "automationBlocker": "로그인된 테스트 계정과 계정 선택자 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C44",
+    "name": "좋아요_설정해제",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 전용 영상·원래 상태 확보"
+    ],
+    "procedure": [
+      "좋아요 설정",
+      "상태 확인",
+      "원래 상태 복원"
+    ],
+    "success": "좋아요 상태 변화·원복",
+    "automationBlocker": "계정 데이터 변경; 전용 테스트 대상 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C45",
+    "name": "구독_설정해제",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 전용 채널·원래 상태 확보"
+    ],
+    "procedure": [
+      "구독",
+      "표시 확인",
+      "원래 상태 복원"
+    ],
+    "success": "구독 상태 변화·원복",
+    "automationBlocker": "계정 데이터 변경; 전용 테스트 대상 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C46",
+    "name": "나중에볼영상",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 계정·원래 저장 상태 확보"
+    ],
+    "procedure": [
+      "저장",
+      "목록 확인",
+      "원래 상태 복원"
+    ],
+    "success": "대상 영상 저장·원복",
+    "automationBlocker": "계정 목록 변경; 테스트 대상 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C47",
+    "name": "재생목록_추가제거",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "테스트 전용 목록"
+    ],
+    "procedure": [
+      "영상 추가",
+      "목록에서 확인",
+      "추가분 제거"
+    ],
+    "success": "목록 반영과 원복",
+    "automationBlocker": "계정 목록 변경; 기존 항목 보존 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C48",
+    "name": "오프라인저장",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "오프라인 저장 지원 계정·영상·공간"
+    ],
+    "procedure": [
+      "다운로드",
+      "오프라인 전환",
+      "재생",
+      "네트워크 복원"
+    ],
+    "success": "저장 완료·오프라인 재생",
+    "automationBlocker": "계정 기능·저장 공간·원복 절차 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C49",
+    "name": "외부링크_진입",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "검증된 영상 링크·앱 연결 설정"
+    ],
+    "procedure": [
+      "다른 앱에서 링크 선택",
+      "YouTube 진입",
+      "재생"
+    ],
+    "success": "지정 영상 ID로 재생",
+    "automationBlocker": "외부 앱 링크·앱 연결 설정 확인 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  },
+  {
+    "id": "C50",
+    "name": "외부기기_전송",
+    "category": "조건부",
+    "status": "procedure-only",
+    "preconditions": [
+      "동일 망의 테스트 수신 기기"
+    ],
+    "procedure": [
+      "전송 기기 선택",
+      "1분 재생",
+      "연결 해제"
+    ],
+    "success": "수신 기기 재생과 연결 해제",
+    "automationBlocker": "테스트 수신 장비 필요",
+    "deviceValidation": "not-run",
+    "measurement": "준비 완료 뒤 trace 시작, 동작 전체 FSIO·DRAM 수집, 원래 상태 복구 뒤 trace 종료. 광고는 별도 관측 구간으로 기록."
+  }
+]

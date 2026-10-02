@@ -79,7 +79,8 @@ var Specs = []StepSpec{
 		Type: "youtube", AIUsable: true, Summary: "YouTube 광고 감지·본영상 관측·화질 선택",
 		Notes: []string{"화면과 미디어 재생 상태를 주기적으로 확인합니다. 관측 사이의 짧은 광고와 버퍼링은 놓칠 수 있으며 UI 조회가 측정 부하를 추가합니다. inspect는 피드 광고를 기록만 하고 클릭하지 않습니다."},
 		Params: []ParamSpec{
-			{Name: "action", Enum: []string{"watch", "inspect", "feed", "quality", "select_video"}, Default: "watch", Desc: "재생 관측 / 피드 광고 확인 / 스크롤하며 확인 / 화질 선택 / 일반 영상 선택"},
+			{Name: "action", Enum: []string{"watch", "inspect", "feed", "quality", "select_video", "control", "panel", "network_cycle"}, Default: "watch", Desc: "재생 관측 / 피드 광고 확인 / 스크롤하며 확인 / 화질 선택 / 일반 영상 선택 / 재생 컨트롤 / 댓글·설명 패널 / 네트워크 끊김·복구"},
+			{Name: "target", Enum: []string{"play", "pause", "fullscreen", "inline", "next", "previous", "minimize", "comments", "description", "close_panel"}, Desc: "control 또는 panel 대상. play/pause/fullscreen/inline과 패널은 적용 상태도 확인"},
 			{Name: "title", Desc: "select_video에서 제목 시작 문자열(선택)"},
 			{Name: "surface", Enum: []string{"video", "shorts"}, Default: "video", Desc: "watch 대상 화면. Shorts OCR에서 스폰서 표시를 판별할 때 사용"},
 			{Name: "count", Default: "1", Desc: "feed 스크롤 횟수"},

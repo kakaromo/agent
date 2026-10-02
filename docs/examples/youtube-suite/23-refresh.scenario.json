@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_23_홈_새로고침요청_10회_DRAM",
+  "description": "최상단에서 아래로 당기는 입력을 보냅니다. 서버의 새 추천 응답 여부는 검증하지 않습니다. 반복 블록 10회. up 방향 1회 이동 → 3초 대기 → 피드 광고 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "type": "launch_app",
+      "params": {
+        "label": "앱 실행",
+        "package_name": "com.google.android.youtube",
+        "clear_mode": "force_stop",
+        "wait_seconds": "3"
+      }
+    },
+    {
+      "type": "tap_element",
+      "params": {
+        "label": "홈 탭",
+        "element_content_desc": "^(홈|Home)(,.*)?$",
+        "element_match_mode": "regex"
+      }
+    },
+    {
+      "type": "scroll",
+      "params": {
+        "label": "up 방향 1회 이동",
+        "direction": "up",
+        "count": "1",
+        "pause": "1",
+        "duration": "400"
+      }
+    },
+    {
+      "type": "sleep",
+      "params": {
+        "label": "3초 대기",
+        "seconds": "3"
+      }
+    },
+    {
+      "type": "youtube",
+      "params": {
+        "label": "피드 광고 기록",
+        "action": "inspect"
+      }
+    },
+    {
+      "type": "stop_app",
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      }
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "loops": [
+    {
+      "startStep": 3,
+      "endStep": 5,
+      "count": 10
+    }
+  ],
+  "requirements": {
+    "packages": [
+      "com.google.android.youtube"
+    ],
+    "traceType": "fsio_ufs"
+  }
+}

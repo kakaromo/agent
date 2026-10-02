@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "kind": "scenario",
+  "name": "YouTube_07_앞뒤_구간이동_5회_DRAM",
+  "description": "키 이벤트를 보내고 재생을 확인합니다. 실제 위치 이동 여부·이동 초 수는 자동 검증하지 않습니다. 반복 블록 5회. 앞으로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 → 뒤로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+  "repeatCount": 1,
+  "steps": [
+    {
+      "params": {
+        "include_dram": "true",
+        "include_vfs": "false",
+        "label": "FSIO UFS + DRAM 수집 시작",
+        "trace_type": "fsio_ufs",
+        "window_seconds": "1"
+      },
+      "type": "trace_start"
+    },
+    {
+      "params": {
+        "clear_mode": "force_stop",
+        "label": "YouTube 앱 실행",
+        "package_name": "com.google.android.youtube",
+        "wait_activity": "HomeActivity",
+        "wait_seconds": "3"
+      },
+      "type": "launch_app"
+    },
+    {
+      "params": {
+        "element_content_desc": "검색",
+        "label": "검색창 열기"
+      },
+      "type": "tap_element"
+    },
+    {
+      "params": {
+        "input_text": "Best of lofi hip hop 2021",
+        "label": "화질 비교용 긴 영상 검색",
+        "submit": "true"
+      },
+      "type": "text"
+    },
+    {
+      "params": {
+        "label": "검색 결과 로딩 대기",
+        "seconds": "3"
+      },
+      "type": "sleep"
+    },
+    {
+      "params": {
+        "action": "inspect",
+        "label": "검색 결과 광고 표시 확인"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "select_video",
+        "label": "광고·Shorts를 제외한 일반 영상 선택",
+        "title": "Best of lofi hip hop 2021"
+      },
+      "type": "youtube"
+    },
+    {
+      "params": {
+        "action": "watch",
+        "ad_timeout": "180",
+        "label": "광고 종료·본영상 준비 확인",
+        "seconds": "0"
+      },
+      "type": "youtube"
+    },
+    {
+      "type": "key",
+      "params": {
+        "label": "앞으로 이동 키 요청",
+        "keycode": "90"
+      }
+    },
+    {
+      "type": "youtube",
+      "params": {
+        "label": "본영상 20초 관측 · 광고 제외",
+        "action": "watch",
+        "seconds": "20",
+        "surface": "video",
+        "ad_timeout": "180"
+      }
+    },
+    {
+      "type": "key",
+      "params": {
+        "label": "뒤로 이동 키 요청",
+        "keycode": "89"
+      }
+    },
+    {
+      "type": "youtube",
+      "params": {
+        "label": "본영상 20초 관측 · 광고 제외",
+        "action": "watch",
+        "seconds": "20",
+        "surface": "video",
+        "ad_timeout": "180"
+      }
+    },
+    {
+      "type": "stop_app",
+      "params": {
+        "label": "YouTube 종료",
+        "package_name": "com.google.android.youtube"
+      }
+    },
+    {
+      "params": {
+        "label": "Trace 종료 및 결과 저장",
+        "trace_type": "fsio_ufs"
+      },
+      "type": "trace_stop"
+    }
+  ],
+  "loops": [
+    {
+      "startStep": 8,
+      "endStep": 11,
+      "count": 5
+    }
+  ],
+  "requirements": {
+    "packages": [
+      "com.google.android.youtube"
+    ],
+    "traceType": "fsio_ufs"
+  }
+}

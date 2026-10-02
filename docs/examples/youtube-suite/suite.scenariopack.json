@@ -1,0 +1,4455 @@
+[
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_01_앱종료_재실행_5회_DRAM",
+    "description": "앱 데이터·캐시는 삭제하지 않습니다. 프로세스 재시작 테스트입니다. 반복 블록 5회. 앱 실행 → 5초 대기 → 홈 광고 기록 → YouTube 종료 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "5초 대기",
+          "seconds": "5"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "홈 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 1,
+        "endStep": 4,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_02_홈이동_복귀_5회_DRAM",
+    "description": " 반복 블록 5회. 본영상 30초 관측 · 광고 제외 → 홈 화면 이동 → 10초 대기 → 앱 복귀 → 재생 확인 → 본영상 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "홈 화면 이동",
+          "keycode": "3"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "10초 대기",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 복귀",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "none",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 13,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_03_Chrome이동_복귀_5회_DRAM",
+    "description": "Chrome 현재 화면을 열고 돌아옵니다. 웹 탐색이나 Chrome 강제 종료는 하지 않습니다. 반복 블록 5회. 본영상 30초 관측 · 광고 제외 → 앱 복귀 → 10초 대기 → 앱 복귀 → 재생 확인 → 본영상 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 복귀",
+          "package_name": "com.android.chrome",
+          "clear_mode": "none",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "10초 대기",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 복귀",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "none",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 13,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube",
+        "com.android.chrome"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_04_백그라운드_2분후복귀_DRAM",
+    "description": " 반복 블록 1회. 본영상 30초 관측 · 광고 제외 → 홈 화면 이동 → 120초 대기 → 앱 복귀 → 재생 확인 → 본영상 60초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "홈 화면 이동",
+          "keycode": "3"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "120초 대기",
+          "seconds": "120"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 복귀",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "none",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 60초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "60",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_05_일시정지_재생_5회_DRAM",
+    "description": " 반복 블록 5회. 본영상 20초 관측 · 광고 제외 → 일시정지 확인 → 10초 대기 → 재생 확인 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일시정지 확인",
+          "action": "control",
+          "target": "pause"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "10초 대기",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_06_전체화면_전환_5회_DRAM",
+    "description": " 반복 블록 5회. 전체화면 확인 → 본영상 20초 관측 · 광고 제외 → 일반화면 확인 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "전체화면 확인",
+          "action": "control",
+          "target": "fullscreen"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일반화면 확인",
+          "action": "control",
+          "target": "inline"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_07_앞뒤_구간이동_5회_DRAM",
+    "description": "키 이벤트를 보내고 재생을 확인합니다. 실제 위치 이동 여부·이동 초 수는 자동 검증하지 않습니다. 반복 블록 5회. 앞으로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 → 뒤로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "앞으로 이동 키 요청",
+          "keycode": "90"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "뒤로 이동 키 요청",
+          "keycode": "89"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_08_다음영상_5회_DRAM",
+    "description": "현재 플레이어의 다음 영상 버튼을 사용합니다. 반복 블록 5회. 다음 영상 요청 → 본영상 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "다음 영상 요청",
+          "action": "control",
+          "target": "next"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 9,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_09_이전_다음영상_3회_DRAM",
+    "description": "이전 영상 버튼이 제공되는 재생 이력이 필요합니다. 반복 블록 3회. 다음 영상 요청 → 본영상 20초 관측 · 광고 제외 → 이전 영상 요청 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "다음 영상 요청",
+          "action": "control",
+          "target": "next"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "이전 영상 요청",
+          "action": "control",
+          "target": "previous"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_10_미니플레이어_피드탐색_DRAM",
+    "description": "미니플레이어 전환 요청 후 피드를 탐색합니다. 축소 상태의 실제 백그라운드 재생은 검증하지 않습니다. 반복 블록 1회. 본영상 30초 관측 · 광고 제외 → 미니플레이어 전환 요청 → down 방향 10회 탐색 · 광고 카드 기록 → up 방향 5회 탐색 · 광고 카드 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "미니플레이어 전환 요청",
+          "action": "control",
+          "target": "minimize"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 10회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "10",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "up 방향 5회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "5",
+          "direction": "up"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_11_공유메뉴_열기닫기_3회_DRAM",
+    "description": "공유 대상 선택이나 메시지 전송은 하지 않습니다. 반복 블록 3회. 공유 메뉴 열기 → 3초 대기 → 공유 메뉴 닫기 → 본영상 10초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "공유 메뉴 열기",
+          "element_content_desc": "^(공유|Share)$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "공유 메뉴 닫기",
+          "keycode": "4"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_12_연속재생_10분_DRAM",
+    "description": " 반복 블록 1회. 본영상 600초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 600초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "600",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_13_연속재생_30분_DRAM",
+    "description": " 반복 블록 1회. 본영상 1800초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 1800초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "1800",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_14_같은영상_재선택_3회_DRAM",
+    "description": "같은 검색 제목의 영상을 다시 선택합니다. 재생 위치 초기화나 영상 ID 동일성은 보장하지 않습니다. 반복 블록 3회. YouTube 앱 실행 → 검색창 열기 → 화질 비교용 긴 영상 검색 → 검색 결과 로딩 대기 → 검색 결과 광고 표시 확인 → 광고·Shorts를 제외한 일반 영상 선택 → 광고 종료·본영상 준비 확인 → 본영상 60초 관측 · 광고 제외 → YouTube 종료 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 60초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "60",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 1,
+        "endStep": 9,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_15_빠른영상전환_20회_DRAM",
+    "description": " 반복 블록 20회. 다음 영상 요청 → 본영상 6초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "다음 영상 요청",
+          "action": "control",
+          "target": "next"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 6초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "6",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 9,
+        "count": 20
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_16_고정화질_360p_3분_DRAM",
+    "description": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다. 반복 블록 1회. 360p 선택·확인 → 본영상 180초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "360p 선택·확인",
+          "action": "quality",
+          "quality": "360p"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 180초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "180",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_17_고정화질_720p_3분_DRAM",
+    "description": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다. 반복 블록 1회. 720p 선택·확인 → 본영상 180초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "720p 선택·확인",
+          "action": "quality",
+          "quality": "720p"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 180초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "180",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_18_고정화질_1080p_3분_DRAM",
+    "description": "요청 화질을 지원하는 영상과 필요 시 Tesseract eng/kor가 필요합니다. 반복 블록 1회. 1080p 선택·확인 → 본영상 180초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "1080p 선택·확인",
+          "action": "quality",
+          "quality": "1080p"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 180초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "180",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_19_저고화질_교차_3회_DRAM",
+    "description": " 반복 블록 3회. 360p 선택·확인 → 본영상 30초 관측 · 광고 제외 → 1080p 선택·확인 → 본영상 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "360p 선택·확인",
+          "action": "quality",
+          "quality": "360p"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "1080p 선택·확인",
+          "action": "quality",
+          "quality": "1080p"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_20_검색어_3종탐색_DRAM",
+    "description": "검색어마다 앱을 재실행하여 검색창 상태를 초기화합니다. 반복 블록 1회. 앱 실행 → 검색창 열기 → lofi hip hop 검색 → 3초 대기 → 검색 결과 광고 기록 → down 방향 3회 탐색 · 광고 카드 기록 → 앱 실행 → 검색창 열기 → nature documentary 검색 → 3초 대기 → 검색 결과 광고 기록 → down 방향 3회 탐색 · 광고 카드 기록 → 앱 실행 → 검색창 열기 → space documentary 검색 → 3초 대기 → 검색 결과 광고 기록 → down 방향 3회 탐색 · 광고 카드 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "검색창 열기",
+          "element_content_desc": "^(검색|Search)$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "text",
+        "params": {
+          "label": "lofi hip hop 검색",
+          "input_text": "lofi hip hop",
+          "submit": "true"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "검색 결과 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 3회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "3",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "검색창 열기",
+          "element_content_desc": "^(검색|Search)$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "text",
+        "params": {
+          "label": "nature documentary 검색",
+          "input_text": "nature documentary",
+          "submit": "true"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "검색 결과 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 3회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "3",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "검색창 열기",
+          "element_content_desc": "^(검색|Search)$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "text",
+        "params": {
+          "label": "space documentary 검색",
+          "input_text": "space documentary",
+          "submit": "true"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "검색 결과 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 3회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "3",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_21_검색결과_30회탐색_DRAM",
+    "description": " 반복 블록 1회. down 방향 30회 탐색 · 광고 카드 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "검색창 열기",
+          "element_content_desc": "^(검색|Search)$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "text",
+        "params": {
+          "label": "lofi hip hop 검색",
+          "input_text": "lofi hip hop",
+          "submit": "true"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "검색 결과 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 30회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "30",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_22_홈피드_장시간탐색_DRAM",
+    "description": " 반복 블록 3회. down 방향 20회 탐색 · 광고 카드 기록 → up 방향 10회 탐색 · 광고 카드 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "홈 탭",
+          "element_content_desc": "^(홈|Home)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 20회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "20",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "up 방향 10회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "10",
+          "direction": "up"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 3,
+        "endStep": 4,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_23_홈_새로고침요청_10회_DRAM",
+    "description": "최상단에서 아래로 당기는 입력을 보냅니다. 서버의 새 추천 응답 여부는 검증하지 않습니다. 반복 블록 10회. up 방향 1회 이동 → 3초 대기 → 피드 광고 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "홈 탭",
+          "element_content_desc": "^(홈|Home)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "scroll",
+        "params": {
+          "label": "up 방향 1회 이동",
+          "direction": "up",
+          "count": "1",
+          "pause": "1",
+          "duration": "400"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "피드 광고 기록",
+          "action": "inspect"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 3,
+        "endStep": 5,
+        "count": 10
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_24_Shorts_빠르게넘기기_30회_DRAM",
+    "description": "각 카드의 광고 표시를 확인하고 넘깁니다. UI 조회 시간 때문에 일정한 1초 간격은 아닙니다. 반복 블록 1회. down 방향 30회 탐색 · 광고 카드 기록 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "down 방향 30회 탐색 · 광고 카드 기록",
+          "action": "feed",
+          "count": "30",
+          "direction": "down"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_25_Shorts_이전다음_10회_DRAM",
+    "description": " 반복 블록 10회. down 방향 1회 이동 → Shorts 6초 관측 · 광고 제외 → up 방향 1회 이동 → Shorts 6초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "scroll",
+        "params": {
+          "label": "down 방향 1회 이동",
+          "direction": "down",
+          "count": "1",
+          "pause": "1",
+          "duration": "400"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 6초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "6",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "scroll",
+        "params": {
+          "label": "up 방향 1회 이동",
+          "direction": "up",
+          "count": "1",
+          "pause": "1",
+          "duration": "400"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 6초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "6",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 4,
+        "endStep": 7,
+        "count": 10
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_26_Shorts_일시정지_5회_DRAM",
+    "description": " 반복 블록 5회. Shorts 10초 관측 · 광고 제외 → 일시정지 확인 → 5초 대기 → 재생 확인 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일시정지 확인",
+          "action": "control",
+          "target": "pause"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "5초 대기",
+          "seconds": "5"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 4,
+        "endStep": 7,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_27_Shorts_홈이동복귀_5회_DRAM",
+    "description": " 반복 블록 5회. Shorts 10초 관측 · 광고 제외 → 홈 화면 이동 → 10초 대기 → 앱 복귀 → 재생 확인 → Shorts 10초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "홈 화면 이동",
+          "keycode": "3"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "10초 대기",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 복귀",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "none",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 4,
+        "endStep": 9,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_28_Shorts_한카드_10분_DRAM",
+    "description": "다음 카드 입력 없이 현재 Shorts를 관측합니다. 광고 카드는 자동으로 넘깁니다. 반복 블록 1회. Shorts 600초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 600초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "600",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_29_일반영상_Shorts교차_3회_DRAM",
+    "description": " 반복 블록 3회. YouTube 앱 실행 → 검색창 열기 → 화질 비교용 긴 영상 검색 → 검색 결과 로딩 대기 → 검색 결과 광고 표시 확인 → 광고·Shorts를 제외한 일반 영상 선택 → 광고 종료·본영상 준비 확인 → 본영상 15초 관측 · 광고 제외 → 앱 실행 → Shorts 탭 → 3초 대기 → Shorts 15초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 15초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "15",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 15초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "15",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 1,
+        "endStep": 12,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_30_네트워크_끊김복구_DRAM",
+    "description": "Wi-Fi·모바일 데이터 원래 상태를 저장하고 취소·실패 시에도 복원을 시도합니다. 캐시로 재생이 지속될 수 있어 버퍼링 발생 자체를 성공 조건으로 쓰지 않습니다. 반복 블록 1회. 본영상 30초 관측 · 광고 제외 → 네트워크 10초 차단·원복 → 5초 대기 → 재생 확인 → 본영상 60초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "네트워크 10초 차단·원복",
+          "action": "network_cycle",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "5초 대기",
+          "seconds": "5"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 60초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "60",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_31_Shorts_네트워크복구_DRAM",
+    "description": " 반복 블록 1회. Shorts 10초 관측 · 광고 제외 → 네트워크 10초 차단·원복 → 5초 대기 → 재생 확인 → Shorts 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "type": "launch_app",
+        "params": {
+          "label": "앱 실행",
+          "package_name": "com.google.android.youtube",
+          "clear_mode": "force_stop",
+          "wait_seconds": "3"
+        }
+      },
+      {
+        "type": "tap_element",
+        "params": {
+          "label": "Shorts 탭",
+          "element_content_desc": "^(Shorts|쇼츠)(,.*)?$",
+          "element_match_mode": "regex"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "3초 대기",
+          "seconds": "3"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 10초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "10",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "네트워크 10초 차단·원복",
+          "action": "network_cycle",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "5초 대기",
+          "seconds": "5"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "Shorts 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "shorts",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_32_네트워크_끊김복구_3회_DRAM",
+    "description": " 반복 블록 3회. 네트워크 10초 차단·원복 → 5초 대기 → 재생 확인 → 본영상 30초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "네트워크 10초 차단·원복",
+          "action": "network_cycle",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "5초 대기",
+          "seconds": "5"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 30초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "30",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_33_전체화면_일시정지_5회_DRAM",
+    "description": " 반복 블록 5회. 전체화면 확인 → 본영상 20초 관측 · 광고 제외 → 일시정지 확인 → 10초 대기 → 재생 확인 → 본영상 20초 관측 · 광고 제외 → 일반화면 확인 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "전체화면 확인",
+          "action": "control",
+          "target": "fullscreen"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일시정지 확인",
+          "action": "control",
+          "target": "pause"
+        }
+      },
+      {
+        "type": "sleep",
+        "params": {
+          "label": "10초 대기",
+          "seconds": "10"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "재생 확인",
+          "action": "control",
+          "target": "play"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일반화면 확인",
+          "action": "control",
+          "target": "inline"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 14,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_34_전체화면_구간이동_5회_DRAM",
+    "description": "구간 이동 키를 보내고 재생을 확인하며 실제 이동 위치는 별도 확인합니다. 반복 블록 5회. 전체화면 확인 → 앞으로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 → 뒤로 이동 키 요청 → 본영상 20초 관측 · 광고 제외 → 일반화면 확인 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "전체화면 확인",
+          "action": "control",
+          "target": "fullscreen"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "앞으로 이동 키 요청",
+          "keycode": "90"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "key",
+        "params": {
+          "label": "뒤로 이동 키 요청",
+          "keycode": "89"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "일반화면 확인",
+          "action": "control",
+          "target": "inline"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 13,
+        "count": 5
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_35_댓글탐색_3회_DRAM",
+    "description": "댓글을 읽고 스크롤만 합니다. 댓글 작성·좋아요 입력은 없습니다. OCR에 Tesseract eng/kor가 필요할 수 있습니다. 반복 블록 3회. 댓글 패널 열기·확인 → down 방향 3회 이동 → 댓글 패널 닫기·확인 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "댓글 패널 열기·확인",
+          "action": "panel",
+          "target": "comments"
+        }
+      },
+      {
+        "type": "scroll",
+        "params": {
+          "label": "down 방향 3회 이동",
+          "direction": "down",
+          "count": "3",
+          "pause": "1",
+          "duration": "400"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "댓글 패널 닫기·확인",
+          "action": "panel",
+          "target": "close_panel"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "kind": "scenario",
+    "name": "YouTube_36_설명탐색_3회_DRAM",
+    "description": "설명을 스크롤하고 닫습니다. 외부 링크는 선택하지 않습니다. 반복 블록 3회. 설명 패널 열기·확인 → down 방향 2회 이동 → 설명 패널 닫기·확인 → 본영상 20초 관측 · 광고 제외 FSIO UFS+DRAM 수집. 재생 시간은 광고·미확인을 제외한 표본 간 관측 시간이며 마지막 조회 간격만큼 늘어날 수 있습니다. 광고 조회가 측정 부하를 추가합니다. 잠금 해제·YouTube 초기 안내 완료가 필요합니다. 반복 중 같은 영상이 다시 나올 수 있습니다. 전체 반복·장시간 실행 검증 전이며 개별 공통 동작의 검증과 구분합니다.",
+    "repeatCount": 1,
+    "steps": [
+      {
+        "params": {
+          "include_dram": "true",
+          "include_vfs": "false",
+          "label": "FSIO UFS + DRAM 수집 시작",
+          "trace_type": "fsio_ufs",
+          "window_seconds": "1"
+        },
+        "type": "trace_start"
+      },
+      {
+        "params": {
+          "clear_mode": "force_stop",
+          "label": "YouTube 앱 실행",
+          "package_name": "com.google.android.youtube",
+          "wait_activity": "HomeActivity",
+          "wait_seconds": "3"
+        },
+        "type": "launch_app"
+      },
+      {
+        "params": {
+          "element_content_desc": "검색",
+          "label": "검색창 열기"
+        },
+        "type": "tap_element"
+      },
+      {
+        "params": {
+          "input_text": "Best of lofi hip hop 2021",
+          "label": "화질 비교용 긴 영상 검색",
+          "submit": "true"
+        },
+        "type": "text"
+      },
+      {
+        "params": {
+          "label": "검색 결과 로딩 대기",
+          "seconds": "3"
+        },
+        "type": "sleep"
+      },
+      {
+        "params": {
+          "action": "inspect",
+          "label": "검색 결과 광고 표시 확인"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "select_video",
+          "label": "광고·Shorts를 제외한 일반 영상 선택",
+          "title": "Best of lofi hip hop 2021"
+        },
+        "type": "youtube"
+      },
+      {
+        "params": {
+          "action": "watch",
+          "ad_timeout": "180",
+          "label": "광고 종료·본영상 준비 확인",
+          "seconds": "0"
+        },
+        "type": "youtube"
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "설명 패널 열기·확인",
+          "action": "panel",
+          "target": "description"
+        }
+      },
+      {
+        "type": "scroll",
+        "params": {
+          "label": "down 방향 2회 이동",
+          "direction": "down",
+          "count": "2",
+          "pause": "1",
+          "duration": "400"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "설명 패널 닫기·확인",
+          "action": "panel",
+          "target": "close_panel"
+        }
+      },
+      {
+        "type": "youtube",
+        "params": {
+          "label": "본영상 20초 관측 · 광고 제외",
+          "action": "watch",
+          "seconds": "20",
+          "surface": "video",
+          "ad_timeout": "180"
+        }
+      },
+      {
+        "type": "stop_app",
+        "params": {
+          "label": "YouTube 종료",
+          "package_name": "com.google.android.youtube"
+        }
+      },
+      {
+        "params": {
+          "label": "Trace 종료 및 결과 저장",
+          "trace_type": "fsio_ufs"
+        },
+        "type": "trace_stop"
+      }
+    ],
+    "loops": [
+      {
+        "startStep": 8,
+        "endStep": 11,
+        "count": 3
+      }
+    ],
+    "requirements": {
+      "packages": [
+        "com.google.android.youtube"
+      ],
+      "traceType": "fsio_ufs"
+    }
+  }
+]

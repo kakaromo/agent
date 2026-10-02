@@ -33,7 +33,8 @@ export const STEP_CONTRACTS: StepContract[] = [
 		requiresTool: false,
 		aiUsable: true,
 		params: [
-			{ name: "action", required: false, enum: ["watch", "inspect", "feed", "quality", "select_video"], default: "watch", desc: "재생 관측 / 피드 광고 확인 / 스크롤하며 확인 / 화질 선택 / 일반 영상 선택" },
+			{ name: "action", required: false, enum: ["watch", "inspect", "feed", "quality", "select_video", "control", "panel", "network_cycle"], default: "watch", desc: "재생 관측 / 피드 광고 확인 / 스크롤하며 확인 / 화질 선택 / 일반 영상 선택 / 재생 컨트롤 / 댓글·설명 패널 / 네트워크 끊김·복구" },
+			{ name: "target", required: false, enum: ["play", "pause", "fullscreen", "inline", "next", "previous", "minimize", "comments", "description", "close_panel"], desc: "control 또는 panel 대상. play/pause/fullscreen/inline과 패널은 적용 상태도 확인" },
 			{ name: "title", required: false, desc: "select_video에서 제목 시작 문자열(선택)" },
 			{ name: "surface", required: false, enum: ["video", "shorts"], default: "video", desc: "watch 대상 화면. Shorts OCR에서 스폰서 표시를 판별할 때 사용" },
 			{ name: "count", required: false, default: "1", desc: "feed 스크롤 횟수" },
