@@ -141,3 +141,51 @@ func TestYoutubeVideoCandidate(t *testing.T) {
 		}
 	}
 }
+
+// TestYoutubeMonitorMergesSegments — 같은 상태가 이어지는 표본은 한 구간으로 합친다.
+// 표본마다 구간을 내면 장시간 재생에서 Behavior 구간이 수백 개가 된다.
+func TestYoutubeMonitorMergesSegments(t *testing.T) {
+	n := 0
+	states := []string{"ad", "ad", "ad", "unknown", "content", "content", "content", "content", "content"}
+	var segments []youtubeSegment
+	_, err := monitorYoutube(context.Background(), 4*time.Millisecond, time.Second, time.Millisecond,
+		func(context.Context) (youtubeSample, error) {
+			i := n
+			n++
+			if i >= len(states) {
+				i = len(states) - 1
+			}
+			return youtubeSample{State: states[i]}, nil
+		},
+		func(context.Context, *macro.UIElement) error { return nil },
+		func(s youtubeSegment) { segments = append(segments, s) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for i, s := range segments {
+		got = append(got, s.State)
+		if i > 0 && segments[i-1].End != s.Start {
+			t.Fatalf("구간 사이가 비거나 겹친다: %+v", segments)
+		}
+	}
+	// ad·ad·ad → ad 하나, 경계 표본들 → unknown 하나, 나머지 → content 하나.
+	if strings.Join(got, ",") != "ad,unknown,content" {
+		t.Fatalf("합쳐진 구간 = %v", got)
+	}
+}
+
+// TestYoutubeMonitorFlushesOnError — 에러로 끝나도 진행 중이던 구간을 잃지 않는다.
+func TestYoutubeMonitorFlushesOnError(t *testing.T) {
+	var segments []youtubeSegment
+	_, err := monitorYoutube(context.Background(), time.Second, 5*time.Millisecond, time.Millisecond,
+		func(context.Context) (youtubeSample, error) { return youtubeSample{State: "ad"}, nil },
+		func(context.Context, *macro.UIElement) error { return nil },
+		func(s youtubeSegment) { segments = append(segments, s) })
+	if err == nil {
+		t.Fatal("광고 한도 초과 에러가 나야 한다")
+	}
+	if len(segments) != 1 || segments[0].State != "ad" {
+		t.Fatalf("마지막 구간이 기록되지 않았다: %+v", segments)
+	}
+}

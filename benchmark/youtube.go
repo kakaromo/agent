@@ -120,6 +120,29 @@ func monitorYoutube(ctx context.Context, target, budget, poll time.Duration,
 	emit func(youtubeSegment)) (map[string]float64, error) {
 	ctx, cancel := context.WithTimeout(ctx, target+budget)
 	defer cancel()
+
+	// 같은 상태가 이어지는 표본 구간은 하나로 합쳐서 내보낸다.
+	//
+	// 표본마다(약 3초) 구간을 기록하면 30분 재생에서 Behavior 구간이 수백 개가 되어
+	// 타임라인·범례를 읽을 수 없다. 상태가 바뀔 때만 끊고, 어떤 경로로 끝나든
+	// (성공·에러·취소) 마지막 구간은 defer 로 내보낸다.
+	var pending *youtubeSegment
+	flush := func() {
+		if pending != nil {
+			emit(*pending)
+			pending = nil
+		}
+	}
+	defer flush()
+	push := func(seg youtubeSegment) {
+		if pending != nil && pending.State == seg.State && pending.End == seg.Start {
+			pending.End = seg.End
+			return
+		}
+		flush()
+		pending = &seg
+	}
+
 	metrics := map[string]float64{"content_seconds": 0, "ad_seconds": 0, "unknown_seconds": 0, "ad_skips": 0}
 	var prev string
 	var previousError string
@@ -147,7 +170,7 @@ func monitorYoutube(ctx context.Context, target, budget, poll time.Duration,
 				state = "unknown"
 			}
 			metrics[state+"_seconds"] += now.Sub(last).Seconds()
-			emit(youtubeSegment{state, last.UnixMilli(), now.UnixMilli()})
+			push(youtubeSegment{state, last.UnixMilli(), now.UnixMilli()})
 		}
 		prev = s.State
 		last = now
