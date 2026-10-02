@@ -43,3 +43,13 @@ func TestBuildFsioCommandIncludeVFS(t *testing.T) {
 		t.Errorf("include_vfs=false 인데 vfs 가 붙었다: %q", off)
 	}
 }
+
+// TestBuildFsioCommandClockBoot — 시각 축은 기본값에 맡기지 않고 boot 로 명시한다.
+// 빠지면 옛 fsiotrace 가 MONOTONIC 으로 찍어 DRAM·스텝 구간과 조용히 어긋난다.
+func TestBuildFsioCommandClockBoot(t *testing.T) {
+	for _, tt := range []string{"fsio_ufs", "fsio_block"} {
+		if got := buildFsioCommand(tt, false); !strings.Contains(got, "--clock=boot") {
+			t.Errorf("%s: --clock=boot 가 없다: %q", tt, got)
+		}
+	}
+}

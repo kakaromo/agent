@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,12 +91,18 @@ func prepareFsioDevice(ctx context.Context, dev *adb.Device, toolsDir string) er
 	return nil
 }
 
-// pushIfNeeded — 기기에 없을 때만 push. benchmark/orchestrator.go 의 pushToolIfNeeded 와
-// 같은 패턴이다 (그쪽은 unexported 라 재사용이 안 된다).
+// pushIfNeeded — 기기에 없거나 **로컬과 크기가 다를 때** push.
+//
+// ⚠ 예전엔 "있으면 건너뜀" 이었다. /dev 는 tmpfs 라 재부팅 전까지 남으므로
+// tools/ 의 바이너리를 갈아 끼워도 기기에선 **옛 바이너리가 계속 돌았다.**
+// (--clock 이 없던 빌드가 남아 fsio 시각이 mono 축으로 찍힌 사례.)
+// 크기 비교는 완벽하진 않지만 빌드가 바뀌면 사실상 항상 달라진다.
 func pushIfNeeded(ctx context.Context, dev *adb.Device, localPath, remotePath string) error {
-	out, err := dev.Shell(ctx, "ls "+remotePath+" 2>/dev/null && echo EXISTS")
-	if err == nil && strings.Contains(out, "EXISTS") {
-		return nil
+	if st, err := os.Stat(localPath); err == nil {
+		out, err := dev.Shell(ctx, "stat -c %s "+remotePath+" 2>/dev/null")
+		if err == nil && strings.TrimSpace(out) == strconv.FormatInt(st.Size(), 10) {
+			return nil
+		}
 	}
 	return dev.Push(ctx, localPath, remotePath)
 }
@@ -104,8 +111,14 @@ func pushIfNeeded(ctx context.Context, dev *adb.Device, localPath, remotePath st
 //
 // `-o` 를 주지 않으면 stdout 으로 TSV 를 흘리므로, 기존 ftrace 경로와 똑같이
 // adb stdout 을 로그 파일로 리다이렉트하는 구조를 그대로 쓸 수 있다.
+//
+// `--clock=boot` 는 **명시한다.** ftrace(trace_clock=boot)·DRAM instance·스텝 경계
+// (/proc/uptime) 가 전부 CLOCK_BOOTTIME 이라 fsio 도 그 축이어야 겹쳐 그릴 수 있다.
+// 기본값이 boot 이긴 하지만 그 옵션이 생기기 전 빌드는 bpf_ktime_get_ns()
+// (= MONOTONIC, suspend 중 멈춤) 를 그대로 찍는다 — 축이 suspend 누적만큼 밀려도
+// drift 검사는 못 잡는다. 명시하면 옛 바이너리는 알 수 없는 옵션으로 **즉시 실패**한다.
 func buildFsioCommand(traceType string, includeVFS bool) string {
-	return fmt.Sprintf("%s --only %s", fsiotraceRemotePath, fsioOnlyLayer(traceType, includeVFS))
+	return fmt.Sprintf("%s --clock=boot --only %s", fsiotraceRemotePath, fsioOnlyLayer(traceType, includeVFS))
 }
 
 // stopFsioOnDevice — 기기 측 fsiotrace 를 정상 종료시킨다.
