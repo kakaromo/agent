@@ -51,11 +51,13 @@ type TraceJob struct {
 	dram *dramCollector
 
 	// internal processes
-	adbCancel    context.CancelFunc
-	adbCmd       *exec.Cmd
-	logFd        *os.File
-	subscribers  []chan *pb.JobProgress
-	lastProgress []*pb.JobProgress
+	adbCancel context.CancelFunc
+	adbCmd    *exec.Cmd
+	logFd     *os.File
+	// collectorDone — 수집 프로세스가 끝나고 로그 파일까지 닫히면 close 된다 (waitCollector).
+	collectorDone chan struct{}
+	subscribers   []chan *pb.JobProgress
+	lastProgress  []*pb.JobProgress
 }
 
 func (j *TraceJob) notify(progress *pb.JobProgress) {
@@ -243,7 +245,7 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	job.Mu.Unlock()
 	SaveClockSync(outputDir, sync)
 
-	return m.finishStart(job, adbCmd, adbCancel, logFd)
+	return m.finishStart(adbCtx, job, adbCmd, adbCancel, logFd)
 }
 
 // enableFtraceEvents — ftrace 계열 trace_type 의 이벤트를 켠다.
@@ -283,7 +285,7 @@ func enableFtraceEvents(ctx context.Context, md *adb.ManagedDevice, tracingDir, 
 // finishStart — 수집 프로세스 등록 + 백그라운드 감시. ftrace/fsio 공통 뒷부분.
 //
 // 식별 정보는 전부 job 에 이미 들어 있으므로 따로 받지 않는다.
-func (m *Manager) finishStart(job *TraceJob, adbCmd *exec.Cmd, adbCancel context.CancelFunc,
+func (m *Manager) finishStart(adbCtx context.Context, job *TraceJob, adbCmd *exec.Cmd, adbCancel context.CancelFunc,
 	logFd *os.File) (string, error) {
 
 	jobID, deviceID := job.ID, job.DeviceID
@@ -295,6 +297,8 @@ func (m *Manager) finishStart(job *TraceJob, adbCmd *exec.Cmd, adbCancel context
 	job.adbCancel = adbCancel
 	job.adbCmd = adbCmd
 	job.logFd = logFd
+	collectorDone := make(chan struct{})
+	job.collectorDone = collectorDone
 	job.Mu.Unlock()
 
 	job.notify(&pb.JobProgress{
@@ -307,28 +311,50 @@ func (m *Manager) finishStart(job *TraceJob, adbCmd *exec.Cmd, adbCancel context
 	slog.Info("trace started", "job_id", jobID, "device", deviceID, "type", job.TraceType,
 		"output_dir", job.OutputDir)
 
-	// Wait for adb process in background.
-	// adbCancel 이 호출되면 exec.CommandContext 가 SIGKILL 을 보내므로 Wait 가 즉시 풀린다.
-	// 그래도 adb 가 좀비/uninterruptible 상태로 빠질 가능성을 대비해 timeout 후 강제 Kill.
 	go func() {
-		done := make(chan struct{})
-		go func() {
-			adbCmd.Wait()
-			close(done)
-		}()
+		waitCollector(adbCtx, adbCmd, logFd, jobID)
+		close(collectorDone)
+	}()
+
+	return jobID, nil
+}
+
+// fsioDrainTimeout — fsio 정지 시 fsiotrace 가 ringbuf 를 배수하고 스스로 끝나길 기다리는 상한.
+var fsioDrainTimeout = 10 * time.Second
+
+// collectorKillGrace — 정지 요청(adbCtx 취소) 후 수집 프로세스가 끝나길 기다리는 상한.
+// 테스트에서 줄이려고 변수로 둔다.
+var collectorKillGrace = 30 * time.Second
+
+// waitCollector — 수집 프로세스(adb)가 끝나길 기다렸다가 로그 파일을 닫는다.
+//
+// adbCancel 이 호출되면 exec.CommandContext 가 SIGKILL 을 보내므로 Wait 가 곧 풀린다.
+// 그래도 adb 가 좀비/uninterruptible 상태로 빠질 수 있어 상한 후 강제 Kill 한다.
+//
+// ⚠ 상한 타이머는 **정지 요청 뒤에** 시작한다. 예전엔 수집 시작 시점부터 30초를
+// 쟀기 때문에 **모든 trace 가 시작 30초 후 강제 종료**됐다 — IO 로그는 30초에서
+// 끊기는데 별도 수집기인 DRAM 은 계속 쌓여 두 시간 범위가 어긋났다. 정지 전까지는
+// 수집이 몇 분이든 기다려야 한다.
+func waitCollector(adbCtx context.Context, adbCmd *exec.Cmd, logFd *os.File, jobID string) {
+	done := make(chan struct{})
+	go func() {
+		adbCmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-adbCtx.Done():
 		select {
 		case <-done:
-		case <-time.After(30 * time.Second):
+		case <-time.After(collectorKillGrace):
 			slog.Warn("adb trace_pipe wait timeout, force killing", "job_id", jobID, "pid", adbCmd.Process.Pid)
 			if adbCmd.Process != nil {
 				adbCmd.Process.Kill()
 			}
 			<-done // 짧게는 반환된다 (Kill 후)
 		}
-		logFd.Close()
-	}()
-
-	return jobID, nil
+	}
+	logFd.Close()
 }
 
 // StopTrace stops trace collection. Device tracing off + adb kill은 동기,
@@ -352,6 +378,7 @@ func (m *Manager) StopTrace(jobID string) error {
 	tracingDir := job.TracingDir
 	traceType := job.TraceType
 	dramC := job.dram
+	collectorDone := job.collectorDone
 	job.Mu.Unlock()
 
 	const shellTimeout = 10 * time.Second
@@ -375,8 +402,20 @@ func (m *Manager) StopTrace(jobID string) error {
 		dramC.stop(context.Background(), nil, "")
 	}
 
-	// 2. 수집 프로세스 종료 (동기). fsio 는 위 pkill 로 이미 끝났을 수 있고,
-	//    안 끝났으면 여기서 파이프가 닫혀 EPIPE 로 정리된다.
+	// 2. 수집 프로세스 종료 (동기).
+	//
+	// ⚠ fsio 는 pkill 직후 바로 cancel 하지 않는다. cancel 은 호스트 adb 에 SIGKILL 을
+	//    보내 파이프를 닫으므로, fsiotrace 가 SIGTERM 을 받고 ringbuf 잔여 이벤트를
+	//    stdout 으로 배수하는 도중이면 **마지막 이벤트가 잘린다.** 스스로 끝나길
+	//    상한까지 기다리고, 그래도 안 끝나면 cancel(EPIPE 경로)로 넘어간다.
+	if IsFsioTraceType(traceType) && collectorDone != nil {
+		select {
+		case <-collectorDone:
+		case <-time.After(fsioDrainTimeout):
+			slog.Warn("fsiotrace 가 배수 상한 안에 끝나지 않아 adb 를 강제 종료한다; 마지막 이벤트가 잘렸을 수 있다",
+				"job_id", jobID, "timeout", fsioDrainTimeout)
+		}
+	}
 	if adbCancel != nil {
 		adbCancel()
 	}
