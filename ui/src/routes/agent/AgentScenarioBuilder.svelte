@@ -122,11 +122,12 @@
 
 				return {
 					type: s.type, tool, formParams: formP,
-					extraText: extraLines.filter(l => !l.startsWith('use_file_from_step=') && !l.startsWith('delete_files_from_steps=') && !l.startsWith('path=') && !l.startsWith('trace=') && !l.startsWith('trace_type=')).join('\n'),
+					extraText: extraLines.filter(l => !l.startsWith('use_file_from_step=') && !l.startsWith('delete_files_from_steps=') && !l.startsWith('path=') && !l.startsWith('trace=') && !l.startsWith('trace_type=') && !l.startsWith('include_dram=')).join('\n'),
 					showAdvanced: false, useFileFromStep: useFile,
 					cleanupMode, cleanupSteps, cleanupPath,
 					traceEnabled: s.params?.trace === 'on',
-					traceType: s.params?.trace_type ?? 'ufs'
+					traceType: s.params?.trace_type ?? 'ufs',
+					traceIncludeDram: s.params?.include_dram !== 'false'
 				};
 			});
 			if (t.loopsJson) {
@@ -165,6 +166,8 @@
 		if ((s.type === 'benchmark' || s.type === 'shell') && s.traceEnabled) {
 			params.trace = 'on';
 			params.trace_type = s.traceType;
+			// 없으면 서버가 켠다 — 끈 경우만 싣는다.
+			if (s.traceIncludeDram === false) params.include_dram = 'false';
 		}
 		return params;
 	}

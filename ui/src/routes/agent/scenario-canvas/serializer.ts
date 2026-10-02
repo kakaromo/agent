@@ -240,7 +240,7 @@ export function protoToCanvas(
 
 			// extra params (formParams에 없는 것들)
 			// label 은 전용 입력칸(구간 이름)이 따로 있다 — extraText 로 새면 저장 시 중복된다.
-			const knownKeys = new Set(['use_file_from_step', 'delete_files_from_steps', 'path', 'trace', 'trace_type', 'config', 'label']);
+			const knownKeys = new Set(['use_file_from_step', 'delete_files_from_steps', 'path', 'trace', 'trace_type', 'include_dram', 'config', 'label']);
 			const extraLines: string[] = [];
 			const formParams: Record<string, string> = {};
 			const basicOpts = getBasicOptions(tool);
@@ -280,6 +280,7 @@ export function protoToCanvas(
 				cleanupPath,
 				traceEnabled: params.trace === 'on',
 				traceType: params.trace_type ?? 'ufs',
+				traceIncludeDram: params.include_dram !== 'false',
 				macroId: (s as any).macroId ?? null,
 				macroName: (s as any).macroName ?? '',
 				macroClearMode: (s as any).macroClearMode ?? 'force_stop',
@@ -619,6 +620,7 @@ function buildStepParamsInner(s: StepForm): Record<string, string> {
 		if (s.traceEnabled) {
 			params.trace = 'on';
 			params.trace_type = s.traceType;
+			if (s.traceIncludeDram === false) params.include_dram = 'false';
 		}
 		return params;
 	}
@@ -637,6 +639,8 @@ function buildStepParamsInner(s: StepForm): Record<string, string> {
 	if ((s.type === 'benchmark' || s.type === 'shell') && s.traceEnabled) {
 		params.trace = 'on';
 		params.trace_type = s.traceType;
+		// 없으면 서버가 켠다 — 끈 경우만 싣는다.
+		if (s.traceIncludeDram === false) params.include_dram = 'false';
 	}
 	return params;
 }

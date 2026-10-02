@@ -37,6 +37,8 @@
 		cleanupPath: string;
 		traceEnabled: boolean;
 		traceType: string;
+		// Auto Trace 에 DRAM 대역폭(include_dram)도 함께 받을지. undefined = 켬 (서버 기본값과 같다).
+		traceIncludeDram?: boolean;
 		macroId?: number | null;
 		macroName?: string;
 		macroClearMode?: 'none' | 'force_stop' | 'clear';
@@ -309,6 +311,15 @@
 									<option value={t.value} title={t.desc}>{t.label}</option>
 								{/each}
 							</select>
+							<label class="flex items-center gap-1.5 cursor-pointer text-[10px]" title="DRAM 대역폭(Qualcomm bw_hwmon_meas)을 dram.log 로 함께 수집. 이벤트가 없는 기기는 건너뛴다">
+								<input
+									type="checkbox"
+									checked={local.traceIncludeDram !== false}
+									onchange={(e) => { if (local) local.traceIncludeDram = (e.target as HTMLInputElement).checked; }}
+									class="size-3"
+								/>
+								<span>DRAM BW</span>
+							</label>
 						{/if}
 					</div>
 				{/if}
@@ -430,6 +441,17 @@
 							{/each}
 						</select>
 					</div>
+					<!-- include_dram: 없으면 켬 (서버 기본값). 끌 때만 'false' 가 의미를 가진다. -->
+					<label class="flex items-center gap-1.5 cursor-pointer text-[10px]">
+						<input
+							type="checkbox"
+							checked={local.formParams.include_dram !== 'false'}
+							onchange={(e) => { if (local) local.formParams = { ...local.formParams, include_dram: (e.target as HTMLInputElement).checked ? 'true' : 'false' }; }}
+							class="size-3"
+						/>
+						<span>DRAM 대역폭 함께 수집</span>
+						<span class="text-muted-foreground">(bw_hwmon_meas — 미지원 기기는 건너뜀)</span>
+					</label>
 
 				{:else if local.type === 'trace_stop'}
 					<div class="text-[10px] text-muted-foreground py-2">이전 trace_start를 자동으로 중지합니다</div>
