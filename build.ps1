@@ -25,6 +25,18 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
+# 프로젝트 옆에 설치한 Windows 도구가 있으면 사용한다.
+# 현재 PowerShell 세션에만 적용하며 시스템 PATH는 변경하지 않는다.
+$LocalTools = Join-Path (Split-Path $ScriptDir -Parent) '.build-tools'
+$LocalToolBins = @(
+    (Join-Path $LocalTools 'go\bin'),
+    (Join-Path $LocalTools 'node-v22.23.3-win-x64'),
+    (Join-Path $LocalTools 'gcc15\ucrt64\bin')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+if ($LocalToolBins) {
+    $env:PATH = ($LocalToolBins -join ';') + ';' + $env:PATH
+}
+
 # git describe — 실패해도 무관
 $Version = & git describe --tags --always 2>$null
 if (-not $Version) { $Version = 'dev' }
@@ -45,6 +57,9 @@ Write-Host "=== Building agent v$Version ==="
 
 # MinGW gcc 필수 — go-duckdb 가 cgo 의존이라 없으면 컴파일 불가
 function Find-CGOCompiler {
+    # 이 프로젝트의 DuckDB 링크를 검증한 GCC 15를 우선한다.
+    $localCC = Join-Path $LocalTools 'gcc15\ucrt64\bin\gcc.exe'
+    if (Test-Path -LiteralPath $localCC -PathType Leaf) { return $localCC }
     foreach ($cc in @('x86_64-w64-mingw32-gcc', 'gcc')) {
         $found = Get-Command $cc -ErrorAction SilentlyContinue
         if ($found) { return $cc }
