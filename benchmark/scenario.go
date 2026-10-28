@@ -550,7 +550,8 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 		if cmd == "" {
 			return "", nil, fmt.Errorf("shell step missing 'cmd' param")
 		}
-		out, err := md.Device.Shell(ctx, cmd)
+		// 사용자 명령은 길이를 사용자가 정한다 — 60초 기본 타임아웃을 걸지 않는다. 잡 취소로 멈춘다.
+		out, err := md.Device.ShellUntilDone(ctx, cmd)
 		return out, nil, err
 	case "cleanup":
 		if refs := step.Params["delete_files_from_steps"]; refs != "" {

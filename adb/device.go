@@ -211,7 +211,20 @@ func (d *Device) run(ctx context.Context, args ...string) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, defaultTimeout)
 		defer cancel()
 	}
+	return runAdb(ctx, args...)
+}
 
+// ShellUntilDone — 기본 타임아웃(60초) 없이 명령이 끝날 때까지 기다린다.
+//
+// 시나리오 shell 스텝처럼 실행 시간을 사용자가 정하는 명령용이다. 60초 기본값은
+// 내부의 짧은 조회가 adb 정지로 영원히 묶이지 않게 하는 안전장치인데, 사용자 명령에
+// 걸리면 70초짜리 루프가 60초에 "signal: killed" 로 조용히 잘린다. 중단은 ctx
+// (잡 취소)로만 한다.
+func (d *Device) ShellUntilDone(ctx context.Context, cmd string) (string, error) {
+	return runAdb(ctx, "-s", d.Serial, "shell", cmd)
+}
+
+func runAdb(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "adb", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
