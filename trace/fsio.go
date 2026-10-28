@@ -139,7 +139,11 @@ func stopFsioOnDevice(ctx context.Context, dev *adb.Device) {
 //
 // 넘겨도 수집은 그대로 진행한다(신호를 놓쳤을 뿐 살아 있을 수 있다). 다만 그 경우
 // 앞부분 이벤트를 놓쳤을 가능성이 있으므로 경고를 남긴다.
-const fsioReadyTimeout = 30 * time.Second
+//
+// 화면이 꺼진 기기에서는 BPF 로드(verifier)가 30초를 넘고 EAGAIN 재시도까지 겹칠 때가 있다
+// (2026-10-28 SMOKE: USB 를 뺀 직후 화면 꺼짐 4회 연속 30초 초과, 1회는 attach 전에 멈춰 빈 trace.
+// 화면 켜짐은 15초, 몇 분 뒤 화면 꺼짐은 25초). 대기 시나리오가 화면을 끈 뒤 trace 를 켜므로 넉넉히 기다린다.
+const fsioReadyTimeout = 180 * time.Second
 
 // startFsioCollector — fsiotrace 를 기기에서 실행하고 stdout 을 logFd 로 흘린다.
 //
