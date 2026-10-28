@@ -492,6 +492,7 @@ func (o *Orchestrator) executeStep(ctx context.Context, job *Job, md *adb.Manage
 			IncludeVfs:    step.Params["include_vfs"] == "true",
 			// 없으면 켬 — 지원 기기에서만 수집되고 나머지는 건너뛴다.
 			IncludeDram: step.Params["include_dram"] != "false",
+			FsioOutput:  step.Params["fsio_output"],
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("auto trace start: %w", err)
@@ -622,6 +623,7 @@ func (o *Orchestrator) executeStepInner(ctx context.Context, job *Job, md *adb.M
 			IncludeVfs:    step.Params["include_vfs"] == "true",
 			// 없으면 켬 — 지원 기기에서만 수집되고 나머지는 건너뛴다.
 			IncludeDram: step.Params["include_dram"] != "false",
+			FsioOutput:  step.Params["fsio_output"],
 		})
 		if err != nil {
 			return "", nil, fmt.Errorf("start trace: %w", err)

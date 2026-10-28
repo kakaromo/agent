@@ -132,6 +132,7 @@ export const STEP_CONTRACTS: StepContract[] = [
 			{ name: "window_seconds", required: false, default: "1", desc: "수집 윈도우 (초)" },
 			{ name: "include_vfs", required: false, enum: ["true", "false"], default: "false", desc: "fsio_* 에서 VFS 레이어도 수집 (page cache hit/miss·mmap 통계에 필요). 로그가 커진다" },
 			{ name: "include_dram", required: false, enum: ["true", "false"], default: "true", desc: "DRAM 대역폭(Qualcomm bw_hwmon_meas)을 dram.log 로 함께 수집. 이벤트가 없는 기기는 건너뛴다" },
+			{ name: "fsio_output", required: false, enum: ["stream", "device"], default: "stream", desc: "fsio_* 기록 방식. stream = adb 로 호스트에 바로 기록(끊기면 수집 종료), device = 기기 /dev 에 기록하고 trace_stop 때 가져옴(무선 adb 가 끊겨도 이어짐, 긴 대기 측정용)" },
 			{ name: "label", required: false, desc: "구간 이름 (Behavior 타임라인 표시용). 자동 요약 대신 이 이름을 쓴다. sleep 처럼 타입만으로 의도를 알 수 없는 구간에 특히 유용 (예 \"영상 재생 30초\")" },
 		]
 	},

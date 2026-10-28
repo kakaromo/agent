@@ -53,3 +53,13 @@ func TestBuildFsioCommandClockBoot(t *testing.T) {
 		}
 	}
 }
+
+func TestFsioDevicePrefix(t *testing.T) {
+	got := fsioDevicePrefix("0123456789abcdef")
+	if got != "/dev/fsio_01234567" {
+		t.Errorf("prefix = %q", got)
+	}
+	if !strings.HasPrefix(fsioDevicePrefix("ab"), "/dev/fsio_ab") {
+		t.Errorf("짧은 id 처리 실패: %q", fsioDevicePrefix("ab"))
+	}
+}

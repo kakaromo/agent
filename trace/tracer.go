@@ -50,6 +50,11 @@ type TraceJob struct {
 	// DRAM 대역폭 수집기 (include_dram 이고 기기가 지원할 때만). 산출물은 OutputDir/dram.log.
 	dram *dramCollector
 
+	// FsioOutput — fsio 기록 방식 ("" = stream, FsioOutputDevice = 기기 파일). fsio.go 참고.
+	FsioOutput string
+	// fsioPrefix — device 방식일 때 기기 측 기록 파일 prefix.
+	fsioPrefix string
+
 	// internal processes
 	adbCancel context.CancelFunc
 	adbCmd    *exec.Cmd
@@ -120,6 +125,16 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		traceType = "ufs"
 	}
 	isFsio := IsFsioTraceType(traceType)
+	fsioOut := req.GetFsioOutput()
+	if fsioOut == "stream" {
+		fsioOut = ""
+	}
+	if fsioOut != "" && fsioOut != FsioOutputDevice {
+		return "", fmt.Errorf("fsio_output 은 stream 또는 device 여야 한다: %q", req.GetFsioOutput())
+	}
+	if !isFsio {
+		fsioOut = ""
+	}
 
 	// fsio 는 ftrace 를 안 쓰므로 tracingDir 이 없어도 된다.
 	tracingDir := md.TracingDir
@@ -153,6 +168,10 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 		LogFile:    logFile,
 		TracingDir: tracingDir,
 		StartedAt:  time.Now().UnixMilli(),
+		FsioOutput: fsioOut,
+	}
+	if fsioOut == FsioOutputDevice {
+		job.fsioPrefix = fsioDevicePrefix(jobID)
 	}
 
 	m.mu.Lock()
@@ -201,7 +220,10 @@ func (m *Manager) StartTrace(ctx context.Context, req *pb.StartTraceRequest) (st
 	}
 
 	var adbCmd *exec.Cmd
-	if isFsio {
+	if fsioOut == FsioOutputDevice {
+		// 호스트 쪽 수집 프로세스가 없다 (adbCmd = nil). trace.log 는 trace_stop 때 pull 로 채운다.
+		err = startFsioOnDevice(md.Device, md.Serial, traceType, req.GetIncludeVfs(), job.fsioPrefix)
+	} else if isFsio {
 		adbCmd, err = startFsioCollector(adbCtx, md.Serial, traceType, req.GetIncludeVfs(), logFd)
 	} else {
 		adbCmd = exec.CommandContext(adbCtx, "adb", "-s", md.Serial, "shell",
@@ -309,7 +331,7 @@ func (m *Manager) finishStart(adbCtx context.Context, job *TraceJob, adbCmd *exe
 	})
 
 	slog.Info("trace started", "job_id", jobID, "device", deviceID, "type", job.TraceType,
-		"output_dir", job.OutputDir)
+		"output_dir", job.OutputDir, "fsio_output", job.FsioOutput)
 
 	go func() {
 		waitCollector(adbCtx, adbCmd, logFd, jobID)
@@ -336,6 +358,12 @@ var collectorKillGrace = 30 * time.Second
 // 끊기는데 별도 수집기인 DRAM 은 계속 쌓여 두 시간 범위가 어긋났다. 정지 전까지는
 // 수집이 몇 분이든 기다려야 한다.
 func waitCollector(adbCtx context.Context, adbCmd *exec.Cmd, logFd *os.File, jobID string) {
+	if adbCmd == nil {
+		// fsio device 방식: 호스트 쪽 수집 프로세스가 없다. 정지 요청까지 기다렸다가 파일만 닫는다.
+		<-adbCtx.Done()
+		logFd.Close()
+		return
+	}
 	done := make(chan struct{})
 	go func() {
 		adbCmd.Wait()
@@ -379,6 +407,9 @@ func (m *Manager) StopTrace(jobID string) error {
 	traceType := job.TraceType
 	dramC := job.dram
 	collectorDone := job.collectorDone
+	onDevice := job.FsioOutput == FsioOutputDevice
+	fsioPrefix := job.fsioPrefix
+	logFile := job.LogFile
 	job.Mu.Unlock()
 
 	const shellTimeout = 10 * time.Second
@@ -386,7 +417,9 @@ func (m *Manager) StopTrace(jobID string) error {
 	// 1. 기기 측 수집 중지 (동기, 타임아웃)
 	if md, err := m.adbMgr.GetDevice(deviceID); err == nil {
 		shellCtx, shellCancel := context.WithTimeout(context.Background(), shellTimeout)
-		if IsFsioTraceType(traceType) {
+		if onDevice {
+			// device 방식은 아래 collectFsioFromDevice 가 끝내고 가져온다.
+		} else if IsFsioTraceType(traceType) {
 			// ⚠ pkill 이 **먼저**다. fsiotrace 는 SIGTERM 을 받으면 detach 후 ringbuf
 			// 잔여 이벤트를 배수하고 끝내서 마지막 몇 건이 안 잘린다. adb 를 먼저
 			// 죽이면 EPIPE 경로로 가는데 그건 fallback 이다 (fsio.go 주석 참고).
@@ -408,7 +441,7 @@ func (m *Manager) StopTrace(jobID string) error {
 	//    보내 파이프를 닫으므로, fsiotrace 가 SIGTERM 을 받고 ringbuf 잔여 이벤트를
 	//    stdout 으로 배수하는 도중이면 **마지막 이벤트가 잘린다.** 스스로 끝나길
 	//    상한까지 기다리고, 그래도 안 끝나면 cancel(EPIPE 경로)로 넘어간다.
-	if IsFsioTraceType(traceType) && collectorDone != nil {
+	if IsFsioTraceType(traceType) && collectorDone != nil && !onDevice {
 		select {
 		case <-collectorDone:
 		case <-time.After(fsioDrainTimeout):
@@ -418,6 +451,26 @@ func (m *Manager) StopTrace(jobID string) error {
 	}
 	if adbCancel != nil {
 		adbCancel()
+	}
+
+	// device 방식: 호스트 로그 파일이 닫힌 뒤 기기 기록을 trace.log 자리로 가져온다.
+	// 기기가 잠깐 안 보이면 다시 붙기를 기다린다 (수집은 기기에서 계속되고 있었다).
+	if onDevice {
+		if collectorDone != nil {
+			<-collectorDone
+		}
+		getDev := func() (*adb.Device, error) {
+			md, err := m.adbMgr.GetDevice(deviceID)
+			if err != nil {
+				return nil, err
+			}
+			return md.Device, nil
+		}
+		if err := collectFsioFromDevice(getDev, deviceID, fsioPrefix, logFile); err != nil {
+			slog.Error("fsiotrace 기기 기록을 가져오지 못했다", "job_id", jobID, "error", err)
+			m.failJob(job, err.Error())
+			return err
+		}
 	}
 
 	// 상태를 COLLECTING으로 변경 (parquet 생성 대기)

@@ -289,6 +289,8 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 		if v, ok := body["includeDram"].(bool); ok {
 			includeDram = v
 		}
+		// fsioOutput — "device" 면 fsiotrace 를 기기 파일(-o)로 기록해 adb 끊김에 버틴다. 없으면 stream.
+		fsioOutput, _ := body["fsioOutput"].(string)
 		resp, err := agent.StartTrace(r.Context(), &pb.StartTraceRequest{
 			DeviceId:      deviceID,
 			TraceType:     traceType,
@@ -296,6 +298,7 @@ func registerRESTRoutes(mux *http.ServeMux, agent *DeviceAgentServer) {
 			JobName:       jobName,
 			IncludeVfs:    includeVfs,
 			IncludeDram:   includeDram,
+			FsioOutput:    fsioOutput,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

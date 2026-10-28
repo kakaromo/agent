@@ -210,3 +210,150 @@ func isFsioReadyLine(line string) bool {
 	return strings.Contains(line, "warn: stdout") ||
 		strings.Contains(line, "writing events to")
 }
+
+// ---- 기기 파일 기록 (fsio_output=device) ------------------------------------------
+//
+// stream 방식은 fsiotrace stdout 을 `adb shell` 로 받는다. 무선 adb 가 잠깐만 끊겨도
+// adb shell 세션이 닫히며 fsiotrace 가 SIGHUP 을 받고 끝나고, 다시 붙어도 이어지지
+// 않는다 (2026-10-29 3시간 대기: 131분째 5분 끊김으로 기록 종료).
+//
+// device 방식은 fsiotrace 를 **새 session(setsid)** 으로 띄워 adb 세션과 떼고,
+// `-o <prefix>` 로 기기 tmpfs(/dev)에 쓴다. trace_stop 때 SIGTERM 으로 끝내고
+// `<prefix>.events` 를 pull 해 호스트 trace.log 로 만든다. 형식은 stdout 과 같다
+// (fsiotrace 가 같은 함수로 쓴다). 요약(diag)은 `<prefix>.summary`·`.stderr` 로 따로 남는다.
+
+// FsioOutputDevice — StartTraceRequest.fsio_output 에서 기기 파일 기록을 뜻하는 값.
+const FsioOutputDevice = "device"
+
+// fsioDevicePrefix — 기기 측 기록 파일 prefix. 잡마다 다르게 해서 남은 파일과 섞이지 않게 한다.
+func fsioDevicePrefix(jobID string) string {
+	id := jobID
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "/dev/fsio_" + id
+}
+
+// fsioPullTimeout — 기기 기록 파일을 가져오는 상한. 대기 6시간이면 200MB 안팎이라
+// 무선 adb 로도 몇십 초면 되지만, 연결이 느린 경우를 위해 넉넉히 둔다.
+var fsioPullTimeout = 10 * time.Minute
+
+// fsioDeviceWaitTimeout — trace_stop 때 기기가 안 보이면 다시 붙기를 기다리는 상한.
+// 수집은 기기에서 계속되고 있으므로, 잠깐 끊긴 연결이 돌아오면 그대로 가져올 수 있다.
+var fsioDeviceWaitTimeout = 3 * time.Minute
+
+// startFsioOnDevice — fsiotrace 를 기기 파일 기록으로 띄우고 attach 완료까지 기다린다.
+//
+// stream 방식처럼 준비 완료 줄("writing events to")을 기다린다. 상한을 넘기면 경고만
+// 남기고 진행하는 것도 같다. 다만 그 사이에 fsiotrace 가 죽으면 바로 실패로 돌려준다.
+func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS bool, prefix string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), fsioReadyTimeout+30*time.Second)
+	defer cancel()
+
+	// 두 개를 동시에 붙이면 훅이 겹쳐 둘 다 틀린다. 앞 잡이 남긴 프로세스가 있으면 멈춘다.
+	if out, _ := dev.Shell(ctx, "pidof "+fsiotraceBinary); strings.TrimSpace(out) != "" {
+		return fmt.Errorf("기기에 fsiotrace 가 이미 돌고 있다 (pid %s). 앞 수집을 멈춘 뒤 다시 시도할 것",
+			strings.TrimSpace(out))
+	}
+	_, _ = dev.Shell(ctx, "rm -f "+prefix+".*")
+
+	// </dev/null >/dev/null 로 adb shell 이 기다릴 fd 를 다 끊어야 바로 돌아온다.
+	launch := fmt.Sprintf("setsid %s -o %s </dev/null >/dev/null 2>%s.stderr &",
+		buildFsioCommand(traceType, includeVFS), prefix, prefix)
+	if _, err := dev.Shell(ctx, launch); err != nil {
+		return fmt.Errorf("fsiotrace 기기 실행 실패: %w", err)
+	}
+
+	deadline := time.Now().Add(fsioReadyTimeout)
+	logged := 0
+	for {
+		out, _ := dev.Shell(ctx, "cat "+prefix+".stderr 2>/dev/null")
+		var lines []string // 아직 비었으면 nil (빈 줄 하나로 세면 다음 회차의 첫 줄을 건너뛴다)
+		if t := strings.TrimRight(out, "\n"); t != "" {
+			lines = strings.Split(t, "\n")
+		}
+		for ; logged < len(lines); logged++ {
+			if lines[logged] != "" {
+				slog.Info("fsiotrace", "serial", serial, "msg", lines[logged])
+			}
+		}
+		if strings.Contains(out, "writing events to") {
+			return nil
+		}
+		if pid, _ := dev.Shell(ctx, "pidof "+fsiotraceBinary); strings.TrimSpace(pid) == "" {
+			return fmt.Errorf("fsiotrace 가 attach 전에 끝났다 (%s.stderr 참고)", prefix)
+		}
+		if time.Now().After(deadline) {
+			slog.Warn("fsiotrace attach 신호를 기다리다 시간이 초과됐다; 초반 이벤트를 놓쳤을 수 있다",
+				"serial", serial, "timeout", fsioReadyTimeout, "output", "device")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// collectFsioFromDevice — 기기 측 fsiotrace 를 끝내고 기록 파일을 localLog 로 가져온다.
+//
+// 기기가 안 보이면 fsioDeviceWaitTimeout 동안 다시 붙기를 기다린다. 그래도 못 가져오면
+// 기기에 파일을 남겨 두고 에러를 돌려준다 (/dev 는 재부팅 전까지 남는다).
+func collectFsioFromDevice(getDev func() (*adb.Device, error), serial, prefix, localLog string) error {
+	var dev *adb.Device
+	waitUntil := time.Now().Add(fsioDeviceWaitTimeout)
+	for {
+		d, err := getDev()
+		if err == nil {
+			aliveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			alive := d.IsAlive(aliveCtx)
+			cancel()
+			if alive {
+				dev = d
+				break
+			}
+		}
+		if time.Now().After(waitUntil) {
+			return fmt.Errorf("기기가 %s 동안 안 보여 기록을 못 가져왔다. 기기의 %s.events 에 남아 있다",
+				fsioDeviceWaitTimeout, prefix)
+		}
+		slog.Warn("fsiotrace 기록을 가져오려는데 기기가 안 보인다; 다시 붙기를 기다린다", "serial", serial)
+		time.Sleep(10 * time.Second)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), fsioPullTimeout)
+	defer cancel()
+
+	// SIGTERM → fsiotrace 가 ringbuf 를 배수하고 파일을 flush·close 한 뒤 끝난다.
+	stopFsioOnDevice(ctx, dev)
+	exitUntil := time.Now().Add(30 * time.Second)
+	for {
+		pid, _ := dev.Shell(ctx, "pidof "+fsiotraceBinary)
+		if strings.TrimSpace(pid) == "" {
+			break
+		}
+		if time.Now().After(exitUntil) {
+			slog.Warn("fsiotrace 가 30초 안에 끝나지 않았다; 지금까지 기록된 파일을 가져온다", "serial", serial)
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// 기기 쪽 진단 출력을 stream 방식과 같은 모양으로 로그에 남긴다.
+	for _, f := range []string{".stderr", ".summary"} {
+		if out, err := dev.Shell(ctx, "cat "+prefix+f+" 2>/dev/null"); err == nil {
+			for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+				if line != "" {
+					slog.Info("fsiotrace", "serial", serial, "msg", line)
+				}
+			}
+		}
+	}
+
+	if err := dev.Pull(ctx, prefix+".events", localLog); err != nil {
+		return fmt.Errorf("기록 파일 pull 실패 (기기의 %s.events 에 남아 있다): %w", prefix, err)
+	}
+	_, _ = dev.Shell(ctx, "rm -f "+prefix+".*")
+	return nil
+}

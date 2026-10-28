@@ -765,6 +765,8 @@ export function startTrace(serverId: number, data: {
 	includeVfs?: boolean;
 	/** DRAM 대역폭을 dram.log 로 함께 수집. 생략하면 서버가 켠다(지원 기기만). */
 	includeDram?: boolean;
+	/** fsio_* 기록 방식. 'device' 면 기기 파일에 기록해 adb 끊김에 버틴다. 생략하면 'stream'. */
+	fsioOutput?: 'stream' | 'device';
 }): Promise<{ jobId: string }> {
 	return post(`/agent/trace/start?serverId=${serverId}`, data);
 }

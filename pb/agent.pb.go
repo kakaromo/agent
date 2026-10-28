@@ -2545,7 +2545,24 @@ type StartTraceRequest struct {
 	// 시나리오가 이걸 채워 **그 잡 폴더 안**에 trace 를 모은다 — 예전엔 결과 JSON 과
 	// trace 가 서로 다른 트리에, 서로 다른 ID 이름으로 흩어져 사람이 잇기 어려웠다.
 	// trace manager 는 시나리오를 몰라도 되게 경로만 받는다.
-	OutputDir     string `protobuf:"bytes,5,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
+	OutputDir string `protobuf:"bytes,5,opt,name=output_dir,json=outputDir,proto3" json:"output_dir,omitempty"`
+	// fsio 계열의 기록 방식. "" 또는 "stream" = 기본, "device" = 기기 파일.
+	//
+	// stream: fsiotrace stdout 을 adb shell 로 받아 호스트 trace.log 에 바로 쓴다.
+	//
+	//	adb 연결이 끊기면(무선 adb 의 Wi-Fi 끊김 등) SIGHUP 으로 수집이 끝나고,
+	//	다시 붙어도 이어지지 않는다 (2026-10-29 3시간 대기: 131분째 5분 끊김으로 기록 종료).
+	//
+	// device: 기기에서 `fsiotrace -o /dev/fsio_<id>` 를 새 session(setsid)으로 띄워
+	//
+	//	기기 tmpfs 에 쓰고, trace_stop 때 adb pull 로 trace.log 를 만든다.
+	//	수집 중 adb 가 끊겨도 기록은 이어진다. 대신 수집 중 trace.log 는 비어 있고,
+	//	기록 크기만큼 기기 메모리(/dev tmpfs)를 쓴다 (대기 1시간 약 35MB).
+	//	⚠ adb 가 끊기면 기기가 실제로 suspend 할 수 있다. fsiotrace 는 boot 시계 offset 을
+	//	시작 때 한 번만 재므로, suspend 뒤 시각이 suspend 시간만큼 앞당겨진다
+	//	(2026-10-29 시험: 20초 끊김 중 약 30초). fsiotrace 가 offset 을 다시 재게 고치기 전에는
+	//	시간축(구간 분할·Idle·분당 지표)을 믿지 말 것. Volume·파일 귀속은 맞다.
+	FsioOutput    string `protobuf:"bytes,8,opt,name=fsio_output,json=fsioOutput,proto3" json:"fsio_output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2625,6 +2642,13 @@ func (x *StartTraceRequest) GetIncludeDram() bool {
 func (x *StartTraceRequest) GetOutputDir() string {
 	if x != nil {
 		return x.OutputDir
+	}
+	return ""
+}
+
+func (x *StartTraceRequest) GetFsioOutput() string {
+	if x != nil {
+		return x.FsioOutput
 	}
 	return ""
 }
@@ -9218,7 +9242,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
 	"\x13RunScenarioResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xf4\x01\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\x95\x02\n" +
 	"\x11StartTraceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
@@ -9229,7 +9253,9 @@ const file_proto_agent_proto_rawDesc = "" +
 	"includeVfs\x12!\n" +
 	"\finclude_dram\x18\a \x01(\bR\vincludeDram\x12\x1d\n" +
 	"\n" +
-	"output_dir\x18\x05 \x01(\tR\toutputDir\"+\n" +
+	"output_dir\x18\x05 \x01(\tR\toutputDir\x12\x1f\n" +
+	"\vfsio_output\x18\b \x01(\tR\n" +
+	"fsioOutput\"+\n" +
 	"\x12StartTraceResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\")\n" +
 	"\x10StopTraceRequest\x12\x15\n" +

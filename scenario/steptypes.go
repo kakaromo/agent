@@ -143,6 +143,7 @@ var Specs = []StepSpec{
 			{Name: "window_seconds", Default: "1", Desc: "수집 윈도우 (초)"},
 			{Name: "include_vfs", Enum: []string{"true", "false"}, Default: "false", Desc: "fsio_* 에서 VFS 레이어도 수집 (page cache hit/miss·mmap 통계에 필요). 로그가 커진다"},
 			{Name: "include_dram", Enum: []string{"true", "false"}, Default: "true", Desc: "DRAM 대역폭(Qualcomm bw_hwmon_meas)을 dram.log 로 함께 수집. 이벤트가 없는 기기는 건너뛴다"},
+			{Name: "fsio_output", Enum: []string{"stream", "device"}, Default: "stream", Desc: "fsio_* 기록 방식. stream = adb 로 호스트에 바로 기록(끊기면 수집 종료), device = 기기 /dev 에 기록하고 trace_stop 때 가져옴(무선 adb 가 끊겨도 이어짐, 긴 대기 측정용)"},
 		},
 		Label: "Trace Start", Desc: "ftrace 시작", Icon: "scan-search", Color: "emerald",
 	},
