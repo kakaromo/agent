@@ -258,7 +258,10 @@ func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS boo
 	_, _ = dev.Shell(ctx, "rm -f "+prefix+".*")
 
 	// </dev/null >/dev/null 로 adb shell 이 기다릴 fd 를 다 끊어야 바로 돌아온다.
-	launch := fmt.Sprintf("setsid %s -o %s </dev/null >/dev/null 2>%s.stderr &",
+	// --no-parent-watch: fsiotrace 는 부모(adb shell)가 사라지면 스스로 끝나는데,
+	// 여기서는 일부러 떼어 놓았으므로 그 안전장치를 끈다 (끄지 않으면 attach 가 빨리
+	// 끝나 부모가 살아 있을 때 기준을 잡은 경우 바로 종료된다).
+	launch := fmt.Sprintf("setsid %s --no-parent-watch -o %s </dev/null >/dev/null 2>%s.stderr &",
 		buildFsioCommand(traceType, includeVFS), prefix, prefix)
 	if _, err := dev.Shell(ctx, launch); err != nil {
 		return fmt.Errorf("fsiotrace 기기 실행 실패: %w", err)

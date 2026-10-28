@@ -386,10 +386,9 @@ message StartTraceRequest {
   //   기기 tmpfs 에 쓰고, trace_stop 때 adb pull 로 trace.log 를 만든다.
   //   수집 중 adb 가 끊겨도 기록은 이어진다. 대신 수집 중 trace.log 는 비어 있고,
   //   기록 크기만큼 기기 메모리(/dev tmpfs)를 쓴다 (대기 1시간 약 35MB).
-  //   ⚠ adb 가 끊기면 기기가 실제로 suspend 할 수 있다. fsiotrace 는 boot 시계 offset 을
-  //   시작 때 한 번만 재므로, suspend 뒤 시각이 suspend 시간만큼 앞당겨진다
-  //   (2026-10-29 시험: 20초 끊김 중 약 30초). fsiotrace 가 offset 을 다시 재게 고치기 전에는
-  //   시간축(구간 분할·Idle·분당 지표)을 믿지 말 것. Volume·파일 귀속은 맞다.
+  //   adb 가 끊기면 기기가 실제로 suspend 할 수 있다. fsiotrace 06b61fa 부터는 깨어날 때
+  //   boot 시계 offset 을 다시 재서 시각이 맞다. 그 전 빌드는 suspend 시간만큼 시각이
+  //   앞당겨졌다 (2026-10-29 시험: 20초 끊김에 약 30초).
   string fsio_output = 8;
 }
 
