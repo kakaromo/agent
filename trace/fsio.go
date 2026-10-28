@@ -252,10 +252,26 @@ func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS boo
 
 	// 두 개를 동시에 붙이면 훅이 겹쳐 둘 다 틀린다. 앞 잡이 남긴 프로세스가 있으면 멈춘다.
 	if out, _ := dev.Shell(ctx, "pidof "+fsiotraceBinary); strings.TrimSpace(out) != "" {
-		return fmt.Errorf("기기에 fsiotrace 가 이미 돌고 있다 (pid %s). 앞 수집을 멈춘 뒤 다시 시도할 것",
+		return fmt.Errorf("기기에 fsiotrace 가 이미 돌고 있다 (pid %s). 앞 수집을 멈춘 뒤 다시 시도할 것 "+
+			"(agent 가 수집 중에 죽었다면 `adb shell pkill fsiotrace` 후 /dev/fsio_* 를 가져오거나 지운다)",
 			strings.TrimSpace(out))
 	}
+	// 앞 잡이 못 가져간 기록이 있으면 알린다. 지우지는 않는다 — 아직 pull 하지 않은 데이터일 수 있다.
+	// /dev 는 메모리(tmpfs)라 쌓이면 기기 메모리를 쓴다.
+	if out, _ := dev.Shell(ctx, "ls -l /dev/fsio_*.events 2>/dev/null"); strings.TrimSpace(out) != "" {
+		slog.Warn("기기에 앞 수집이 남긴 fsiotrace 기록이 있다; 필요하면 pull 한 뒤 지울 것",
+			"serial", serial, "files", strings.TrimSpace(out))
+	}
 	_, _ = dev.Shell(ctx, "rm -f "+prefix+".*")
+
+	// 시작이 실패하면 이 잡의 프로세스와 파일을 정리한다 (attach 전이라 쓸 데이터가 없다).
+	fail := func(err error) error {
+		cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer ccancel()
+		stopFsioOnDevice(cctx, dev)
+		_, _ = dev.Shell(cctx, "rm -f "+prefix+".*")
+		return err
+	}
 
 	// </dev/null >/dev/null 로 adb shell 이 기다릴 fd 를 다 끊어야 바로 돌아온다.
 	// --no-parent-watch: fsiotrace 는 부모(adb shell)가 사라지면 스스로 끝나는데,
@@ -264,7 +280,7 @@ func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS boo
 	launch := fmt.Sprintf("setsid %s --no-parent-watch -o %s </dev/null >/dev/null 2>%s.stderr &",
 		buildFsioCommand(traceType, includeVFS), prefix, prefix)
 	if _, err := dev.Shell(ctx, launch); err != nil {
-		return fmt.Errorf("fsiotrace 기기 실행 실패: %w", err)
+		return fail(fmt.Errorf("fsiotrace 기기 실행 실패: %w", err))
 	}
 
 	deadline := time.Now().Add(fsioReadyTimeout)
@@ -284,7 +300,8 @@ func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS boo
 			return nil
 		}
 		if pid, _ := dev.Shell(ctx, "pidof "+fsiotraceBinary); strings.TrimSpace(pid) == "" {
-			return fmt.Errorf("fsiotrace 가 attach 전에 끝났다 (%s.stderr 참고)", prefix)
+			// 원인은 위에서 stderr 를 로그로 남겼다
+			return fail(fmt.Errorf("fsiotrace 가 attach 전에 끝났다 (agent 로그의 fsiotrace 줄 참고)"))
 		}
 		if time.Now().After(deadline) {
 			slog.Warn("fsiotrace attach 신호를 기다리다 시간이 초과됐다; 초반 이벤트를 놓쳤을 수 있다",
@@ -293,7 +310,7 @@ func startFsioOnDevice(dev *adb.Device, serial, traceType string, includeVFS boo
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fail(ctx.Err())
 		case <-time.After(time.Second):
 		}
 	}
